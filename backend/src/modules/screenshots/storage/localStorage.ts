@@ -43,11 +43,13 @@ export class LocalScreenshotStorage implements ScreenshotStorage {
     contentType: string;
     expiresAt: Date;
     uploadToken: string;
+    uploadPath?: string;
   }): Promise<UploadTarget> {
     void input.objectKey;
+    const pathPrefix = input.uploadPath ?? '/agent/screenshot-uploads';
     return {
       method: 'PUT',
-      url: `${config.screenshots.publicBaseUrl}${config.apiPrefix}/agent/screenshot-uploads/${encodeURIComponent(input.uploadToken)}`,
+      url: `${config.screenshots.publicBaseUrl}${config.apiPrefix}${pathPrefix}/${encodeURIComponent(input.uploadToken)}`,
       headers: {
         'Content-Type': input.contentType,
       },
@@ -109,11 +111,14 @@ export class LocalScreenshotStorage implements ScreenshotStorage {
     actorUserId: string | null;
     objectKey: string;
     expiresAt: Date;
+    downloadToken?: string;
+    downloadPath?: string;
   }): Promise<DownloadUrl> {
     void input.objectKey;
-    const token = createScreenshotDownloadToken(input);
+    const token = input.downloadToken ?? createScreenshotDownloadToken(input);
+    const pathPrefix = input.downloadPath ?? '/screenshot-files';
     return {
-      url: `${config.screenshots.publicBaseUrl}${config.apiPrefix}/screenshot-files/${encodeURIComponent(token)}`,
+      url: `${config.screenshots.publicBaseUrl}${config.apiPrefix}${pathPrefix}/${encodeURIComponent(token)}`,
       expiresAt: input.expiresAt,
     };
   }

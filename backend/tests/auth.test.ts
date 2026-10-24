@@ -4,8 +4,11 @@ import {
   API,
   PASSWORD,
   app,
+  createOwner,
   loginBrowser,
   loginDesktop,
+  loginMobile,
+  registerAgent,
   registerUser,
   resetDatabase,
   uniqueEmail,
@@ -271,5 +274,151 @@ describe('desktop (bearer) sessions', () => {
       .get(`${API}/auth/me`)
       .set('authorization', `Bearer ${secondToken}`);
     expect(revokedSession.status).toBe(401);
+  });
+});
+
+describe('mobile (bearer) sessions', () => {
+  it('issues bearer tokens without cookies and keeps the mobile label', async () => {
+    const email = uniqueEmail();
+    await registerUser(email);
+
+    const login = await loginMobile(email);
+    expect(login.status).toBe(200);
+    expect(login.body.data.client).toBe('mobile');
+    expect(login.body.data.accessToken).toBeTruthy();
+    expect(login.body.data.refreshToken).toBeTruthy();
+    expect(login.body.data.tokenType).toBe('Bearer');
+    expect(login.headers['set-cookie']).toBeUndefined();
+    expect(JSON.stringify(login.body)).not.toContain('passwordHash');
+
+    const me = await request(app)
+      .get(`${API}/auth/me`)
+      .set('authorization', `Bearer ${login.body.data.accessToken}`);
+    expect(me.status).toBe(200);
+    expect(me.body.data.session.transport).toBe('bearer');
+  });
+
+  it('restores a mobile session by rotating the refresh token', async () => {
+    const email = uniqueEmail();
+    await registerUser(email);
+    const login = await loginMobile(email);
+
+    const firstAccess = login.body.data.accessToken as string;
+    const firstRefresh = login.body.data.refreshToken as string;
+
+    const missingBodyToken = await request(app)
+      .post(`${API}/auth/refresh`)
+      .send({ client: 'mobile' });
+    expect(missingBodyToken.status).toBe(401);
+    expect(missingBodyToken.body.error.code).toBe('REFRESH_TOKEN_REQUIRED');
+
+    const refresh = await request(app)
+      .post(`${API}/auth/refresh`)
+      .send({ refreshToken: firstRefresh, client: 'mobile' });
+    expect(refresh.status).toBe(200);
+    expect(refresh.body.data.client).toBe('mobile');
+    expect(refresh.body.data.accessToken).toBeTruthy();
+    expect(refresh.body.data.refreshToken).not.toBe(firstRefresh);
+    expect(refresh.headers['set-cookie']).toBeUndefined();
+
+    const oldAccess = await request(app)
+      .get(`${API}/auth/me`)
+      .set('authorization', `Bearer ${firstAccess}`);
+    expect(oldAccess.status).toBe(401);
+
+    const newAccess = await request(app)
+      .get(`${API}/auth/me`)
+      .set('authorization', `Bearer ${refresh.body.data.accessToken}`);
+    expect(newAccess.status).toBe(200);
+  });
+
+  it('logs out and revokes the mobile session', async () => {
+    const email = uniqueEmail();
+    await registerUser(email);
+    const login = await loginMobile(email);
+    const accessToken = login.body.data.accessToken as string;
+
+    const logout = await request(app)
+      .post(`${API}/auth/logout`)
+      .set('authorization', `Bearer ${accessToken}`)
+      .send({});
+    expect(logout.status).toBe(204);
+
+    const me = await request(app)
+      .get(`${API}/auth/me`)
+      .set('authorization', `Bearer ${accessToken}`);
+    expect(me.status).toBe(401);
+
+    const stored = await Session.findOne({ where: { userId: login.body.data.user.id } });
+    expect(stored?.revokedAt).toBeInstanceOf(Date);
+  });
+
+  it('does not grant time-session writes without registered device credentials', async () => {
+    const owner = await createOwner(uniqueEmail('mobile-owner'), 'Mobile Owner Org');
+    const login = await loginMobile(owner.email);
+    const accessToken = login.body.data.accessToken as string;
+    const orgId = owner.organization.id;
+
+    // Reads already require only the bearer session and existing permissions.
+    const current = await request(app)
+      .get(`${API}/organizations/${orgId}/time-sessions/current`)
+      .set('authorization', `Bearer ${accessToken}`);
+    expect(current.status).toBe(200);
+    expect(current.body.data.session).toBeNull();
+
+    const noAgent = await request(app)
+      .post(`${API}/organizations/${orgId}/time-sessions/start`)
+      .set('authorization', `Bearer ${accessToken}`)
+      .send({});
+    expect(noAgent.status).toBe(401);
+    expect(noAgent.body.error.code).toBe('AGENT_AUTH_REQUIRED');
+
+    const invalidAgent = await request(app)
+      .post(`${API}/organizations/${orgId}/time-sessions/start`)
+      .set({
+        authorization: `Bearer ${accessToken}`,
+        'x-agent-id': '00000000-0000-4000-8000-000000000000',
+        'x-agent-key': 'tna_this-is-not-a-real-key',
+      })
+      .send({});
+    expect(invalidAgent.status).toBe(401);
+    expect(invalidAgent.body.error.code).toBe('AGENT_CREDENTIALS_INVALID');
+
+    // A registered mobile device still passes the existing agent gate.
+    const agent = await registerAgent(
+      { token: accessToken },
+      orgId,
+      { name: 'Mobile phone', platform: 'android', clientType: 'MOBILE' },
+    );
+    expect(agent.agent.clientType).toBe('MOBILE');
+
+    const started = await request(app)
+      .post(`${API}/organizations/${orgId}/time-sessions/start`)
+      .set(agent.headers)
+      .send({});
+    expect(started.status).toBe(201);
+  });
+
+  it('keeps organization boundaries for mobile tokens', async () => {
+    const owner = await createOwner(uniqueEmail('mobile-owner'), 'Mobile Org A');
+    const otherOwner = await createOwner(uniqueEmail('owner'), 'Mobile Org B');
+    const login = await loginMobile(owner.email);
+
+    const response = await request(app)
+      .get(`${API}/organizations/${otherOwner.organization.id}/time-sessions/current`)
+      .set('authorization', `Bearer ${login.body.data.accessToken}`);
+    expect(response.status).toBe(404);
+    expect(response.body.error.code).toBe('ORGANIZATION_NOT_FOUND');
+  });
+
+  it('rejects unsupported client values', async () => {
+    const email = uniqueEmail();
+    await registerUser(email);
+
+    const login = await request(app)
+      .post(`${API}/auth/login`)
+      .send({ email, password: PASSWORD, client: 'tablet' });
+    expect(login.status).toBe(422);
+    expect(login.body.error.code).toBe('VALIDATION_ERROR');
   });
 });

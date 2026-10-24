@@ -63,6 +63,8 @@ export const {
   Screenshot,
   AuditEvent,
   AttendanceCorrectionRequest,
+  AttendanceEvidence,
+  AttendanceCheckIn,
 } = models;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

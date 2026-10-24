@@ -13,7 +13,7 @@ export const registerAgentSchema = z
     platform: z.string().trim().max(40).optional(),
     osVersion: z.string().trim().max(80).optional(),
     appVersion: z.string().trim().max(40).optional(),
-    clientType: z.enum(DESKTOP_AGENT_CLIENT_TYPES).default('ELECTRON'),
+    clientType: z.enum(DESKTOP_AGENT_CLIENT_TYPES).optional(),
   })
   .strict();
 

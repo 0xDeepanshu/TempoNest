@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
+import { AppError } from '../../utils/errors';
 import { getClientIp, getUserAgent } from '../../utils/pagination';
 import {
   approveAttendanceCorrection,
@@ -9,11 +10,25 @@ import {
   rejectAttendanceCorrection,
 } from './attendanceCorrection.service';
 import { getAttendanceSummary } from './attendanceSummary.service';
+import { checkIn, getCurrentAttendance } from './attendanceCheckIn.service';
+import {
+  createAttendanceEvidenceAccess,
+  createAttendanceEvidenceUpload,
+  openAttendanceEvidenceFile,
+  reauthorizeAttendanceEvidenceUpload,
+  storeAttendanceEvidenceUpload,
+} from './attendanceEvidence.service';
+import {
+  assertAttendanceEvidenceContentType,
+} from './attendanceEvidence.validation';
+import { normalizeContentType } from '../screenshots/screenshot.validation';
 import type {
   ApproveAttendanceCorrectionInput,
+  AttendanceCheckInInput,
   AttendanceCorrectionListQuery,
   AttendanceSummaryQuery,
   CreateAttendanceCorrectionInput,
+  CreateAttendanceEvidenceInput,
   RejectAttendanceCorrectionInput,
 } from './attendance.schemas';
 
@@ -94,4 +109,99 @@ export const rejectCorrection = asyncHandler(async (req: Request, res: Response)
   });
 
   res.status(200).json({ data: { correction, serverTime: now() } });
+});
+
+export const checkInAttendance = asyncHandler(async (req: Request, res: Response) => {
+  const result = await checkIn({
+    organizationId: req.organization!.organization.id,
+    employeeId: req.auth!.user.id,
+    agent: req.desktopAgent!,
+    input: req.body as AttendanceCheckInInput,
+    context: auditContext(req),
+  });
+
+  res.status(result.replayed ? 200 : 201).json({
+    data: result,
+    serverTime: now(),
+  });
+});
+
+export const currentCheckIn = asyncHandler(async (req: Request, res: Response) => {
+  const result = await getCurrentAttendance({
+    organizationId: req.organization!.organization.id,
+    employeeId: req.auth!.user.id,
+  });
+
+  res.status(200).json({ data: result, serverTime: now() });
+});
+
+export const createEvidence = asyncHandler(async (req: Request, res: Response) => {
+  const result = await createAttendanceEvidenceUpload({
+    organizationId: req.organization!.organization.id,
+    employeeId: req.auth!.user.id,
+    agent: req.desktopAgent!,
+    input: req.body as CreateAttendanceEvidenceInput,
+    context: auditContext(req),
+  });
+
+  res.status(201).json({ data: result, serverTime: now() });
+});
+
+export const reauthorizeEvidence = asyncHandler(async (req: Request, res: Response) => {
+  const result = await reauthorizeAttendanceEvidenceUpload({
+    organizationId: req.organization!.organization.id,
+    evidenceId: req.params.evidenceId!,
+    employeeId: req.auth!.user.id,
+    agent: req.desktopAgent!,
+  });
+
+  res.status(200).json({ data: result, serverTime: now() });
+});
+
+export const uploadEvidence = asyncHandler(async (req: Request, res: Response) => {
+  const contentType = normalizeContentType(req.get('content-type'));
+  assertAttendanceEvidenceContentType(contentType);
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    throw new AppError(
+      422,
+      'INVALID_ATTENDANCE_EVIDENCE_FILE',
+      'The uploaded attendance photo is empty',
+    );
+  }
+
+  const evidence = await storeAttendanceEvidenceUpload({
+    organizationId: req.organization!.organization.id,
+    agent: req.desktopAgent!,
+    uploadToken: req.params.token!,
+    body: req.body,
+    contentType,
+    context: auditContext(req),
+  });
+
+  res.status(201).json({ data: { evidence }, serverTime: now() });
+});
+
+export const accessEvidence = asyncHandler(async (req: Request, res: Response) => {
+  const result = await createAttendanceEvidenceAccess({
+    organizationId: req.organization!.organization.id,
+    evidenceId: req.params.evidenceId!,
+    actorUserId: req.auth!.user.id,
+    actorRole: req.organization!.membership.role,
+    context: auditContext(req),
+  });
+
+  res.status(200).json({ data: result, serverTime: now() });
+});
+
+export const downloadEvidenceFile = asyncHandler(async (req: Request, res: Response) => {
+  const result = await openAttendanceEvidenceFile(req.params.token!, auditContext(req));
+  res.setHeader('Content-Type', result.contentType);
+  res.setHeader('Content-Length', String(result.sizeBytes));
+  res.setHeader('Content-Disposition', 'inline; filename="attendance-evidence"');
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  result.stream.on('error', (error) => {
+    res.destroy(error);
+  });
+  result.stream.pipe(res);
 });

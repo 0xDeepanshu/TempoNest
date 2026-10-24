@@ -166,7 +166,7 @@ src/
     timeTracking/           # Sessions, breaks, heartbeats, offline event ledger
     activity/               # Foreground application metadata ingestion
     reporting/              # Tracking status, session/daily/app reports
-    attendance/             # Employee summaries and attendance-correction workflow
+    attendance/             # Summaries, corrections, mobile check-in, private evidence
     screenshots/            # Policy, admin requests, agent lifecycle, private storage,
                             # audit events, retention/maintenance
   realtime/
@@ -184,6 +184,7 @@ tests/
   desktopAgents.test.ts
   timeTracking.test.ts
   attendance.test.ts
+  attendanceMobile.test.ts
   screenshots.test.ts
   websocket.test.ts
   rateLimit.test.ts
@@ -231,6 +232,12 @@ Key variables (see `.env.example`):
 | `SCREENSHOT_S3_BUCKET` / `SCREENSHOT_S3_REGION` | Private bucket and region for `s3` |
 | `SCREENSHOT_S3_ENDPOINT` / `SCREENSHOT_S3_FORCE_PATH_STYLE` | S3-compatible endpoint (e.g. MinIO) and path-style toggle |
 | `SCREENSHOT_S3_ACCESS_KEY_ID` / `SCREENSHOT_S3_SECRET_ACCESS_KEY` | Optional explicit credentials; omit both to use the runtime IAM role |
+| `ATTENDANCE_UPLOAD_TTL_SECONDS` | One-time attendance evidence upload authorization lifetime (default 120) |
+| `ATTENDANCE_EVIDENCE_TTL_SECONDS` | Lifetime of uploaded but unattached evidence (default 900) |
+| `ATTENDANCE_EVIDENCE_DOWNLOAD_TTL_SECONDS` | Signed attendance evidence link lifetime (default 300) |
+| `ATTENDANCE_LOCATION_MAX_ACCURACY_METERS` | Maximum accepted location accuracy (default 500 m) |
+| `ATTENDANCE_LOCATION_MAX_AGE_SECONDS` | Maximum age of a location fix (default 300) |
+| `ATTENDANCE_LOCATION_FUTURE_SKEW_SECONDS` | Tolerated future clock skew for location timestamps (default 60) |
 | `LOG_LEVEL` | Pino level (`silent` in tests) |
 
 `NODE_ENV=production` requires an explicit database configuration, a `TOKEN_PEPPER`, and `COOKIE_SECURE=true` if `COOKIE_SAME_SITE=none`.
@@ -272,6 +279,16 @@ Credentials never belong in renderer `localStorage`.
 
 Bearer-token requests are not subject to CSRF checks because browsers do not attach them automatically.
 
+### Mobile app
+
+Mobile employees use the same accounts and session model as web/Electron; there is no separate mobile account or authentication system.
+
+1. `POST /api/v1/auth/login` with `"client": "mobile"`. No cookies are set, the response retains `"client": "mobile"`, and it contains `accessToken`, `refreshToken`, and expiry metadata.
+2. Store the refresh token in the OS Keychain/Keystore; keep the access token in memory where possible and attach `Authorization: Bearer <accessToken>`.
+3. Restore with `POST /api/v1/auth/refresh` and `{ "refreshToken": ..., "client": "mobile" }`, replacing both stored tokens.
+4. Log out with `POST /api/v1/auth/logout` using the bearer token, or with the refresh token when no valid access token remains.
+5. Mobile authentication alone does not authorize time-tracking writes. Those still require a registered `MOBILE` device and the existing agent authorization checks.
+
 ### Passwords
 
 - Argon2id hashing with configurable cost.
@@ -301,7 +318,8 @@ Bearer-token requests are not subject to CSRF checks because browsers do not att
 
 - Registration returns a 256-bit `tna_…` agent key exactly once. Only its HMAC-SHA256 hash (keyed by `TOKEN_PEPPER`) is stored.
 - Re-registering the same `deviceId` rotates the key and closes old sockets. Revoked device registrations cannot be reused without a new device identity.
-- Agent keys belong in Electron main-process OS-protected storage (`safeStorage`); they must never be exposed to the renderer.
+- `client_type` is immutable once the device exists: rotation preserves it when omitted and rejects an explicit change with `AGENT_CLIENT_TYPE_MISMATCH`.
+- Agent keys belong in Electron main-process OS-protected storage (`safeStorage`); they must never be exposed to the renderer or mobile logs.
 - Revocation is logical, preserves history, closes live sockets with code `4003`, and stops that device's open sessions.
 
 ### WebSocket presence
@@ -342,6 +360,20 @@ Bearer-token requests are not subject to CSRF checks because browsers do not att
 - OWNER/ADMIN/MANAGER review with `correction:review`; nobody may review their own correction. The workflow is `PENDING -> APPROVED` or `PENDING -> REJECTED`, with repeat decisions idempotent and conflicting decisions returning `409`.
 - Approval runs in one transaction: employee/correction locks, pending/status recheck, timestamp and break validation, overlap recheck, session update/create, break replacement, original/applied snapshots, and an audit event. A stale or conflicting request stays `PENDING` and time data is unchanged.
 - Missing-session approvals create a stopped session with the existing `OFFLINE` source and no desktop agent. Existing `ONLINE`/`OFFLINE` sources and all Electron time-tracking contracts remain unchanged.
+
+### Mobile check-in & attendance evidence
+
+- New additive routes let the React Native employee app check in with `WFH`, `WFO`, or `ON_SITE` and attach private photo evidence. They create the same `time_sessions` rows as the existing start endpoint; `/time-sessions/*` behavior and Electron contracts are unchanged.
+- New check-in/evidence-write routes require a non-revoked device registered with `clientType: "MOBILE"`. Electron devices receive `403 MOBILE_AGENT_REQUIRED`. Check-in reads remain available to authenticated employees.
+- Policy: `WFH` needs neither photo nor location (location is optional and validated if supplied); `WFO` needs a selfie and never accepts or stores a location; `ON_SITE` needs a selfie, a separate site photo, and location. Accuracy (default ≤ 500 m), fix age (default ≤ 5 min), and future skew (default ≤ 60 s) are configurable and apply to ON_SITE and optional WFH locations.
+- Evidence lifecycle: create `PENDING` + short-lived upload target → raw private upload (`UPLOADED`) → atomic check-in transaction (`ATTACHED` + session + check-in + audit). A failed check-in attaches nothing and leaves evidence retryable until expiry; evidence attached to a successful check-in is never removed by error recovery.
+- `checkInRequestId` makes retries idempotent: the same payload returns the original result (`200`, `replayed: true`), a different payload returns `409 IDEMPOTENCY_KEY_REUSED`. Different request IDs cannot create a second active session (`409 ACTIVE_SESSION_EXISTS`). Employee row locks plus unique indexes serialize concurrent requests across processes.
+- Evidence is validated at check-in for ownership, device, kind, status, expiry, stored size, and image signature. Storage keys and upload tokens are never returned.
+- Signed access is available to the owning employee and organization reviewers with `time:read`; every grant writes `ATTENDANCE_EVIDENCE_ACCESS_GRANTED` and each local view writes `ATTENDANCE_EVIDENCE_VIEWED`. Attendance links use a separate token context and `/attendance-files` route, so screenshot and attendance access controls stay independent.
+- **Retention gap:** attendance evidence has no automatic deletion yet. Private objects and metadata are retained until an approved retention policy is implemented; this must be resolved before production retention commitments. There is no public or admin deletion endpoint.
+- The server verifies format, size, and signature but cannot prove live camera capture, honest device clocks, or truthful coordinates. There is no geofencing and no continuous background tracking.
+
+See [docs/API.md](docs/API.md#mobile-attendance-check-in-and-evidence) for schemas and error codes.
 
 ### Admin-initiated screenshots
 
@@ -425,11 +457,13 @@ All identifiers are UUIDs. Timestamps are `TIMESTAMPTZ` in PostgreSQL and manage
 | `screenshot_requests` | `PENDING`/`CLAIMED`/`COMPLETED`/`FAILED`/`EXPIRED`/`CANCELLED`; partial unique index allows one active request per employee; unique admin/org idempotency key; one-time upload-token hash and unique server-generated storage key |
 | `screenshots` | one per completed request; private `storage_key`, content type/size, capture time, retention expiry; no binary data |
 | `attendance_correction_requests` | employee self-service request targeting a stopped session or a missing session; `PENDING`/`APPROVED`/`REJECTED`; requested timestamps/breaks, original/applied snapshots, reviewer fields; partial unique index prevents duplicate pending requests per session |
-| `audit_events` | organization-scoped append-only audit trail for screenshot and attendance-correction actions; actor/target/entity references, sanitized JSON metadata, IP/user-agent; screenshot rows retained by policy |
+| `attendance_evidence` | private mobile photo metadata (`SELFIE`/`SITE_PHOTO`); `PENDING`/`UPLOADED`/`ATTACHED`; unique server-generated `storage_key`; one-time HMAC upload token; expiry and attachment session; no binary data |
+| `attendance_check_ins` | one per time session; `WFH`/`WFO`/`ON_SITE`; optional selfie/site-photo evidence FKs; nullable validated location; unique `(organization_id, employee_id, check_in_request_id)` for idempotency and unique evidence FKs |
+| `audit_events` | organization-scoped append-only audit trail for screenshot, attendance-correction, and attendance-evidence actions; actor/target/entity references, sanitized JSON metadata, IP/user-agent; screenshot rows retained by policy |
 
 Migrations live in `migrations/` and are the only production schema mechanism. `sequelize.sync({ alter: true })` is never used by application code; test suites use `sync()` only to create/reset their disposable schema.
 
-Foreign keys use `ON DELETE CASCADE` for organization → memberships/invitations/time data/attendance corrections/screenshot data and user → memberships/sessions/agents. Invitation inviter/acceptance, correction targets/reviewers, and audit actor/target references use `ON DELETE SET NULL` so audit data survives user deletion. Deleting an agent (not exposed by the API) would null historical session/activity/screenshot-request agent references while preserving the records.
+Foreign keys use `ON DELETE CASCADE` for organization → memberships/invitations/time data/attendance corrections/check-ins/evidence/screenshot data and user → memberships/sessions/agents. Invitation inviter/acceptance, correction targets/reviewers, attendance evidence attachment, and audit actor/target references use `ON DELETE SET NULL` so records survive deletion. Deleting an agent (not exposed by the API) would null historical session/activity/screenshot-request agent references while preserving the records.
 
 ---
 
@@ -451,6 +485,7 @@ Foreign keys use `ON DELETE CASCADE` for organization → memberships/invitation
 - Screenshot creation/claims/completions use transactions and row locks; the partial unique active-request index and idempotency index are the cross-process guards. State is persisted before WebSocket delivery.
 - Upload/download tokens are short-lived, HMAC-protected, and never returned in list/detail metadata. Upload tokens are consumed on success. Signed screenshot paths, `Authorization`, cookies, and agent keys are redacted from logs.
 - Binary screenshot data is stored only in the configured private object store. Access requires a valid screenshot ID/ownership check plus a current short-lived link; a client-supplied storage key is never accepted as ownership proof.
+- Attendance evidence uses the same private storage adapter but a separate table, upload/download paths, HMAC token context, and audit actions. Check-in locks the employee row, validates evidence ownership/kind/expiry/stored bytes, creates the session and check-in, attaches evidence, and writes audit records in one transaction. Failed transactions leave evidence unattached and retryable; attached evidence is never deleted by error recovery.
 
 Passwords/tokens are excluded from all API responses except the explicit desktop token payload, the one-time invitation token, the one-time desktop-agent key, and short-lived screenshot upload/download URLs returned only to the authorized caller. Storage keys and image bytes are never returned by metadata APIs.
 
@@ -461,7 +496,7 @@ Passwords/tokens are excluded from all API responses except the explicit desktop
 ## Testing
 
 ```bash
-npm test                 # 75 tests, in-memory SQLite, no external services
+npm test                 # 100 tests, in-memory SQLite, no external services
 npm run typecheck
 npm run build
 ```
@@ -504,27 +539,34 @@ The PostgreSQL path resets data between tests with `TRUNCATE` and can run agains
 - Content-type/magic-byte/size validation, arbitrary `storageKey` rejection, one-time upload-token replay, signed download tampering/expiry, and cross-organization access denial.
 - Retention deletion of screenshot metadata and private objects, terminal-request object cleanup, audit-retention cleanup, and audit event coverage.
 - Screenshot WebSocket delivery, ack/claim/complete messages, replay errors, reconnect pending recovery, and HTTP pending claim.
+- Mobile check-in modes (`WFH`/`WFO`/`ON_SITE`), selfie-only WFO with location rejection and no persisted coordinates, ON_SITE evidence/location requirements and freshness rejection, and server-generated session timestamps.
+- Mobile check-in recovery after app restart, break/resume/checkout through the existing time-session routes, and `current` check-in restoration.
+- Evidence create/upload/validate/reauthorize/expire flows, private signed access with audit events, and image type/signature/size enforcement.
+- Same-key and different-key concurrency, replay with the original result, payload-mismatch rejection, and prevention of duplicate active sessions.
+- Evidence expiry, missing/mismatched stored bytes, reuse rejection, employee/device/organization isolation, and Electron `403 MOBILE_AGENT_REQUIRED` while existing time-session routes still work.
 
 ### Verification performed
 
-Earlier Step 1/2/3 checks remain valid. Attendance checks in this workspace:
+Earlier Step 1/2/3 checks remain valid. Step 3 (mobile attendance) checks in this workspace:
 
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | Passed |
-| `npm test` (SQLite) | 76/76 passed (9 files; 5 attendance tests) |
-| PostgreSQL 18: `npm run db:migrate` | Passed (17 migrations, including the attendance-correction migration) |
-| PostgreSQL 18: `db:migrate:undo` + re-migrate of the new migration | Passed |
-| PostgreSQL 18: `npx vitest run --no-file-parallelism` | 75/75 passed |
+| `npm test` (SQLite) | 100/100 passed (11 files; 12 mobile attendance tests) |
 | `npm run build` | Passed |
-| `npm run smoke` against the migrated disposable PostgreSQL database | Passed (baseline flows; attendance contracts are covered by the focused suite) |
+| PostgreSQL: `npx sequelize-cli db:migrate --env test` on a disposable database | Passed (19 migrations, including attendance evidence/check-ins) |
+| PostgreSQL: `db:migrate:undo` + re-migrate of `20261025000100` | Passed |
+| PostgreSQL: `npx vitest run --no-file-parallelism` on a disposable database | 100/100 passed |
+| Local development database (`temponest_dev`) | Pending migration applied; all 19 migrations `up` |
 
-The PostgreSQL checks used a disposable local cluster; no developer/production database was modified.
+The PostgreSQL checks used a disposable local database that was dropped afterward; no developer/production data was reset or modified. The local development database only received the additive attendance migration.
 
 ---
 
 ## Remaining work (Step 4+)
 
+- **Attendance evidence retention**: define and implement an approved retention/deletion policy for private attendance evidence and its metadata. Until then evidence is retained indefinitely and must not be described as expiring.
+- **Live-capture assurance**: the backend validates file type/size/signature only. Stronger liveness, device-integrity, and location-authenticity measures need a separate approved design.
 - **Electron screenshot capture/upload**: implement and verify actual capture, local image encoding, claim/upload/complete/fail calls, one-time upload tokens, reconnect/resume, and a clear visible capture indicator without pausing the timer. The backend does not claim this works yet.
 - **Next.js screenshot UI**: policy/disclosure management, employee acknowledgement, request/history/status/review screens, short-lived access link handling, and cancellation. Keep controls out of the employee Electron UI.
 - **Admin portal and production Electron adapters**: replace renderer mocks, add `safeStorage`, IPC allowlists, the agent WebSocket client, and durable offline queues; see [docs/ELECTRON_INTEGRATION.md](docs/ELECTRON_INTEGRATION.md).

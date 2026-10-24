@@ -26,6 +26,8 @@ export interface ScreenshotStorage {
     contentType: string;
     expiresAt: Date;
     uploadToken: string;
+    /** Local adapter path for non-screenshot private objects. */
+    uploadPath?: string;
   }): Promise<UploadTarget>;
   putObject(input: { objectKey: string; body: Buffer; contentType: string }): Promise<StoredObjectInfo>;
   statObject(objectKey: string): Promise<StoredObjectInfo | null>;
@@ -37,6 +39,10 @@ export interface ScreenshotStorage {
     actorUserId: string | null;
     objectKey: string;
     expiresAt: Date;
+    /** Pre-built signed token for non-screenshot private objects (local adapter). */
+    downloadToken?: string;
+    /** Local adapter route prefix for non-screenshot private objects. */
+    downloadPath?: string;
   }): Promise<DownloadUrl>;
   openObject(objectKey: string): Promise<{ stream: Readable; sizeBytes: number } | null>;
 }

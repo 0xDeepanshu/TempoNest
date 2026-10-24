@@ -1,5 +1,7 @@
 import { secondsBetween } from '../../utils/time';
 import type { AttendanceCorrectionRequest as AttendanceCorrectionModel } from './attendanceCorrection.model';
+import type { AttendanceEvidence as AttendanceEvidenceModel } from './attendanceEvidence.model';
+import type { AttendanceCheckIn as AttendanceCheckInModel } from './attendanceCheckIn.model';
 
 export function toAttendanceCorrectionSummary(correction: AttendanceCorrectionModel) {
   const requestedBreaks = [...(correction.requestedBreaks ?? [])]
@@ -57,3 +59,59 @@ export function toAttendanceCorrectionSummary(correction: AttendanceCorrectionMo
 }
 
 export type AttendanceCorrectionSummary = ReturnType<typeof toAttendanceCorrectionSummary>;
+
+/** Storage keys and upload tokens are intentionally never exposed. */
+export function toAttendanceEvidenceSummary(evidence: AttendanceEvidenceModel) {
+  return {
+    id: evidence.id,
+    organizationId: evidence.organizationId,
+    employeeId: evidence.employeeId,
+    desktopAgentId: evidence.desktopAgentId,
+    kind: evidence.kind,
+    status: evidence.status,
+    contentType: evidence.contentType,
+    fileSizeBytes: evidence.fileSizeBytes,
+    capturedAt: evidence.capturedAt,
+    uploadedAt: evidence.uploadedAt,
+    expiresAt: evidence.expiresAt,
+    attachedSessionId: evidence.attachedSessionId,
+    createdAt: evidence.createdAt,
+    updatedAt: evidence.updatedAt,
+  };
+}
+
+export type AttendanceEvidenceSummary = ReturnType<typeof toAttendanceEvidenceSummary>;
+
+export function toAttendanceCheckInSummary(checkIn: AttendanceCheckInModel) {
+  return {
+    id: checkIn.id,
+    organizationId: checkIn.organizationId,
+    employeeId: checkIn.employeeId,
+    desktopAgentId: checkIn.desktopAgentId,
+    sessionId: checkIn.timeSessionId,
+    workMode: checkIn.workMode,
+    checkInRequestId: checkIn.checkInRequestId,
+    location:
+      checkIn.latitude !== null &&
+      checkIn.longitude !== null &&
+      checkIn.accuracyMeters !== null &&
+      checkIn.locationRecordedAt !== null
+        ? {
+            latitude: Number(checkIn.latitude),
+            longitude: Number(checkIn.longitude),
+            accuracyMeters: Number(checkIn.accuracyMeters),
+            recordedAt: checkIn.locationRecordedAt,
+          }
+        : null,
+    selfie: checkIn.selfieEvidence
+      ? toAttendanceEvidenceSummary(checkIn.selfieEvidence)
+      : null,
+    sitePhoto: checkIn.sitePhotoEvidence
+      ? toAttendanceEvidenceSummary(checkIn.sitePhotoEvidence)
+      : null,
+    createdAt: checkIn.createdAt,
+    updatedAt: checkIn.updatedAt,
+  };
+}
+
+export type AttendanceCheckInSummary = ReturnType<typeof toAttendanceCheckInSummary>;

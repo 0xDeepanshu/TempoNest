@@ -14,7 +14,7 @@ export async function resetDatabase(): Promise<void> {
     // clear data between tests.
     await sequelize.sync();
     await sequelize.query(
-      'TRUNCATE TABLE attendance_correction_requests, audit_events, screenshots, screenshot_requests, screenshot_policy_acknowledgements, screenshot_policies, agent_sync_events, application_activities, breaks, time_sessions, desktop_agents, sessions, invitations, memberships, users, organizations RESTART IDENTITY CASCADE',
+      'TRUNCATE TABLE attendance_check_ins, attendance_evidence, attendance_correction_requests, audit_events, screenshots, screenshot_requests, screenshot_policy_acknowledgements, screenshot_policies, agent_sync_events, application_activities, breaks, time_sessions, desktop_agents, sessions, invitations, memberships, users, organizations RESTART IDENTITY CASCADE',
     );
     await clearLocalScreenshotStorage();
     return;
@@ -61,6 +61,24 @@ export async function loginBrowser(email: string, password = PASSWORD): Promise<
 
 export async function loginDesktop(email: string, password = PASSWORD): Promise<request.Response> {
   return request(app).post(`${API}/auth/login`).send({ email, password, client: 'desktop' });
+}
+
+export async function loginMobile(email: string, password = PASSWORD): Promise<request.Response> {
+  return request(app).post(`${API}/auth/login`).send({ email, password, client: 'mobile' });
+}
+
+export async function mobileAuth(email: string, password = PASSWORD) {
+  const response = await loginMobile(email, password);
+  if (response.status !== 200) {
+    throw new Error(`Mobile login failed: ${JSON.stringify(response.body)}`);
+  }
+  return {
+    response,
+    token: response.body.data.accessToken as string,
+    refreshToken: response.body.data.refreshToken as string,
+    user: response.body.data.user as { id: string; name: string; email: string },
+    headers: { Authorization: `Bearer ${response.body.data.accessToken}` },
+  };
 }
 
 export async function desktopAuth(email: string, password = PASSWORD) {

@@ -10,6 +10,10 @@ import {
   createScreenshotFileRouter,
   createScreenshotPolicyRouter,
 } from '../modules/screenshots/screenshot.routes';
+import {
+  createAgentAttendanceRouter,
+  createAttendanceFileRouter,
+} from '../modules/attendance/attendance.routes';
 
 export function createApiRouter(): Router {
   const router = Router();
@@ -21,8 +25,10 @@ export function createApiRouter(): Router {
   router.use('/desktop-agents', createDesktopAgentPublicRouter());
   router.use('/admin', createAdminScreenshotRouter());
   router.use('/agent', createAgentScreenshotRouter());
+  router.use('/agent', createAgentAttendanceRouter());
   router.use('/screenshot-policy', createScreenshotPolicyRouter());
   router.use('/screenshot-files', createScreenshotFileRouter());
+  router.use('/attendance-files', createAttendanceFileRouter());
 
   return router;
 }

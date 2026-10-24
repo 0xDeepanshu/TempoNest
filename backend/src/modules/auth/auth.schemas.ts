@@ -24,17 +24,20 @@ export const registerSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 
+export const AUTH_CLIENTS = ['browser', 'desktop', 'mobile'] as const;
+export type AuthClient = (typeof AUTH_CLIENTS)[number];
+
 export const loginSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, 'Password is required').max(128),
-  client: z.enum(['browser', 'desktop']).default('browser'),
+  client: z.enum(AUTH_CLIENTS).default('browser'),
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
 
 export const refreshSchema = z.object({
   refreshToken: z.string().min(20).max(512).optional(),
-  client: z.enum(['browser', 'desktop']).optional(),
+  client: z.enum(AUTH_CLIENTS).optional(),
 });
 
 export type RefreshInput = z.infer<typeof refreshSchema>;

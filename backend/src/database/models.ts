@@ -15,6 +15,8 @@ import { initScreenshotRequest } from '../modules/screenshots/screenshotRequest.
 import { initScreenshot } from '../modules/screenshots/screenshot.model';
 import { initAuditEvent } from '../modules/screenshots/auditEvent.model';
 import { initAttendanceCorrectionRequest } from '../modules/attendance/attendanceCorrection.model';
+import { initAttendanceEvidence } from '../modules/attendance/attendanceEvidence.model';
+import { initAttendanceCheckIn } from '../modules/attendance/attendanceCheckIn.model';
 
 export function initModels(sequelize: Sequelize) {
   const Organization = initOrganization(sequelize);
@@ -33,6 +35,8 @@ export function initModels(sequelize: Sequelize) {
   const Screenshot = initScreenshot(sequelize);
   const AuditEvent = initAuditEvent(sequelize);
   const AttendanceCorrectionRequest = initAttendanceCorrectionRequest(sequelize);
+  const AttendanceEvidence = initAttendanceEvidence(sequelize);
+  const AttendanceCheckIn = initAttendanceCheckIn(sequelize);
 
   Organization.hasMany(Membership, {
     foreignKey: 'organizationId',
@@ -92,6 +96,16 @@ export function initModels(sequelize: Sequelize) {
   Organization.hasMany(AttendanceCorrectionRequest, {
     foreignKey: 'organizationId',
     as: 'attendanceCorrectionRequests',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(AttendanceEvidence, {
+    foreignKey: 'organizationId',
+    as: 'attendanceEvidence',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(AttendanceCheckIn, {
+    foreignKey: 'organizationId',
+    as: 'attendanceCheckIns',
     onDelete: 'CASCADE',
   });
 
@@ -155,6 +169,16 @@ export function initModels(sequelize: Sequelize) {
     as: 'reviewedAttendanceCorrectionRequests',
     onDelete: 'SET NULL',
   });
+  User.hasMany(AttendanceEvidence, {
+    foreignKey: 'employeeId',
+    as: 'attendanceEvidence',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(AttendanceCheckIn, {
+    foreignKey: 'employeeId',
+    as: 'attendanceCheckIns',
+    onDelete: 'CASCADE',
+  });
 
   Membership.belongsTo(Organization, {
     foreignKey: 'organizationId',
@@ -214,6 +238,16 @@ export function initModels(sequelize: Sequelize) {
     as: 'syncEvents',
     onDelete: 'CASCADE',
   });
+  DesktopAgent.hasMany(AttendanceEvidence, {
+    foreignKey: 'desktopAgentId',
+    as: 'attendanceEvidence',
+    onDelete: 'CASCADE',
+  });
+  DesktopAgent.hasMany(AttendanceCheckIn, {
+    foreignKey: 'desktopAgentId',
+    as: 'attendanceCheckIns',
+    onDelete: 'CASCADE',
+  });
 
   TimeSession.belongsTo(Organization, {
     foreignKey: 'organizationId',
@@ -248,6 +282,16 @@ export function initModels(sequelize: Sequelize) {
   TimeSession.hasMany(AttendanceCorrectionRequest, {
     foreignKey: 'resultingSessionId',
     as: 'resultingAttendanceCorrections',
+    onDelete: 'SET NULL',
+  });
+  TimeSession.hasOne(AttendanceCheckIn, {
+    foreignKey: 'timeSessionId',
+    as: 'attendanceCheckIn',
+    onDelete: 'CASCADE',
+  });
+  TimeSession.hasMany(AttendanceEvidence, {
+    foreignKey: 'attachedSessionId',
+    as: 'attendanceEvidence',
     onDelete: 'SET NULL',
   });
 
@@ -425,6 +469,58 @@ export function initModels(sequelize: Sequelize) {
     onDelete: 'SET NULL',
   });
 
+  AttendanceEvidence.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  AttendanceEvidence.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  AttendanceEvidence.belongsTo(DesktopAgent, {
+    foreignKey: 'desktopAgentId',
+    as: 'desktopAgent',
+    onDelete: 'CASCADE',
+  });
+  AttendanceEvidence.belongsTo(TimeSession, {
+    foreignKey: 'attachedSessionId',
+    as: 'attachedSession',
+    onDelete: 'SET NULL',
+  });
+
+  AttendanceCheckIn.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  AttendanceCheckIn.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  AttendanceCheckIn.belongsTo(DesktopAgent, {
+    foreignKey: 'desktopAgentId',
+    as: 'desktopAgent',
+    onDelete: 'CASCADE',
+  });
+  AttendanceCheckIn.belongsTo(TimeSession, {
+    foreignKey: 'timeSessionId',
+    as: 'timeSession',
+    onDelete: 'CASCADE',
+  });
+  AttendanceCheckIn.belongsTo(AttendanceEvidence, {
+    foreignKey: 'selfieEvidenceId',
+    as: 'selfieEvidence',
+    onDelete: 'SET NULL',
+  });
+  AttendanceCheckIn.belongsTo(AttendanceEvidence, {
+    foreignKey: 'sitePhotoEvidenceId',
+    as: 'sitePhotoEvidence',
+    onDelete: 'SET NULL',
+  });
+
   return {
     Organization,
     User,
@@ -442,6 +538,8 @@ export function initModels(sequelize: Sequelize) {
     Screenshot,
     AuditEvent,
     AttendanceCorrectionRequest,
+    AttendanceEvidence,
+    AttendanceCheckIn,
   };
 }
 

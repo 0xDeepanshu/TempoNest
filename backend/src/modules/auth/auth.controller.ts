@@ -15,23 +15,23 @@ import {
   toSessionSummary,
 } from './session.service';
 import type { IssuedTokens } from './session.service';
-import type { LoginInput, RefreshInput, RegisterInput } from './auth.schemas';
+import type { AuthClient, LoginInput, RefreshInput, RegisterInput } from './auth.schemas';
 
 function sessionPayload(
   issued: IssuedTokens,
   user: { id: string },
   memberships: unknown[],
-  desktop: boolean,
+  client: AuthClient,
 ) {
   return {
     user,
     memberships,
-    client: desktop ? ('desktop' as const) : ('browser' as const),
+    client,
     csrfToken: issued.csrfToken,
     accessTokenExpiresAt: issued.accessExpiresAt,
     refreshTokenExpiresAt: issued.refreshExpiresAt,
     expiresIn: config.auth.accessTokenTtlSeconds,
-    ...(desktop
+    ...(client !== 'browser'
       ? {
           accessToken: issued.accessToken,
           refreshToken: issued.refreshToken,
@@ -50,9 +50,9 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const input = req.body as LoginInput;
   const { user, memberships, issued } = await loginUser(input, req);
-  const desktop = input.client === 'desktop';
+  const client = input.client;
 
-  if (!desktop) {
+  if (client === 'browser') {
     setAuthCookies(res, {
       accessToken: issued.accessToken,
       refreshToken: issued.refreshToken,
@@ -63,7 +63,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   }
 
   res.status(200).json({
-    data: sessionPayload(issued, toPublicUser(user), memberships, desktop),
+    data: sessionPayload(issued, toPublicUser(user), memberships, client),
   });
 });
 
@@ -77,18 +77,28 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
     throw AppError.unauthorized('Refresh token is required', 'REFRESH_TOKEN_REQUIRED');
   }
 
-  const desktop = input.client === 'desktop' || Boolean(bodyToken);
-  if (input.client === 'desktop' && !bodyToken) {
+  if ((input.client === 'desktop' || input.client === 'mobile') && !bodyToken) {
     throw AppError.badRequest(
-      'Desktop clients must send the refresh token in the request body',
+      'Token clients must send the refresh token in the request body',
       'REFRESH_TOKEN_REQUIRED',
     );
   }
 
+  // Explicit token clients keep their label. An omitted client with a body
+  // token remains "desktop" for backward compatibility with existing clients.
+  const client: AuthClient =
+    input.client === 'mobile'
+      ? 'mobile'
+      : input.client === 'desktop'
+        ? 'desktop'
+        : bodyToken
+          ? 'desktop'
+          : 'browser';
+
   const { user, tokens } = await rotateSession(token);
   const { memberships } = await getAuthenticatedUser(user);
 
-  if (!desktop) {
+  if (client === 'browser') {
     setAuthCookies(res, {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
@@ -99,7 +109,7 @@ export const refresh = asyncHandler(async (req: Request, res: Response) => {
   }
 
   res.status(200).json({
-    data: sessionPayload(tokens, toPublicUser(user), memberships, desktop),
+    data: sessionPayload(tokens, toPublicUser(user), memberships, client),
   });
 });
 

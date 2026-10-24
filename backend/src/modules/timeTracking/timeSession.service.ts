@@ -20,7 +20,10 @@ const sessionIncludes = [
   { model: User, as: 'employee', required: false, attributes: ['id', 'name', 'email'] },
 ];
 
-async function lockEmployee(transaction: Transaction, employeeId: string): Promise<void> {
+export async function lockEmployee(
+  transaction: Transaction,
+  employeeId: string,
+): Promise<void> {
   // Serializes start/stop/break transitions for one employee on PostgreSQL.
   // SQLite serializes writers at the database level.
   await User.findByPk(employeeId, {
@@ -65,79 +68,110 @@ function publishSession(session: TimeSessionModel): void {
   });
 }
 
+/** Lets attendance check-in publish the same realtime update after commit. */
+export function publishSessionUpdate(session: TimeSessionModel): void {
+  publishSession(session);
+}
+
+/**
+ * Core online-session creation. Callers must hold the per-employee serialization
+ * key; the transaction must also hold (or request) the employee row lock so
+ * attendance check-in can attach evidence atomically with the session.
+ */
+export async function startSessionInTransaction(options: {
+  transaction: Transaction;
+  organizationId: string;
+  employeeId: string;
+  agent: DesktopAgentModel;
+  employeeLocked?: boolean;
+}): Promise<{ session: TimeSessionModel; autoClosedSessionId: string | null }> {
+  const { transaction, organizationId, employeeId, agent } = options;
+  const now = new Date();
+  let autoClosedSessionId: string | null = null;
+
+  if (!options.employeeLocked) {
+    await lockEmployee(transaction, employeeId);
+  }
+
+  const active = await TimeSession.findOne({
+    where: { employeeId, endedAt: null },
+    transaction,
+    lock: Transaction.LOCK.UPDATE,
+  });
+
+  if (active) {
+    const heartbeatAge = now.getTime() - active.lastHeartbeatAt.getTime();
+    if (heartbeatAge <= config.timeTracking.sessionStaleSeconds * 1000) {
+      throw AppError.conflict(
+        'An active time session already exists. Stop it before starting a new one.',
+        'ACTIVE_SESSION_EXISTS',
+      );
+    }
+
+    // Recover from a device that vanished without stopping. The session is
+    // closed at its last known heartbeat, never at the new start time.
+    const cutoff = new Date(
+      Math.max(active.startedAt.getTime(), active.lastHeartbeatAt.getTime()),
+    );
+    await closeActiveBreak(transaction, active.id, cutoff, true);
+    await active.update(
+      { endedAt: cutoff, status: 'STOPPED', lastHeartbeatAt: cutoff },
+      { transaction },
+    );
+    autoClosedSessionId = active.id;
+  }
+
+  const agentActive = await TimeSession.findOne({
+    where: { desktopAgentId: agent.id, endedAt: null },
+    transaction,
+    lock: Transaction.LOCK.UPDATE,
+  });
+  if (agentActive) {
+    throw AppError.conflict(
+      'This desktop agent already has an active session.',
+      'AGENT_SESSION_EXISTS',
+    );
+  }
+
+  const session = await TimeSession.create(
+    {
+      organizationId,
+      employeeId,
+      desktopAgentId: agent.id,
+      startedAt: now,
+      endedAt: null,
+      status: 'ACTIVE',
+      source: 'ONLINE',
+      lastHeartbeatAt: now,
+    },
+    { transaction },
+  );
+
+  return { session, autoClosedSessionId };
+}
+
 export async function startSession(options: {
   organizationId: string;
   employeeId: string;
   agent: DesktopAgentModel;
 }): Promise<{ session: TimeSessionModel; autoClosedSessionId: string | null }> {
   const { organizationId, employeeId, agent } = options;
-  let autoClosedSessionId: string | null = null;
 
   try {
-    const session = await serializeByKey(`employee:${employeeId}`, () => {
-      const now = new Date();
-      return sequelize.transaction(async (transaction) => {
-        await lockEmployee(transaction, employeeId);
-
-        const active = await TimeSession.findOne({
-          where: { employeeId, endedAt: null },
+    const result = await serializeByKey(`employee:${employeeId}`, () =>
+      sequelize.transaction((transaction) =>
+        startSessionInTransaction({
           transaction,
-          lock: Transaction.LOCK.UPDATE,
-        });
+          organizationId,
+          employeeId,
+          agent,
+        }),
+      ),
+    );
 
-        if (active) {
-          const heartbeatAge = now.getTime() - active.lastHeartbeatAt.getTime();
-          if (heartbeatAge <= config.timeTracking.sessionStaleSeconds * 1000) {
-            throw AppError.conflict(
-              'An active time session already exists. Stop it before starting a new one.',
-              'ACTIVE_SESSION_EXISTS',
-            );
-          }
-
-          // Recover from a device that vanished without stopping. The session is
-          // closed at its last known heartbeat, never at the new start time.
-          const cutoff = new Date(
-            Math.max(active.startedAt.getTime(), active.lastHeartbeatAt.getTime()),
-          );
-          await closeActiveBreak(transaction, active.id, cutoff, true);
-          await active.update(
-            { endedAt: cutoff, status: 'STOPPED', lastHeartbeatAt: cutoff },
-            { transaction },
-          );
-          autoClosedSessionId = active.id;
-        }
-
-        const agentActive = await TimeSession.findOne({
-          where: { desktopAgentId: agent.id, endedAt: null },
-          transaction,
-          lock: Transaction.LOCK.UPDATE,
-        });
-        if (agentActive) {
-          throw AppError.conflict(
-            'This desktop agent already has an active session.',
-            'AGENT_SESSION_EXISTS',
-          );
-        }
-
-        return TimeSession.create(
-          {
-            organizationId,
-            employeeId,
-            desktopAgentId: agent.id,
-            startedAt: now,
-            endedAt: null,
-            status: 'ACTIVE',
-            source: 'ONLINE',
-            lastHeartbeatAt: now,
-          },
-          { transaction },
-        );
-      });
-    });
-
-    const full = await loadSession(session.id);
+    const full = await loadSession(result.session.id);
     publishSession(full);
-    return { session: full, autoClosedSessionId };
+    return { session: full, autoClosedSessionId: result.autoClosedSessionId };
   } catch (error) {
     if (error instanceof UniqueConstraintError) {
       throw AppError.conflict(

@@ -43,17 +43,22 @@ TempoNest/
    - Network interruptions do not lose tracked work. Offline mutations are buffered into a durable queue.
    - Batched synchronization through `/time-sessions/sync` resolves with an immutable idempotency ledger (`applied`, `duplicate`, `conflict`).
 
-4. **Transparent, Admin-Initiated Screenshots**
+4. **Mobile Attendance Check-Ins & Evidence**
+   - Multi-mode employee attendance check-ins (`WFH`, `WFO`, `ON_SITE`) for mobile and desktop agents.
+   - Enforces tamper-resistant evidence uploads (selfies, site photos) and location accuracy/freshness verification.
+   - Audited signed access for review by organization managers and administrators.
+
+5. **Transparent, Admin-Initiated Screenshots**
    - Individual, administrator-initiated captures only during active work sessions.
    - Strictly opt-in per organization with mandatory disclosure text and employee acknowledgement.
    - Storage uses short-lived, HMAC-signed upload/download URLs backed by private local storage or S3 buckets.
 
-5. **Attendance Summaries & Correction Workflow**
+6. **Attendance Summaries & Correction Workflow**
    - Daily, weekly, and monthly attendance rollups bounded by organization timezones.
    - Employees submit correction requests for missed or modified sessions.
    - Managers/admins review with atomic overlap validation and full audit logging.
 
-6. **Hierarchical RBAC & Security Infrastructure**
+7. **Hierarchical RBAC & Security Infrastructure**
    - Strictly enforced role matrix: `OWNER`, `ADMIN`, `MANAGER`, and `EMPLOYEE`.
    - Argon2id password hashing, opaque server-side session tokens with HMAC peppers, CSRF protection, and rate limiting.
 

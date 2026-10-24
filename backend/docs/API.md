@@ -44,7 +44,7 @@ Collection (paginated):
 
 | Header | Direction | Purpose |
 | --- | --- | --- |
-| `Authorization: Bearer <accessToken>` | Client → API | Desktop/API authentication |
+| `Authorization: Bearer <accessToken>` | Client → API | Desktop, mobile, and API authentication |
 | `Cookie: tn_access=…; tn_refresh=…; tn_csrf=…` | Browser | Browser session authentication |
 | `X-CSRF-Token: <csrfToken>` | Client → API | Required for unsafe (`POST`/`PATCH`/`PUT`/`DELETE`) cookie-authenticated requests |
 | `X-Organization-Id: <uuid>` | Client → API | Selects the organization for `/organizations/current` |
@@ -86,7 +86,7 @@ Collection (paginated):
 | `screenshot:manage` | ✅ | ✅ | — | — |
 | `screenshot:policy` | ✅ | ✅ | — | — |
 
-Additional constraints: no self role change/suspension/removal; `ADMIN` may manage only `MANAGER`/`EMPLOYEE`; only `OWNER` may administer `OWNER`/`ADMIN`; `OWNER` is not invitable; at least one active owner is required. Employees are always forced to their own employee ID for time/device lists and attendance summaries/corrections. Attendance correction review requires `correction:review`; self-review is always rejected. Revoking a device is additionally allowed for its owner even without `agent:revoke`. Screenshot routes additionally enforce the organization’s policy role lists: route permissions are necessary but not sufficient, so an organization can narrow access but cannot grant it to a role that lacks the underlying permission.
+Additional constraints: no self role change/suspension/removal; `ADMIN` may manage only `MANAGER`/`EMPLOYEE`; only `OWNER` may administer `OWNER`/`ADMIN`; `OWNER` is not invitable; at least one active owner is required. Employees are always forced to their own employee ID for time/device lists, attendance summaries/corrections, current check-in, and evidence they created. Attendance correction review requires `correction:review`; self-review is always rejected. Attendance evidence access requires `time:read` and is limited to the owning employee or an organization reviewer. New mobile check-in/evidence-write routes additionally require a registered `MOBILE` device. Revoking a device is additionally allowed for its owner even without `agent:revoke`. Screenshot routes additionally enforce the organization’s policy role lists: route permissions are necessary but not sufficient, so an organization can narrow access but cannot grant it to a role that lacks the underlying permission.
 
 Non-members receive `404 ORGANIZATION_NOT_FOUND` for organization-scoped routes.
 
@@ -130,7 +130,7 @@ Errors: `409 EMAIL_ALREADY_EXISTS`, `422 VALIDATION_ERROR`.
 { "email": "ada@example.com", "password": "…", "client": "browser" }
 ```
 
-`client` is `"browser"` (default) or `"desktop"`.
+`client` is `"browser"` (default), `"desktop"`, or `"mobile"`. Browser sessions use cookies; desktop and mobile sessions use bearer tokens.
 
 Browser success (`200`) sets `tn_access`, `tn_refresh`, and `tn_csrf` cookies:
 
@@ -178,21 +178,29 @@ Desktop success (`200`) sets **no cookies** and additionally returns:
 }
 ```
 
+Mobile success (`200`) uses the same body-token contract as desktop: it sets **no cookies**, returns a `client` value of `"mobile"`, and includes `accessToken`, `refreshToken`, and `tokenType: "Bearer"`.
+
 Errors: `401 INVALID_CREDENTIALS`, `403 ACCOUNT_DISABLED`, `429 RATE_LIMITED`.
 
 Electron guidance: keep the refresh token encrypted via `safeStorage` in the main process, keep the access token in main-process memory, and never store either in renderer `localStorage`.
+
+Mobile guidance: store the refresh token in the OS Keychain/Keystore, keep the access token in memory where possible, send it only in the `Authorization` header, and never write tokens to logs or URLs. Authentication identifies the employee only; time-tracking writes still require a separately registered device (see [Desktop agents](#desktop-agents)).
 
 ### `POST /auth/refresh`
 
 Browser: send the `tn_refresh` cookie plus `X-CSRF-Token`; no body fields are required.
 
-Desktop:
+Desktop or mobile:
 
 ```json
 { "refreshToken": "<stored refresh token>", "client": "desktop" }
 ```
 
-`200` returns the same payload shape as login, with newly rotated tokens. Browser responses reset all three cookies; desktop responses return new tokens in the body.
+```json
+{ "refreshToken": "<stored refresh token>", "client": "mobile" }
+```
+
+`200` returns the same payload shape as login, with newly rotated tokens and the requested `client` label. Browser responses reset all three cookies; desktop and mobile responses return new tokens in the body and set no cookies. Mobile clients must send the refresh token in the body and the `client: "mobile"` label. If `client` is omitted with a body token, the response retains the legacy `"desktop"` label.
 
 Rotation rules:
 
@@ -204,13 +212,13 @@ Errors: `401 REFRESH_TOKEN_REQUIRED`, `401 REFRESH_TOKEN_INVALID`, `401 REFRESH_
 
 ### `POST /auth/logout`
 
-Optional body for desktop clients:
+Optional body for desktop/mobile clients when no valid bearer token is available:
 
 ```json
 { "refreshToken": "…" }
 ```
 
-Revokes the current session (from bearer token or refresh cookie) and clears browser cookies. `204 No Content`. Idempotent.
+Revokes the current session (from bearer token or refresh cookie) and clears browser cookies. `204 No Content`. Idempotent. Revoking an authentication session does not stop an active work-tracking session; that lifecycle remains separate.
 
 ### `GET /auth/me`
 
@@ -522,11 +530,11 @@ For a previously `REMOVED` membership, acceptance reactivates the existing row w
 
 A desktop agent is a registered device installation. The raw key is returned only from registration (and key rotation); only its HMAC hash is stored. Agent credentials are always combined with the signed-in user's bearer token for HTTP time/activity writes.
 
-`clientType` records device provenance. It is `ELECTRON` for the desktop app and `MOBILE` for mobile-app installations. The field is optional on registration and defaults to `ELECTRON`, so existing Electron clients are unaffected. Screenshot requests are only created for eligible `ELECTRON` agents.
+`clientType` records device provenance. It is `ELECTRON` for the desktop app and `MOBILE` for mobile-app installations. The mobile and Electron apps share this device registry; it is separate from the employee authentication session. For a new `deviceId` the field is optional and defaults to `ELECTRON`. Provenance is immutable once the device exists: re-registering the same `deviceId` without `clientType` preserves the stored type, and supplying a different type returns `409 AGENT_CLIENT_TYPE_MISMATCH`. Screenshot requests are only created for eligible `ELECTRON` agents.
 
 ### `POST /organizations/:organizationId/desktop-agents`
 
-Requires authentication and an active membership. Any member may register a device **for themselves**; the employee is derived from the bearer token. Sending the same `deviceId` again rotates the key and closes existing WebSockets for that device; the submitted `clientType` is persisted for the rotated device.
+Requires authentication and an active membership. Any member may register a device **for themselves**; the employee is derived from the bearer token. Sending the same `deviceId` again rotates the key and closes existing WebSockets for that device; the stored `clientType` is preserved.
 
 ```json
 {
@@ -570,7 +578,7 @@ Requires authentication and an active membership. Any member may register a devi
 }
 ```
 
-Errors: `401`, `403 MEMBERSHIP_INACTIVE`, `404 ORGANIZATION_NOT_FOUND`, `409 AGENT_REVOKED` (a revoked `deviceId` cannot be re-registered), `422 VALIDATION_ERROR`.
+Errors: `401`, `403 MEMBERSHIP_INACTIVE`, `404 ORGANIZATION_NOT_FOUND`, `409 AGENT_REVOKED` (a revoked `deviceId` cannot be re-registered), `409 AGENT_CLIENT_TYPE_MISMATCH` (a device cannot change between `MOBILE` and `ELECTRON`), `422 VALIDATION_ERROR`.
 
 ### `POST /desktop-agents/authenticate`
 
@@ -947,7 +955,10 @@ Query: `from`, `to`, `employeeId` (required), `page`, `limit` (max 500, default 
 Employees use the existing `GET /organizations/:organizationId/time-sessions` history
 endpoint (with `from`/`to`, break details, and forced self-scoping) and
 `GET /organizations/:organizationId/time-sessions/current` for the live state. The
-endpoints below add daily/weekly/monthly summaries and the correction workflow.
+endpoints below add daily/weekly/monthly summaries, the correction workflow, and the
+mobile check-in/evidence flow. Check-in creates the same `TimeSession` rows as
+`/time-sessions/start`, so existing timer, break, reporting, and correction behavior is
+unchanged for website and Electron clients.
 
 ### `GET /organizations/:organizationId/attendance/summaries`
 
@@ -1074,6 +1085,268 @@ is idempotent; rejecting an approved correction returns
 All submitted, approved, and rejected decisions retain the original session/break
 snapshot in the request and audit metadata. No credentials or tokens are stored in audit
 metadata.
+
+---
+
+## Mobile attendance check-in and evidence
+
+These additive endpoints let the React Native apps start the existing time-session state
+machine with a work mode and, when required, private photo evidence. The behavior is
+online-only: offline recovery continues to use `/time-sessions/sync` and is not extended
+with evidence.
+
+Requirements:
+
+- The caller must be authenticated and have `time:write` for writes or `time:read` for
+  reads. The employee is always the authenticated user; the organization is resolved
+  from the verified membership.
+- New check-in and evidence-write routes require `X-Agent-Id`/`X-Agent-Key` for a
+  non-revoked device registered with `clientType: "MOBILE"`. Electron devices receive
+  `403 MOBILE_AGENT_REQUIRED`. Existing `/time-sessions/*` routes are unchanged and keep
+  accepting any registered agent.
+- Session start/stop timestamps and audit timestamps are server-generated. Clients only
+  send `capturedAt` and `location.recordedAt` so the server can verify freshness; those
+  values never drive the session clock.
+- There is exactly one open session per employee across mobile, website, and Electron
+  clients. A check-in while another session is active returns
+  `409 ACTIVE_SESSION_EXISTS`. The work mode is fixed for the life of a session; check
+  out before checking in with a different mode.
+
+| Work mode | Selfie | Site photo | Location |
+| --- | --- | --- | --- |
+| `WFH` | Not accepted | Not accepted | Optional; validated and recorded when supplied |
+| `WFO` | Required | Not accepted | Not accepted; a supplied `location` is rejected with `422 VALIDATION_ERROR` and no coordinates are persisted |
+| `ON_SITE` | Required | Required (a different evidence upload) | Required |
+
+WFO is location-free by policy: the mobile client does not need location permission, and
+the check-in record stores `null` latitude, longitude, accuracy, and recorded time. WFH
+does not collect location automatically. Location policy applies only to an optional WFH
+fix and to the required ON_SITE fix.
+
+Location policy defaults (all configurable):
+
+- accuracy must be at most `ATTENDANCE_LOCATION_MAX_ACCURACY_METERS` (500 m);
+- `recordedAt` must be at most `ATTENDANCE_LOCATION_MAX_AGE_SECONDS` (300 s) old;
+- `recordedAt` may be at most `ATTENDANCE_LOCATION_FUTURE_SKEW_SECONDS` (60 s) in the
+  future.
+
+There is no geofencing and no continuous background location tracking.
+
+### Evidence lifecycle
+
+1. `POST .../attendance/evidence` creates a `PENDING` row plus a short-lived private
+   upload target. Storage keys and upload tokens are never returned.
+2. `PUT` the returned `upload.url` with the raw image body. The server validates the
+   content type, byte size, and image signature, writes only to private object storage,
+   and marks the row `UPLOADED`.
+3. `POST .../attendance/check-ins` references the uploaded evidence IDs. In one
+   transaction the server locks the employee, creates the time session, creates the
+   check-in, marks the evidence `ATTACHED`, and writes an `ATTENDANCE_CHECKED_IN` audit
+   event.
+4. If anything fails before commit, no evidence is attached and no session is created.
+   Uploaded, unattached evidence remains retryable until it expires
+   (`ATTENDANCE_EVIDENCE_TTL_SECONDS`, default 900 s). Evidence attached to a successful
+   check-in is never deleted by error recovery.
+
+Evidence is employee- and device-scoped. The server re-verifies ownership, kind
+(`SELFIE` vs `SITE_PHOTO`), status, expiry, and the stored object's size/signature at
+check-in, so a storage/database mismatch cannot attach unexpected bytes.
+
+### Idempotency and concurrency
+
+`checkInRequestId` is a client-generated UUID. Repeating the request with the same
+payload returns the original successful result (`200`, `replayed: true`). For modes that
+carry a location, this holds even after the original fix would no longer be fresh:
+freshness is evaluated only when a new check-in is created. WFO retries never need a GPS
+fix. Reusing the ID with a different payload returns `409 IDEMPOTENCY_KEY_REUSED`.
+Different request IDs cannot create a second active session: the later request returns
+`409 ACTIVE_SESSION_EXISTS`. Concurrent retries are serialized per employee; database
+unique constraints remain the cross-process guarantee.
+
+### `POST /organizations/:organizationId/attendance/evidence`
+
+Requires `time:write` plus a registered `MOBILE` agent.
+
+```json
+{ "kind": "SELFIE", "contentType": "image/png", "capturedAt": "2026-10-24T08:59:30.000Z" }
+```
+
+`201`:
+
+```json
+{
+  "data": {
+    "evidence": {
+      "id": "uuid",
+      "organizationId": "uuid",
+      "employeeId": "uuid",
+      "desktopAgentId": "uuid",
+      "kind": "SELFIE",
+      "status": "PENDING",
+      "contentType": "image/png",
+      "fileSizeBytes": null,
+      "capturedAt": "2026-10-24T08:59:30.000Z",
+      "uploadedAt": null,
+      "expiresAt": "2026-10-24T09:14:30.000Z",
+      "attachedSessionId": null,
+      "createdAt": "2026-10-24T08:59:30.000Z",
+      "updatedAt": "2026-10-24T08:59:30.000Z"
+    },
+    "upload": {
+      "method": "PUT",
+      "url": "https://api.example.com/api/v1/agent/attendance-evidence/<token>",
+      "headers": { "Content-Type": "image/png" },
+      "requiredHeaders": { "X-Organization-Id": "uuid" },
+      "requiresAgentAuth": true,
+      "expiresAt": "2026-10-24T09:01:30.000Z",
+      "maxBytes": 10485760,
+      "contentType": "image/png"
+    }
+  },
+  "serverTime": "2026-10-24T08:59:30.000Z"
+}
+```
+
+`kind` is `SELFIE` or `SITE_PHOTO`. `capturedAt` is optional but cannot be in the future.
+
+### `POST /organizations/:organizationId/attendance/evidence/:evidenceId/upload-authorization`
+
+Requires `time:write` plus a registered `MOBILE` agent. Reissues the upload target for a
+`PENDING` row and invalidates the previous token. Uploaded/attached evidence returns
+`409`; expired evidence returns `410`. No request body.
+
+### `PUT /agent/attendance-evidence/:token`
+
+Requires bearer auth, `X-Organization-Id`, and `X-Agent-Id`/`X-Agent-Key` for the same
+`MOBILE` agent that created the evidence. The body is the raw image. Allowed types and
+the size cap are shared with screenshots (`SCREENSHOT_ALLOWED_CONTENT_TYPES`,
+`SCREENSHOT_MAX_BYTES`). Returns `201 { data: { evidence }, serverTime }`.
+
+### `POST /organizations/:organizationId/attendance/check-ins`
+
+Requires `time:write` plus a registered `MOBILE` agent.
+
+```json
+{
+  "checkInRequestId": "2f6f0f6e-7a8f-4a2b-9a17-0e0f4f9f0a11",
+  "workMode": "ON_SITE",
+  "selfieEvidenceId": "uuid",
+  "sitePhotoEvidenceId": "uuid",
+  "location": {
+    "latitude": 28.6139,
+    "longitude": 77.209,
+    "accuracyMeters": 20,
+    "recordedAt": "2026-10-24T08:59:55.000Z"
+  }
+}
+```
+
+`201` (or `200` with `replayed: true`):
+
+```json
+{
+  "data": {
+    "checkIn": {
+      "id": "uuid",
+      "organizationId": "uuid",
+      "employeeId": "uuid",
+      "desktopAgentId": "uuid",
+      "sessionId": "uuid",
+      "workMode": "ON_SITE",
+      "checkInRequestId": "uuid",
+      "location": {
+        "latitude": 28.6139,
+        "longitude": 77.209,
+        "accuracyMeters": 20,
+        "recordedAt": "2026-10-24T08:59:55.000Z"
+      },
+      "selfie": { "id": "uuid", "kind": "SELFIE", "status": "ATTACHED" },
+      "sitePhoto": { "id": "uuid", "kind": "SITE_PHOTO", "status": "ATTACHED" },
+      "createdAt": "2026-10-24T09:00:01.000Z",
+      "updatedAt": "2026-10-24T09:00:01.000Z"
+    },
+    "session": { "id": "uuid", "status": "ACTIVE", "source": "ONLINE" },
+    "autoClosedSessionId": null,
+    "replayed": false
+  },
+  "serverTime": "2026-10-24T09:00:01.000Z"
+}
+```
+
+`session` is the normal time-session summary, including breaks and
+`desktopAgent`/`employee` summaries. `autoClosedSessionId` is populated only when a stale
+session was recovered at its last heartbeat, matching the existing start-session rules.
+
+Per-mode request bodies:
+
+```json
+{ "checkInRequestId": "uuid", "workMode": "WFH" }
+```
+
+```json
+{ "checkInRequestId": "uuid", "workMode": "WFO", "selfieEvidenceId": "uuid" }
+```
+
+ON_SITE uses the full example above (`selfieEvidenceId`, `sitePhotoEvidenceId`, and
+`location`). WFH omits both evidence fields and `location`; WFO omits
+`sitePhotoEvidenceId` and `location`. Do not send `location` for WFO: it is rejected
+rather than ignored, and no coordinates are stored. Repeating a successful WFO request
+requires only the same `checkInRequestId`, work mode, and selfie evidence ID; no GPS fix
+is needed for the retry.
+
+After check-in, breaks, resume, heartbeat, and checkout use the existing time-session
+routes with the same `MOBILE` agent credentials:
+`POST .../time-sessions/:sessionId/breaks`, `POST .../time-sessions/:sessionId/breaks/end`,
+`POST .../time-sessions/:sessionId/heartbeat`, and `POST .../time-sessions/:sessionId/stop`.
+This endpoint reports the resulting session status (`ACTIVE`, `ON_BREAK`, or after
+checkout, a null session), so a restarted mobile app can recover both the open timer and
+its check-in without creating a second session.
+
+### `GET /organizations/:organizationId/attendance/check-ins/current`
+
+Requires `time:read`; always self-scoped. No device credential is required. Returns the
+open session and its check-in, or `{ "checkIn": null, "session": null }` when checked
+out. A session started through another client has `checkIn: null`.
+
+### `POST /organizations/:organizationId/attendance/evidence/:evidenceId/access`
+
+Requires `time:read`. The owning employee may access their own evidence; owners, admins,
+and managers with `time:read` may access evidence anywhere in the organization. Every
+grant writes `ATTENDANCE_EVIDENCE_ACCESS_GRANTED` and returns a short-lived signed URL:
+
+```json
+{
+  "data": {
+    "evidence": { "id": "uuid", "kind": "SELFIE", "status": "ATTACHED" },
+    "url": "https://api.example.com/api/v1/attendance-files/<token>",
+    "expiresAt": "2026-10-24T09:05:01.000Z"
+  },
+  "serverTime": "2026-10-24T09:00:01.000Z"
+}
+```
+
+### `GET /attendance-files/:token`
+
+No bearer token is required; the HMAC-signed, expiring token is the authorization. It
+verifies the evidence, organization, and expiry server-side, streams the private object
+with `Cache-Control: private, no-store, max-age=0`, and writes
+`ATTENDANCE_EVIDENCE_VIEWED`. Attendance evidence tokens are separate from screenshot
+tokens and cannot be used on `/screenshot-files`.
+
+### Retention and limitations
+
+- Attendance evidence is retained privately with **no automatic deletion** until an
+  approved retention policy exists. This is a known gap that must be resolved before
+  committing to a retention period in production. Evidence can only be removed by
+  future administrative retention work; there is no public or admin delete endpoint.
+- The server validates the declared content type, file size, and image signature, but it
+  cannot prove that a photo was captured live, that the device clock is honest, or that
+  the reported coordinates are truthful. Attendance photos are work-location evidence,
+  not biometric identity verification; there is no facial recognition, face enrollment,
+  or biometric template storage. Clients must not present these records as stronger
+  proof than the server can provide.
+- Screenshot capture policy, authorization, storage, and audit remain independent of
+  attendance evidence.
 
 ---
 
@@ -1494,6 +1767,7 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 403 | `SCREENSHOT_ROLE_NOT_ALLOWED` | The policy role list excludes this role |
 | 403 | `INVITATION_EMAIL_MISMATCH` | Signed-in e-mail differs from invitation |
 | 403 | `SELF_REVIEW_FORBIDDEN` | Reviewer is the employee who submitted the correction |
+| 403 | `MOBILE_AGENT_REQUIRED` | New mobile check-in/evidence-write route called by a non-`MOBILE` device |
 | 404 | `ROUTE_NOT_FOUND` | Unknown route |
 | 404 | `NOT_FOUND` | Generic missing resource |
 | 404 | `ORGANIZATION_NOT_FOUND` | Organization missing or caller is not a member |
@@ -1505,6 +1779,9 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 404 | `SCREENSHOT_NOT_FOUND` | Screenshot missing, outside the organization, or past retention |
 | 404 | `SCREENSHOT_LINK_INVALID` | Signed screenshot URL is invalid, tampered, or expired |
 | 404 | `UPLOAD_AUTHORIZATION_INVALID` | Upload token is unknown, already consumed, or belongs to another agent |
+| 404 | `ATTENDANCE_EVIDENCE_NOT_FOUND` | Evidence missing, outside the organization, or not owned by the employee/device |
+| 404 | `ATTENDANCE_EVIDENCE_UPLOAD_INVALID` | Attendance upload token is unknown, consumed, or belongs to another device |
+| 404 | `ATTENDANCE_EVIDENCE_LINK_INVALID` | Signed attendance evidence URL is invalid, tampered, or expired |
 | 409 | `CONFLICT` | Generic uniqueness/constraint conflict |
 | 409 | `EMAIL_ALREADY_EXISTS` | Registration e-mail already used |
 | 409 | `ALREADY_MEMBER` | Accepting an invitation while already active |
@@ -1524,6 +1801,7 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 409 | `EVENT_OVERLAP` | Application activity overlaps an existing interval |
 | 409 | `EVENT_OUTSIDE_SESSION` | Application activity falls outside its session window |
 | 409 | `AGENT_REVOKED` | Device registration was revoked |
+| 409 | `AGENT_CLIENT_TYPE_MISMATCH` | Re-registration attempted to change the device's immutable client type |
 | 409 | `SESSION_ID_EXISTS` | Offline session UUID is already in use |
 | 409 | `SESSION_NOT_CLOSED` | Correction targets a session that is not stopped |
 | 409 | `CORRECTION_OVERLAPS_EXISTING_SESSION` | Corrected interval overlaps another recorded work session |
@@ -1532,6 +1810,11 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 409 | `CORRECTION_ALREADY_APPROVED` | Rejection was attempted after approval |
 | 409 | `CORRECTION_ALREADY_REJECTED` | Approval was attempted after rejection |
 | 409 | `CORRECTION_INVALID` | Stored correction data cannot be applied |
+| 409 | `ATTENDANCE_EVIDENCE_ALREADY_ATTACHED` | Evidence is already attached to a check-in |
+| 409 | `ATTENDANCE_EVIDENCE_NOT_UPLOADED` | Evidence upload has not completed yet |
+| 409 | `ATTENDANCE_EVIDENCE_ALREADY_UPLOADED` | Upload authorization requested after the upload succeeded |
+| 409 | `ATTENDANCE_EVIDENCE_STORAGE_MISSING` | Uploaded evidence bytes are missing from private storage |
+| 409 | `ATTENDANCE_EVIDENCE_STORAGE_MISMATCH` | Stored bytes/signature/size do not match evidence metadata |
 | 422 | `INVALID_CORRECTION_INTERVAL` | Correction start/end are missing, equal, or reversed |
 | 422 | `INVALID_CORRECTION_BREAKS` | Corrected breaks are outside the session or overlap |
 | 422 | `CORRECTION_IN_FUTURE` | Correction includes future timestamps |
@@ -1549,15 +1832,26 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 409 | `SCREENSHOT_UPLOAD_NOT_FOUND` | Completion was attempted before an upload |
 | 409 | `SCREENSHOT_SESSION_NOT_ACTIVE` | Linked time session stopped before claim |
 | 409 | `SCREENSHOT_REQUEST_NOT_CANCELLABLE` | Request is already terminal |
-| 409 | `IDEMPOTENCY_KEY_REUSED` | Idempotency key belongs to another employee |
+| 409 | `IDEMPOTENCY_KEY_REUSED` | Idempotency key / `checkInRequestId` was reused with a different payload |
 | 410 | `INVITATION_EXPIRED` | Invitation expired |
 | 410 | `UPLOAD_AUTHORIZATION_EXPIRED` | Short-lived upload authorization expired |
+| 410 | `ATTENDANCE_EVIDENCE_EXPIRED` | Evidence expired before check-in |
+| 410 | `ATTENDANCE_UPLOAD_AUTHORIZATION_EXPIRED` | Attendance upload authorization expired |
 | 410 | `INVITATION_REVOKED` | Invitation revoked |
 | 410 | `INVITATION_ALREADY_USED` | Invitation already accepted |
 | 413 | `PAYLOAD_TOO_LARGE` | JSON or screenshot body exceeds limit |
+| 413 | `ATTENDANCE_EVIDENCE_TOO_LARGE` | Attendance photo exceeds the configured size limit |
 | 415 | `UNSUPPORTED_SCREENSHOT_TYPE` | Upload is not an allowed image content type |
+| 415 | `UNSUPPORTED_ATTENDANCE_EVIDENCE_TYPE` | Attendance photo is not an allowed image content type |
 | 422 | `VALIDATION_ERROR` | Zod validation failed (with `details`) |
 | 422 | `INVALID_SCREENSHOT_FILE` | Empty or invalid image signature |
+| 422 | `INVALID_ATTENDANCE_EVIDENCE_FILE` | Empty attendance photo or invalid image signature |
+| 422 | `ATTENDANCE_EVIDENCE_CONTENT_TYPE_MISMATCH` | Upload type differs from the type authorized for this evidence |
+| 422 | `ATTENDANCE_EVIDENCE_KIND_MISMATCH` | Referenced evidence kind does not match selfie/site-photo slot |
+| 422 | `EVIDENCE_CAPTURED_AT_IN_FUTURE` | `capturedAt` is too far in the future |
+| 422 | `LOCATION_ACCURACY_TOO_LOW` | Location accuracy exceeds the configured maximum |
+| 422 | `LOCATION_FIX_TOO_OLD` | Location timestamp is older than the configured window |
+| 422 | `LOCATION_FIX_IN_FUTURE` | Location timestamp is too far in the future |
 | 422 | `SCREENSHOT_CONTENT_TYPE_MISMATCH` | Upload type differs from the claimed/expected type |
 | 422 | `SCREENSHOT_DISCLOSURE_VERSION_REQUIRED` | Acknowledged disclosure text changed without a new version |
 | 429 | `RATE_LIMITED` | Rate limit exceeded |

@@ -70,6 +70,19 @@ const envSchema = z
     SCREENSHOT_S3_SECRET_ACCESS_KEY: optionalString,
     SCREENSHOT_S3_FORCE_PATH_STYLE: booleanFromEnv.default('false'),
 
+    // Mobile attendance evidence is uploaded to the same private object store
+    // as screenshots, but has its own request lifetime and location policy.
+    ATTENDANCE_UPLOAD_TTL_SECONDS: z.coerce.number().int().min(10).max(3600).default(120),
+    ATTENDANCE_EVIDENCE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
+    ATTENDANCE_EVIDENCE_DOWNLOAD_TTL_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
+    ATTENDANCE_LOCATION_MAX_ACCURACY_METERS: z.coerce
+      .number()
+      .positive()
+      .max(100_000)
+      .default(500),
+    ATTENDANCE_LOCATION_MAX_AGE_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+    ATTENDANCE_LOCATION_FUTURE_SKEW_SECONDS: z.coerce.number().int().min(0).max(600).default(60),
+
     ARGON2_MEMORY_KIB: z.coerce.number().int().min(8 * 2).max(1_048_576).default(19_456),
     ARGON2_TIME_COST: z.coerce.number().int().min(1).max(20).default(2),
     ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16).default(1),
@@ -283,6 +296,14 @@ export const config = {
       secretAccessKey: env.SCREENSHOT_S3_SECRET_ACCESS_KEY,
       forcePathStyle: env.SCREENSHOT_S3_FORCE_PATH_STYLE,
     },
+  },
+  attendance: {
+    uploadTtlSeconds: env.ATTENDANCE_UPLOAD_TTL_SECONDS,
+    evidenceTtlSeconds: env.ATTENDANCE_EVIDENCE_TTL_SECONDS,
+    downloadTtlSeconds: env.ATTENDANCE_EVIDENCE_DOWNLOAD_TTL_SECONDS,
+    locationMaxAccuracyMeters: env.ATTENDANCE_LOCATION_MAX_ACCURACY_METERS,
+    locationMaxAgeSeconds: env.ATTENDANCE_LOCATION_MAX_AGE_SECONDS,
+    locationFutureSkewSeconds: env.ATTENDANCE_LOCATION_FUTURE_SKEW_SECONDS,
   },
   logLevel: env.LOG_LEVEL,
   paths: {

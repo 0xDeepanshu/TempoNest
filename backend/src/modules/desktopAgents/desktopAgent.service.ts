@@ -41,13 +41,22 @@ export async function registerDesktopAgent(
     );
   }
 
+  // Device provenance is fixed once the device identity exists. Key rotation
+  // must not turn a mobile device into an Electron screenshot target, or vice versa.
+  if (existing && input.clientType && input.clientType !== existing.clientType) {
+    throw AppError.conflict(
+      'This device is already registered with a different client type',
+      'AGENT_CLIENT_TYPE_MISMATCH',
+    );
+  }
+
   const { key, hash } = issueAgentKey();
   const metadata = {
     name: input.name,
     platform: input.platform ?? null,
     osVersion: input.osVersion ?? null,
     appVersion: input.appVersion ?? null,
-    clientType: input.clientType,
+    clientType: existing?.clientType ?? input.clientType ?? 'ELECTRON',
     agentKeyHash: hash,
   };
 
