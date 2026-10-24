@@ -1,0 +1,74 @@
+import type { Request } from 'express';
+import type { User } from '../users/user.model';
+import { User as UserModel } from '../../database';
+import { AppError } from '../../utils/errors';
+import { hashPassword, getDummyPasswordHash, verifyPassword } from '../../utils/password';
+import { toPublicUser } from '../memberships/membership.mapper';
+import {
+  createSession,
+  getUserMemberships,
+  type IssuedTokens,
+} from './session.service';
+import type { LoginInput, RegisterInput } from './auth.schemas';
+
+export type AuthenticatedLogin = {
+  user: User;
+  memberships: Awaited<ReturnType<typeof getUserMemberships>>;
+  issued: IssuedTokens;
+};
+
+export async function registerUser(input: RegisterInput) {
+  const existing = await UserModel.findOne({ where: { email: input.email } });
+  if (existing) {
+    throw AppError.conflict('An account with this email already exists', 'EMAIL_ALREADY_EXISTS');
+  }
+
+  const passwordHash = await hashPassword(input.password);
+
+  try {
+    const user = await UserModel.create({
+      name: input.name,
+      email: input.email,
+      passwordHash,
+    });
+    return toPublicUser(user);
+  } catch (error) {
+    // Handle the race between the uniqueness check and the insert.
+    if (error instanceof Error && error.name === 'SequelizeUniqueConstraintError') {
+      throw AppError.conflict('An account with this email already exists', 'EMAIL_ALREADY_EXISTS');
+    }
+    throw error;
+  }
+}
+
+export async function loginUser(input: LoginInput, req: Request): Promise<AuthenticatedLogin> {
+  const user = await UserModel.unscoped().findOne({ where: { email: input.email } });
+
+  // Always perform a hash verification to reduce user-enumeration timing leaks.
+  const hashToCheck = user?.passwordHash ?? (await getDummyPasswordHash());
+  const passwordMatches = await verifyPassword(hashToCheck, input.password);
+
+  if (!user || !passwordMatches) {
+    throw AppError.unauthorized('Invalid email or password', 'INVALID_CREDENTIALS');
+  }
+
+  if (user.status !== 'ACTIVE') {
+    throw AppError.forbidden('This account is disabled', 'ACCOUNT_DISABLED');
+  }
+
+  const issued = await createSession(user, req);
+  await user.update({ lastLoginAt: new Date() });
+
+  return {
+    user,
+    memberships: await getUserMemberships(user.id),
+    issued,
+  };
+}
+
+export async function getAuthenticatedUser(user: User) {
+  return {
+    user: toPublicUser(user),
+    memberships: await getUserMemberships(user.id),
+  };
+}
