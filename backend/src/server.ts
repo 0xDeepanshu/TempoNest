@@ -5,8 +5,11 @@ import { config } from './config/env';
 import { logger } from './config/logger';
 import { connectDatabase, disconnectDatabase } from './database';
 import { attachAgentWebSocketServer } from './realtime/agentWebSocket';
+import { attachScreenLiveRelay, type ScreenLiveRelay } from './realtime/screenLiveRelay';
 import { agentHub } from './realtime/agentHub';
 import { startScreenshotMaintenance } from './modules/screenshots/screenshot.maintenance';
+import { startScreenLiveMaintenance } from './modules/screenshots/screenLive.maintenance';
+import { startAttendanceLocationMaintenance } from './modules/attendance/attendanceLocation.maintenance';
 
 let shuttingDown = false;
 
@@ -15,14 +18,26 @@ async function shutdown(
   signal: string,
   wss?: WebSocketServer,
   stopMaintenance?: () => void,
+  relay?: ScreenLiveRelay,
+  stopLiveMaintenance?: () => void,
+  stopLocationMaintenance?: () => void,
 ): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info({ signal }, 'shutdown initiated');
 
   stopMaintenance?.();
+  stopLiveMaintenance?.();
+  stopLocationMaintenance?.();
   agentHub.closeAll(1001, 'Server shutting down');
   wss?.close();
+  if (relay) {
+    try {
+      await relay.close();
+    } catch (error) {
+      logger.warn({ err: error }, 'error while closing live screen relay');
+    }
+  }
 
   const forceExit = setTimeout(() => {
     logger.error('graceful shutdown timed out; forcing exit');
@@ -60,15 +75,40 @@ async function main(): Promise<void> {
     logger.info({ port: config.port, env: config.env }, 'TempoNest API listening');
   });
   const wss = attachAgentWebSocketServer(server);
+  const relay = attachScreenLiveRelay(server);
   const stopMaintenance = startScreenshotMaintenance();
+  const stopLiveMaintenance = startScreenLiveMaintenance();
+  const stopLocationMaintenance = startAttendanceLocationMaintenance();
+
+  // Both realtime endpoints above ignore paths they do not own. Reject any
+  // other upgrade request so unhandled sockets do not linger.
+  const knownUpgradePaths = new Set([
+    `${config.apiPrefix}/ws/agent`,
+    `${config.apiPrefix}${config.screenLive.viewerPath}`,
+    `${config.apiPrefix}${config.screenLive.agentPath}`,
+  ]);
+  server.on('upgrade', (req, socket) => {
+    try {
+      const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+      if (!knownUpgradePaths.has(pathname)) socket.destroy();
+    } catch {
+      socket.destroy();
+    }
+  });
 
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 70_000;
 
   const handleSignal = (signal: NodeJS.Signals) => {
-    void shutdown(server, signal, wss, stopMaintenance).then(() =>
-      process.exit(process.exitCode ?? 0),
-    );
+    void shutdown(
+      server,
+      signal,
+      wss,
+      stopMaintenance,
+      relay,
+      stopLiveMaintenance,
+      stopLocationMaintenance,
+    ).then(() => process.exit(process.exitCode ?? 0));
   };
 
   process.on('SIGINT', handleSignal);
@@ -80,9 +120,15 @@ async function main(): Promise<void> {
 
   process.on('uncaughtException', (error) => {
     logger.fatal({ err: error }, 'uncaught exception; shutting down');
-    void shutdown(server, 'uncaughtException', wss, stopMaintenance).then(() =>
-      process.exit(1),
-    );
+    void shutdown(
+      server,
+      'uncaughtException',
+      wss,
+      stopMaintenance,
+      relay,
+      stopLiveMaintenance,
+      stopLocationMaintenance,
+    ).then(() => process.exit(1));
   });
 }
 

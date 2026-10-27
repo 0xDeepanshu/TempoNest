@@ -12,7 +12,7 @@ export default function RegisterPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center text-indigo-600">
+        <div className="flex min-h-screen items-center justify-center text-muted">
           <Spinner className="h-8 w-8" />
         </div>
       }

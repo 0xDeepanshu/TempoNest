@@ -119,17 +119,17 @@ function SessionTable({
       </thead>
       <tbody>
         {sessions.map((session) => (
-          <tr key={session.id} className="hover:bg-slate-50/60">
+          <tr key={session.id} className="hover:bg-surface-muted">
             <Td>
-              <div className="font-medium text-slate-900">{formatDateTime(session.startedAt, timezone)}</div>
-              <div className="text-xs text-slate-500">
+              <div className="font-medium text-ink">{formatDateTime(session.startedAt, timezone)}</div>
+              <div className="text-xs text-muted">
                 {formatTimeRange(session.startedAt, session.endedAt, timezone)}
               </div>
             </Td>
-            <Td className="font-medium">{formatDuration(session.durationSeconds)}</Td>
+            <Td className="font-medium tnum">{formatDuration(session.durationSeconds)}</Td>
             <Td>{session.breaks?.length ? `${session.breaks.length} recorded` : "—"}</Td>
             <Td>
-              <Badge tone={session.source === "ONLINE" ? "indigo" : "neutral"}>
+              <Badge tone={session.source === "ONLINE" ? "outline" : "neutral"}>
                 {session.source === "ONLINE" ? "Online" : "Offline"}
               </Badge>
             </Td>
@@ -209,7 +209,7 @@ export function PersonalDashboard() {
   const pendingCorrections = pending.data?.data ?? [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization?.name ?? "Workspace"} · ${membership?.role.toLowerCase()}`}
         title={`Good to see you, ${user.name.split(" ")[0]}`}
@@ -268,7 +268,7 @@ export function PersonalDashboard() {
 
       {current.error ? <ErrorState message={current.error} onRetry={current.reload} /> : null}
 
-      <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
         <Card>
           <CardHeader
             title="Current session"
@@ -279,54 +279,54 @@ export function PersonalDashboard() {
             <div className="flex flex-wrap items-start gap-4">
               <span
                 className={[
-                  "mt-1 h-3 w-3 shrink-0 rounded-full",
+                  "mt-1 h-2.5 w-2.5 shrink-0 rounded-full",
                   state.tone === "success"
-                    ? "bg-emerald-500 ring-4 ring-emerald-100"
+                    ? "bg-success"
                     : state.tone === "warning"
-                      ? "bg-amber-500 ring-4 ring-amber-100"
-                      : "bg-slate-300 ring-4 ring-slate-100",
+                      ? "bg-warning"
+                      : "bg-muted",
                 ].join(" ")}
               />
               <div className="min-w-0 flex-1">
-                <p className="text-lg font-bold text-slate-900">{state.label}</p>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{state.detail}</p>
+                <p className="text-base font-semibold text-ink">{state.label}</p>
+                <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted">{state.detail}</p>
                 {session ? (
                   <dl className="mt-4 grid gap-x-8 gap-y-2 text-xs sm:grid-cols-2">
                     <div>
-                      <dt className="text-slate-400">Started</dt>
-                      <dd className="font-medium text-slate-700">
+                      <dt className="text-muted">Started</dt>
+                      <dd className="font-medium text-ink-secondary">
                         {formatDateTime(session.startedAt, timezone)}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-slate-400">Recorded duration</dt>
-                      <dd className="font-medium text-slate-700">
+                      <dt className="text-muted">Recorded duration</dt>
+                      <dd className="font-medium tnum text-ink-secondary">
                         {formatDuration(session.durationSeconds)}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-slate-400">Desktop agent</dt>
-                      <dd className="font-medium text-slate-700">
+                      <dt className="text-muted">Desktop agent</dt>
+                      <dd className="font-medium text-ink-secondary">
                         {session.desktopAgent?.name ?? "Offline session"}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-slate-400">Last heartbeat</dt>
-                      <dd className="font-medium text-slate-700">
+                      <dt className="text-muted">Last heartbeat</dt>
+                      <dd className="font-medium text-ink-secondary">
                         {formatDateTime(session.lastHeartbeatAt, timezone)}
                       </dd>
                     </div>
                   </dl>
                 ) : (
-                  <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                  <p className="mt-4 rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs leading-5 text-muted">
                     Open the TempoNest desktop app and press start. The web portal deliberately
                     cannot create agent-authenticated sessions.
                   </p>
                 )}
                 {session?.activeBreak ? (
-                  <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <div className="mt-4 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
                     Break active since {formatTime(session.activeBreak.startedAt, timezone)} ·{" "}
-                    {formatDuration(session.activeBreak.durationSeconds)}
+                    <span className="tnum">{formatDuration(session.activeBreak.durationSeconds)}</span>
                   </div>
                 ) : null}
               </div>
@@ -338,7 +338,7 @@ export function PersonalDashboard() {
           <CardHeader
             title="Corrections"
             actions={
-              <Link href="/corrections" className="text-xs font-semibold text-indigo-600">
+              <Link href="/corrections" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
                 Open
               </Link>
             }
@@ -347,13 +347,13 @@ export function PersonalDashboard() {
             {pending.error ? <ErrorState message={pending.error} onRetry={pending.reload} /> : null}
             {pending.loading ? (
               <div className="space-y-2">
-                <div className="h-14 animate-pulse rounded-lg bg-slate-100" />
-                <div className="h-14 animate-pulse rounded-lg bg-slate-100" />
+                <div className="h-14 animate-pulse rounded-lg bg-surface-hover" />
+                <div className="h-14 animate-pulse rounded-lg bg-surface-hover" />
               </div>
             ) : pendingCorrections.length === 0 ? (
               <div className="py-6 text-center">
-                <p className="text-sm font-medium text-slate-700">No pending requests</p>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="text-[13px] font-medium text-ink">No pending requests</p>
+                <p className="mt-1 text-xs text-muted">
                   If a session needs fixing, request a correction.
                 </p>
                 <Link href="/corrections" className="mt-3 inline-block">
@@ -367,15 +367,15 @@ export function PersonalDashboard() {
                 <Link
                   key={correction.id}
                   href="/corrections"
-                  className="block rounded-xl border border-slate-200 px-3 py-2.5 transition hover:border-indigo-200 hover:bg-indigo-50/40"
+                  className="block rounded-lg border border-line px-3 py-2.5 transition-colors hover:bg-surface-muted"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-slate-800">
+                    <span className="text-xs font-medium text-ink">
                       {correction.workDate}
                     </span>
                     <CorrectionStatusBadge status={correction.status} />
                   </div>
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-slate-500">
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-muted">
                     {correction.reason}
                   </p>
                 </Link>
@@ -390,19 +390,19 @@ export function PersonalDashboard() {
           title="Recent sessions"
           description={`Last 7 days · ${organization?.name ?? ""}`}
           actions={
-            <Link href="/attendance" className="text-xs font-semibold text-indigo-600">
+            <Link href="/attendance" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
               All history
             </Link>
           }
         />
         {sessions.error ? (
-          <div className="p-5">
+          <div className="p-4">
             <ErrorState message={sessions.error} onRetry={sessions.reload} />
           </div>
         ) : sessions.loading && recentSessions.length === 0 ? (
-          <div className="space-y-2 p-5">
-            <div className="h-10 animate-pulse rounded bg-slate-100" />
-            <div className="h-10 animate-pulse rounded bg-slate-100" />
+          <div className="space-y-2 p-4">
+            <div className="h-10 animate-pulse rounded bg-surface-hover" />
+            <div className="h-10 animate-pulse rounded bg-surface-hover" />
           </div>
         ) : (
           <SessionTable
@@ -471,10 +471,10 @@ export function TeamDashboard() {
   const pendingCorrections = pending.data?.data ?? [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
-        eyebrow={`${organization?.name ?? "Team"} · team overview`}
-        title="Team overview"
+        eyebrow={`${organization?.name ?? "Team"} · overview`}
+        title="Overview"
         description="Live durable tracking state and today's recorded work. Session times are server-authoritative."
         actions={
           <>
@@ -524,14 +524,14 @@ export function TeamDashboard() {
 
       {tracking.error ? <ErrorState message={tracking.error} onRetry={tracking.reload} /> : null}
 
-      <div className="grid gap-6 xl:grid-cols-[1.45fr_0.55fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.45fr_0.55fr]">
         <Card>
           <CardHeader
             title="Live tracking"
             description={`Freshness threshold: ${tracking.data?.heartbeatStaleAfterSeconds ?? 120}s · ${timezone}`}
             actions={
-              <Link href="/admin/reports" className="text-xs font-semibold text-indigo-600">
-                Team reports
+              <Link href="/admin/live-tracking" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
+                Open live tracking
               </Link>
             }
           />
@@ -554,13 +554,13 @@ export function TeamDashboard() {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.employee.id} className="hover:bg-slate-50/60">
+                  <tr key={row.employee.id} className="hover:bg-surface-muted">
                     <Td>
                       <div className="flex items-center gap-2.5">
                         <Avatar name={row.employee.name} size="sm" />
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-slate-900">{row.employee.name}</p>
-                          <p className="truncate text-xs text-slate-500">{row.employee.email}</p>
+                          <p className="truncate font-medium text-ink">{row.employee.name}</p>
+                          <p className="truncate text-xs text-muted">{row.employee.email}</p>
                         </div>
                       </div>
                     </Td>
@@ -572,7 +572,7 @@ export function TeamDashboard() {
                         ? `${formatTimeRange(row.activeSession.startedAt, row.activeSession.endedAt, timezone)} · ${formatDuration(row.activeSession.durationSeconds)}`
                         : "—"}
                     </Td>
-                    <Td className="text-xs text-slate-500">
+                    <Td className="text-xs text-muted">
                       {formatDateTime(row.lastHeartbeatAt, timezone)}
                     </Td>
                     <Td className="text-xs">{row.agent?.name ?? "No active agent"}</Td>
@@ -588,7 +588,7 @@ export function TeamDashboard() {
             title="Awaiting review"
             description="Oldest requests first"
             actions={
-              <Link href="/admin/corrections" className="text-xs font-semibold text-indigo-600">
+              <Link href="/corrections" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
                 Review
               </Link>
             }
@@ -596,23 +596,23 @@ export function TeamDashboard() {
           <CardBody className="space-y-3">
             {pendingCorrections.length === 0 ? (
               <div className="py-8 text-center">
-                <p className="text-sm font-medium text-slate-700">Nothing pending</p>
-                <p className="mt-1 text-xs text-slate-500">Correction requests will appear here.</p>
+                <p className="text-[13px] font-medium text-ink">Nothing pending</p>
+                <p className="mt-1 text-xs text-muted">Correction requests will appear here.</p>
               </div>
             ) : (
               pendingCorrections.map((correction) => (
                 <div
                   key={correction.id}
-                  className="rounded-xl border border-slate-200 px-3 py-2.5"
+                  className="rounded-lg border border-line px-3 py-2.5"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs font-semibold text-slate-800">
+                    <span className="truncate text-xs font-medium text-ink">
                       {correction.employee?.name ?? "Employee"}
                     </span>
                     <CorrectionStatusBadge status={correction.status} />
                   </div>
-                  <p className="mt-0.5 text-[11px] text-slate-500">{correction.workDate}</p>
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-slate-500">
+                  <p className="mt-0.5 text-[11px] text-muted">{correction.workDate}</p>
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-muted">
                     {correction.reason}
                   </p>
                 </div>
@@ -627,13 +627,13 @@ export function TeamDashboard() {
           title="Today's sessions"
           description={`${today} · ${timezone}`}
           actions={
-            <Link href="/admin/reports" className="text-xs font-semibold text-indigo-600">
+            <Link href="/admin/reports" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
               Full report
             </Link>
           }
         />
         {todaySessions.error ? (
-          <div className="p-5">
+          <div className="p-4">
             <ErrorState message={todaySessions.error} onRetry={todaySessions.reload} />
           </div>
         ) : sessions.length === 0 && !todaySessions.loading ? (
@@ -655,15 +655,15 @@ export function TeamDashboard() {
             </thead>
             <tbody>
               {sessions.map((session) => (
-                <tr key={session.id} className="hover:bg-slate-50/60">
-                  <Td className="font-medium text-slate-900">
+                <tr key={session.id} className="hover:bg-surface-muted">
+                  <Td className="font-medium text-ink">
                     {session.employee?.name ?? "Employee"}
                   </Td>
-                  <Td className="text-xs text-slate-600">
+                  <Td className="text-xs text-ink-secondary">
                     {formatTimeRange(session.startedAt, session.endedAt, timezone)}
                   </Td>
-                  <Td className="font-medium">{formatDuration(session.workingSeconds)}</Td>
-                  <Td>{formatDuration(session.breakSeconds)}</Td>
+                  <Td className="font-medium tnum">{formatDuration(session.workingSeconds)}</Td>
+                  <Td className="tnum">{formatDuration(session.breakSeconds)}</Td>
                   <Td>
                     <StatusBadge status={session.status} />
                   </Td>
@@ -691,7 +691,7 @@ export function DashboardLoading() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {[0, 1, 2, 3].map((item) => (
-        <div key={item} className="h-32 animate-pulse rounded-2xl bg-white" />
+        <div key={item} className="h-28 animate-pulse rounded-xl border border-line bg-surface" />
       ))}
     </div>
   );

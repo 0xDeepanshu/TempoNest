@@ -62,9 +62,14 @@ export const {
   ScreenshotRequest,
   Screenshot,
   AuditEvent,
+  ScreenLiveSession,
+  ScreenLiveViewer,
+  PlatformAuditEvent,
   AttendanceCorrectionRequest,
   AttendanceEvidence,
   AttendanceCheckIn,
+  AttendanceLocationSample,
+  AttendanceLocationTracking,
 } = models;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

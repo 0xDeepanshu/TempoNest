@@ -29,6 +29,7 @@ import {
   storeScreenshotUpload,
 } from './screenshot.service';
 import { idempotencyKeySchema } from './screenshot.schemas';
+import { terminateActiveScreenLiveSessionsForOrganization } from './screenLive.service';
 import type {
   OrganizationScreenshotRequestListQuery,
   ScreenshotAuditQuery,
@@ -222,6 +223,14 @@ export const updatePolicy = asyncHandler(async (req: Request, res: Response) => 
     input: req.body as ScreenshotPolicyUpdate,
     context: auditContext(req),
   });
+  if (!policy.enabled) {
+    // Disabling monitoring must stop capture that is already running, not only
+    // reject new starts.
+    await terminateActiveScreenLiveSessionsForOrganization(
+      policy.organizationId,
+      'POLICY_DISABLED',
+    );
+  }
   res.status(200).json({
     data: { policy: await getScreenshotPolicyView(policy.organizationId) },
     serverTime: now(),

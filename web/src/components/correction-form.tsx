@@ -320,7 +320,7 @@ export function CorrectionForm({
         title="Request an attendance correction"
         description="Corrections are reviewed before they change attendance. The backend validates overlap, future timestamps, and break intervals."
       />
-      <form onSubmit={submit} className="space-y-5 p-5">
+      <form onSubmit={submit} className="space-y-5 p-4">
         {submitError ? <Alert tone="danger">{submitError}</Alert> : null}
         {success ? <Alert tone="success">{success}</Alert> : null}
 
@@ -344,7 +344,7 @@ export function CorrectionForm({
         </Field>
 
         {sessions.loading ? (
-          <div className="flex items-center gap-2 text-xs text-slate-500">
+          <div className="flex items-center gap-2 text-xs text-muted">
             <Spinner className="h-4 w-4" /> Loading recent stopped sessions…
           </div>
         ) : null}
@@ -378,29 +378,29 @@ export function CorrectionForm({
           </Field>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          Affected work date: <strong>{workDate}</strong>{" "}
-          <span className="text-slate-400">({timezone})</span>
+        <div className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-ink-secondary">
+          Affected work date: <strong className="tnum">{workDate}</strong>{" "}
+          <span className="text-muted">({timezone})</span>
           {target !== "new" ? (
-            <span className="block text-[11px] text-slate-500">
+            <span className="block text-[11px] text-muted">
               For an existing session this is the original session&apos;s organization-local date.
             </span>
           ) : null}
         </div>
 
         {selectedSession ? (
-          <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-xs text-indigo-900">
+          <div className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs text-ink-secondary">
             Original: {formatDateTime(selectedSession.startedAt, timezone)} –{" "}
             {formatDateTime(selectedSession.endedAt, timezone)} ·{" "}
-            {formatDuration(selectedSession.durationSeconds)}
+            <span className="tnum">{formatDuration(selectedSession.durationSeconds)}</span>
           </div>
         ) : null}
 
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold text-slate-700">Breaks</p>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-xs font-semibold text-ink">Breaks</p>
+              <p className="text-[11px] text-muted">
                 Use full replacement breaks. Leave empty if there were none.
               </p>
             </div>
@@ -410,7 +410,7 @@ export function CorrectionForm({
             </Button>
           </div>
           {breaks.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-400">
+            <p className="rounded-lg border border-dashed border-line-strong px-3 py-3 text-center text-xs text-muted">
               No breaks in this correction.
             </p>
           ) : (

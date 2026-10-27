@@ -49,6 +49,18 @@ export class AgentHub {
     }
   }
 
+  /** Close every live socket belonging to an organization, e.g. on suspension. */
+  closeOrganization(organizationId: string, code: number, reason: string): void {
+    for (const [ws, connection] of this.metadata) {
+      if (connection.organizationId !== organizationId) continue;
+      try {
+        ws.close(code, reason.slice(0, 120));
+      } catch {
+        // A socket may already be closing; removal happens in the close handler.
+      }
+    }
+  }
+
   publishToAgent(agentId: string, payload: Record<string, unknown>): number {
     const set = this.connections.get(agentId);
     if (!set) return 0;

@@ -141,6 +141,7 @@ export const me = asyncHandler(async (req: Request, res: Response) => {
     data: {
       user,
       memberships,
+      platformRole: req.auth.user.platformRole ?? null,
       session: {
         id: req.auth.session.id,
         transport: req.auth.transport,

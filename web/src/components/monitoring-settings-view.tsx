@@ -72,8 +72,8 @@ function RoleChecks({
 }) {
   return (
     <fieldset>
-      <legend className="text-xs font-semibold text-slate-700">{label}</legend>
-      <p className="mt-0.5 text-[11px] leading-5 text-slate-500">{description}</p>
+      <legend className="text-xs font-semibold text-ink">{label}</legend>
+      <p className="mt-0.5 text-[11px] leading-5 text-muted">{description}</p>
       <div className="mt-2 grid grid-cols-2 gap-2">
         {ROLES.map((role) => (
           <label
@@ -81,13 +81,13 @@ function RoleChecks({
             className={cn(
               "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition",
               selected.includes(role)
-                ? "border-indigo-300 bg-indigo-50 text-indigo-800"
-                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                ? "border-ink bg-surface-hover text-ink"
+                : "border-line bg-surface text-ink-secondary hover:bg-surface-muted",
             )}
           >
             <input
               type="checkbox"
-              className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              className="h-3.5 w-3.5 accent-ink"
               checked={selected.includes(role)}
               onChange={() => onChange(toggleRole(selected, role))}
             />
@@ -124,7 +124,7 @@ export function MonitoringSettingsView() {
 
   if (policy.loading && !current) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-5">
         <PageHeader
           eyebrow={organization.name}
           title="Monitoring settings"
@@ -139,7 +139,7 @@ export function MonitoringSettingsView() {
 
   if (policy.error && !current) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-5">
         <PageHeader eyebrow={organization.name} title="Monitoring settings" />
         <ErrorState message={policy.error} onRetry={policy.reload} />
       </div>
@@ -243,20 +243,20 @@ function MonitoringSettingsForm({
     form.viewRoles.length === 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization.name} · ${organization.timezone}`}
         title="Monitoring settings"
         description="Control whether administrators may request an individual employee screenshot. Screenshots are disabled by default and are never captured on a timer or from application usage alone."
         actions={
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset",
-              enabled
-                ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                : "bg-slate-100 text-slate-600 ring-slate-200",
-            )}
-          >
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-ink-secondary">
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                enabled ? "bg-success" : "bg-muted",
+              )}
+              aria-hidden
+            />
             <ShieldIcon className="h-3.5 w-3.5" />
             {enabled ? "Monitoring enabled" : "Monitoring disabled"}
           </span>
@@ -269,34 +269,34 @@ function MonitoringSettingsForm({
           : "No screenshot request can be created while monitoring is disabled. Existing screenshots are retained according to the retention period and remain accessible only to permitted roles."}
       </Alert>
 
-      <form onSubmit={save} className="space-y-6">
+      <form onSubmit={save} className="space-y-5">
         <Card>
           <CardHeader
             title="Policy controls"
             description="Route permissions are necessary but not sufficient: a role must also appear in these lists."
           />
-          <CardBody className="space-y-6">
+          <CardBody className="space-y-5">
             <label
               className={cn(
-                "flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition",
+                "flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition",
                 form.enabled
-                  ? "border-emerald-300 bg-emerald-50/60"
-                  : "border-slate-200 bg-slate-50",
+                  ? "border-ink/30 bg-surface-muted"
+                  : "border-line bg-surface",
               )}
             >
               <input
                 type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                className="mt-0.5 h-4 w-4 accent-ink"
                 checked={form.enabled}
                 onChange={(event) =>
                   setForm({ ...form, enabled: event.target.checked })
                 }
               />
               <span>
-                <span className="block text-sm font-semibold text-slate-900">
+                <span className="block text-sm font-semibold text-ink">
                   Allow administrator-requested screenshots
                 </span>
-                <span className="mt-1 block text-xs leading-5 text-slate-600">
+                <span className="mt-1 block text-xs leading-5 text-muted">
                   When off, request creation, claim, upload, and access are blocked. Turning this on
                   does not create periodic capture or screen streaming.
                 </span>
@@ -379,10 +379,10 @@ function MonitoringSettingsForm({
               </Field>
             </div>
 
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-4">
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-line bg-surface p-4">
               <input
                 type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                className="mt-0.5 h-4 w-4 accent-ink"
                 checked={form.employeeAcknowledgementRequired}
                 onChange={(event) =>
                   setForm({
@@ -392,10 +392,10 @@ function MonitoringSettingsForm({
                 }
               />
               <span>
-                <span className="block text-sm font-semibold text-slate-900">
+                <span className="block text-sm font-semibold text-ink">
                   Require employee acknowledgement
                 </span>
-                <span className="mt-1 block text-xs leading-5 text-slate-600">
+                <span className="mt-1 block text-xs leading-5 text-muted">
                   Employees must acknowledge the current disclosure version in the web portal before
                   an administrator can request their screenshot.
                 </span>
@@ -435,11 +435,11 @@ function MonitoringSettingsForm({
                 }
               />
             </Field>
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+            <div className="rounded-lg border border-line bg-surface-muted p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
                 Employee preview · v{form.disclosureVersion || "—"}
               </p>
-              <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-indigo-950">
+              <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-ink-secondary">
                 {form.disclosureText || "No disclosure text has been entered."}
               </p>
             </div>
@@ -455,7 +455,7 @@ function MonitoringSettingsForm({
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-muted">
             {policy.updatedAt
               ? `Policy last updated ${new Date(policy.updatedAt).toLocaleString()}.`
               : "This organization uses the default policy."}

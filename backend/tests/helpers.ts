@@ -14,7 +14,7 @@ export async function resetDatabase(): Promise<void> {
     // clear data between tests.
     await sequelize.sync();
     await sequelize.query(
-      'TRUNCATE TABLE attendance_check_ins, attendance_evidence, attendance_correction_requests, audit_events, screenshots, screenshot_requests, screenshot_policy_acknowledgements, screenshot_policies, agent_sync_events, application_activities, breaks, time_sessions, desktop_agents, sessions, invitations, memberships, users, organizations RESTART IDENTITY CASCADE',
+      'TRUNCATE TABLE platform_audit_events, attendance_location_samples, attendance_location_tracking, attendance_check_ins, attendance_evidence, attendance_correction_requests, screen_live_viewers, screen_live_sessions, audit_events, screenshots, screenshot_requests, screenshot_policy_acknowledgements, screenshot_policies, agent_sync_events, application_activities, breaks, time_sessions, desktop_agents, sessions, invitations, memberships, users, organizations RESTART IDENTITY CASCADE',
     );
     await clearLocalScreenshotStorage();
     return;

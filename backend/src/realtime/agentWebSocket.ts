@@ -16,6 +16,10 @@ import {
   failScreenshotRequest,
   getPendingScreenshotRequestsForAgent,
 } from '../modules/screenshots/screenshot.service';
+import {
+  failScreenLiveSession,
+  getPendingScreenLiveSessionForAgent,
+} from '../modules/screenshots/screenLive.service';
 import type { DesktopAgent as DesktopAgentModel } from '../modules/desktopAgents/desktopAgent.model';
 import type { Membership as MembershipModel } from '../modules/memberships/membership.model';
 import type { Organization as OrganizationModel } from '../modules/organizations/organization.model';
@@ -23,7 +27,7 @@ import type { Session as SessionModel } from '../modules/auth/session.model';
 import type { User as UserModel } from '../modules/users/user.model';
 import type { TimeSession as TimeSessionModel } from '../modules/timeTracking/timeSession.model';
 
-type ConnectionContext = {
+export type AgentConnectionContext = {
   user: UserModel;
   session: SessionModel;
   membership: MembershipModel;
@@ -31,6 +35,8 @@ type ConnectionContext = {
   agent: DesktopAgentModel;
   isAlive: boolean;
 };
+
+type ConnectionContext = AgentConnectionContext;
 
 const WS_PATH = `${config.apiPrefix}/ws/agent`;
 
@@ -41,6 +47,10 @@ const SCREENSHOT_MESSAGE_TYPES = new Set([
   'screenshot.fail',
 ]);
 
+// Continuous media never travels over this JSON channel. The agent only uses
+// it to report that local capture could not start or continue.
+const SCREEN_LIVE_MESSAGE_TYPES = new Set(['screen.live.failed']);
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -48,16 +58,32 @@ type AgentMessage = {
   type?: unknown;
   sessionId?: unknown;
   requestId?: unknown;
+  liveSessionId?: unknown;
   contentType?: unknown;
   captureTimestamp?: unknown;
   code?: unknown;
   message?: unknown;
 };
 
-function rejectUpgrade(socket: Duplex, status: number, code: string, message: string): void {
+const UPGRADE_STATUS_TEXT: Record<number, string> = {
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  403: 'Forbidden',
+  404: 'Not Found',
+  409: 'Conflict',
+  410: 'Gone',
+  429: 'Too Many Requests',
+};
+
+export function rejectUpgrade(
+  socket: Duplex,
+  status: number,
+  code: string,
+  message: string,
+): void {
   const body = JSON.stringify({ error: { code, message } });
   socket.write(
-    `HTTP/1.1 ${status} ${status === 401 ? 'Unauthorized' : 'Forbidden'}\r\n` +
+    `HTTP/1.1 ${status} ${UPGRADE_STATUS_TEXT[status] ?? 'Error'}\r\n` +
       'Content-Type: application/json\r\n' +
       `Content-Length: ${Buffer.byteLength(body)}\r\n` +
       'Connection: close\r\n\r\n' +
@@ -71,7 +97,9 @@ function header(value: string | string[] | undefined): string | undefined {
   return value;
 }
 
-async function authenticateUpgrade(req: IncomingMessage): Promise<ConnectionContext> {
+export async function authenticateAgentUpgrade(
+  req: IncomingMessage,
+): Promise<AgentConnectionContext> {
   const origin = header(req.headers.origin);
   if (origin && !isOriginAllowed(origin)) {
     throw Object.assign(new Error('Origin not allowed'), { status: 403, code: 'ORIGIN_NOT_ALLOWED' });
@@ -151,7 +179,7 @@ async function authenticateUpgrade(req: IncomingMessage): Promise<ConnectionCont
   if (!membership.organization) {
     throw Object.assign(new Error('Organization not found'), { status: 403, code: 'ORGANIZATION_NOT_FOUND' });
   }
-  if (membership.organization.status !== 'ACTIVE') {
+  if (membership.organization.deletedAt || membership.organization.status !== 'ACTIVE') {
     throw Object.assign(new Error('Organization is suspended'), {
       status: 403,
       code: 'ORGANIZATION_SUSPENDED',
@@ -286,6 +314,50 @@ async function handleScreenshotMessage(
   }
 }
 
+async function handleScreenLiveMessage(
+  ws: WebSocket,
+  context: ConnectionContext,
+  message: AgentMessage,
+): Promise<void> {
+  const liveSessionId = message.liveSessionId;
+  if (typeof liveSessionId !== 'string' || !UUID_PATTERN.test(liveSessionId)) {
+    send(ws, {
+      type: 'screen.live.error',
+      code: 'INVALID_LIVE_SESSION_ID',
+      message: 'A valid liveSessionId is required',
+    });
+    return;
+  }
+
+  try {
+    const result = await failScreenLiveSession({
+      organizationId: context.organization.id,
+      sessionId: liveSessionId,
+      employeeId: context.user.id,
+      agentId: context.agent.id,
+      code: typeof message.code === 'string' ? message.code : '',
+      message: typeof message.message === 'string' ? message.message : undefined,
+    });
+    send(ws, {
+      type: 'screen.live.failed',
+      liveSessionId,
+      session: result,
+      serverTime: new Date().toISOString(),
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      send(ws, {
+        type: 'screen.live.error',
+        liveSessionId,
+        code: error.code,
+        message: error.message,
+      });
+      return;
+    }
+    throw error;
+  }
+}
+
 function setupConnection(ws: WebSocket, context: ConnectionContext): void {
   const now = new Date();
   agentHub.add({
@@ -306,8 +378,12 @@ function setupConnection(ws: WebSocket, context: ConnectionContext): void {
       logger.warn({ err: error }, 'failed to load pending screenshot requests');
       return [];
     }),
+    getPendingScreenLiveSessionForAgent(context.organization.id, context.agent).catch((error) => {
+      logger.warn({ err: error }, 'failed to load pending live screen session');
+      return null;
+    }),
   ])
-    .then(([session, pendingScreenshotRequests]) => {
+    .then(([session, pendingScreenshotRequests, pendingScreenLiveSession]) => {
       send(ws, {
         type: 'connected',
         serverTime: now.toISOString(),
@@ -321,6 +397,7 @@ function setupConnection(ws: WebSocket, context: ConnectionContext): void {
         state: stateFor(session, now),
         session: session ? toTimeSessionSummary(session, now) : null,
         pendingScreenshotRequests,
+        pendingScreenLiveSession,
         heartbeatIntervalSeconds: Math.max(15, Math.floor(config.timeTracking.heartbeatStaleSeconds / 2)),
         heartbeatStaleAfterSeconds: config.timeTracking.heartbeatStaleSeconds,
       });
@@ -364,7 +441,8 @@ function setupConnection(ws: WebSocket, context: ConnectionContext): void {
       if (
         message.type !== 'heartbeat' &&
         message.type !== 'session.status' &&
-        !SCREENSHOT_MESSAGE_TYPES.has(message.type)
+        !SCREENSHOT_MESSAGE_TYPES.has(message.type) &&
+        !SCREEN_LIVE_MESSAGE_TYPES.has(message.type)
       ) {
         send(ws, {
           type: 'error',
@@ -405,7 +483,7 @@ function setupConnection(ws: WebSocket, context: ConnectionContext): void {
         ws.close(4003, 'MEMBERSHIP_INACTIVE');
         return;
       }
-      if (!organization || organization.status !== 'ACTIVE') {
+      if (!organization || organization.deletedAt || organization.status !== 'ACTIVE') {
         ws.close(4003, 'ORGANIZATION_SUSPENDED');
         return;
       }
@@ -417,6 +495,11 @@ function setupConnection(ws: WebSocket, context: ConnectionContext): void {
 
       if (SCREENSHOT_MESSAGE_TYPES.has(message.type)) {
         await handleScreenshotMessage(ws, context, message);
+        return;
+      }
+
+      if (SCREEN_LIVE_MESSAGE_TYPES.has(message.type)) {
+        await handleScreenLiveMessage(ws, context, message);
         return;
       }
 
@@ -503,12 +586,13 @@ export function attachAgentWebSocketServer(server: HttpServer): WebSocketServer 
       return;
     }
 
+    // Other realtime endpoints have their own upgrade listeners. Ignore
+    // unmatched paths instead of destroying the socket.
     if (pathname !== WS_PATH) {
-      socket.destroy();
       return;
     }
 
-    void authenticateUpgrade(req)
+    void authenticateAgentUpgrade(req)
       .then((context) => {
         wss.handleUpgrade(req, socket, head, (ws) => {
           contexts.set(ws, context);

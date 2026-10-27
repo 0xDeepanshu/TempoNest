@@ -96,7 +96,7 @@ export function InvitationAcceptView() {
     invitation && invitation.email.toLowerCase() !== user.email.toLowerCase();
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 py-6">
+    <div className="mx-auto max-w-2xl space-y-5 py-6">
       <PageHeader
         eyebrow="Organization invitation"
         title="Join your team on TempoNest"
@@ -107,7 +107,7 @@ export function InvitationAcceptView() {
         <CardHeader
           title="Invitation details"
           actions={
-            <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span className="flex items-center gap-1.5 text-[11px] text-muted">
               <BuildingIcon className="h-3.5 w-3.5" />
               Signed in as {user.email}
             </span>
@@ -117,23 +117,23 @@ export function InvitationAcceptView() {
           {preview.error ? (
             <ErrorState message={preview.error} onRetry={preview.reload} />
           ) : preview.loading || !invitation ? (
-            <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
+            <div className="flex items-center gap-2 py-6 text-sm text-muted">
               <Spinner className="h-5 w-5" />
               Checking invitation…
             </div>
           ) : (
             <>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-lg font-bold text-slate-900">
+              <div className="rounded-lg border border-line bg-surface-muted p-4">
+                <p className="text-lg font-semibold tracking-tight text-ink">
                   {invitation.organization.name}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-500">
+                <p className="mt-0.5 text-xs text-muted">
                   {invitation.organization.slug} · expires{" "}
                   {formatDateTime(invitation.expiresAt, invitation.organization.timezone)}
                 </p>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
                   <span>Invited email:</span>
-                  <span className="font-semibold text-slate-800">{invitation.email}</span>
+                  <span className="font-medium text-ink">{invitation.email}</span>
                   <RoleBadge role={invitation.role} />
                 </div>
               </div>
@@ -161,7 +161,7 @@ export function InvitationAcceptView() {
                   </Button>
                 </Link>
               </div>
-              <p className="text-[11px] leading-5 text-slate-500">
+              <p className="text-[11px] leading-5 text-muted">
                 The backend verifies that the invitation email matches your signed-in
                 account. If you were previously removed from this organization, accepting
                 reactivates the existing membership.

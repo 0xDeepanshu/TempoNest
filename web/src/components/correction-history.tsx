@@ -33,75 +33,75 @@ function CorrectionCard({
 }) {
   const original = correction.original;
   return (
-    <article className="rounded-xl border border-slate-200 p-4">
+    <article className="rounded-xl border border-line p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold text-slate-900">{correction.workDate}</p>
+            <p className="text-[13px] font-semibold text-ink">{correction.workDate}</p>
             <CorrectionStatusBadge status={correction.status} />
             {correction.requestType === "CREATE_SESSION" ? (
-              <span className="text-[11px] font-medium text-slate-400">Missing session</span>
+              <span className="text-[11px] font-medium text-muted">Missing session</span>
             ) : null}
           </div>
           {showEmployee && correction.employee ? (
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-xs text-muted">
               {correction.employee.name} · {correction.employee.email}
             </p>
           ) : null}
         </div>
-        <p className="text-[11px] text-slate-400">
+        <p className="text-[11px] text-muted">
           Submitted {formatDateTime(correction.createdAt, timezone)}
         </p>
       </div>
 
       <div className="mt-3 grid gap-3 text-xs sm:grid-cols-3">
         <div>
-          <p className="text-slate-400">Requested interval</p>
-          <p className="mt-0.5 font-medium text-slate-700">
+          <p className="text-muted">Requested interval</p>
+          <p className="mt-0.5 font-medium tnum text-ink-secondary">
             {formatTimeRange(correction.requestedStartedAt, correction.requestedEndedAt, timezone)}
           </p>
         </div>
         <div>
-          <p className="text-slate-400">Breaks</p>
-          <p className="mt-0.5 font-medium text-slate-700">
+          <p className="text-muted">Breaks</p>
+          <p className="mt-0.5 font-medium tnum text-ink-secondary">
             {correction.requestedBreaks.length} · {formatDuration(correction.requestedBreakSeconds)}
           </p>
         </div>
         <div>
-          <p className="text-slate-400">Correction ID</p>
-          <p className="mt-0.5 truncate font-mono text-[10px] text-slate-500">{correction.id}</p>
+          <p className="text-muted">Correction ID</p>
+          <p className="mt-0.5 truncate font-mono text-[10px] text-muted">{correction.id}</p>
         </div>
       </div>
 
-      <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-        <span className="font-semibold text-slate-700">Reason: </span>
+      <p className="mt-3 rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs leading-5 text-ink-secondary">
+        <span className="font-medium text-ink">Reason: </span>
         {correction.reason}
       </p>
 
       {correction.reviewedAt || correction.rejectionReason || correction.reviewerNote ? (
-        <div className="mt-3 rounded-lg border border-slate-200 px-3 py-2 text-xs leading-5">
-          <p className="font-semibold text-slate-700">
+        <div className="mt-3 rounded-lg border border-line px-3 py-2 text-xs leading-5">
+          <p className="font-medium text-ink">
             Review · {formatDateTime(correction.reviewedAt, timezone)}
             {correction.reviewer ? ` by ${correction.reviewer.name}` : ""}
           </p>
           {correction.rejectionReason ? (
-            <p className="mt-1 text-rose-700">Rejection reason: {correction.rejectionReason}</p>
+            <p className="mt-1 text-danger">Rejection reason: {correction.rejectionReason}</p>
           ) : null}
           {correction.reviewerNote ? (
-            <p className="mt-1 text-slate-600">Note: {correction.reviewerNote}</p>
+            <p className="mt-1 text-ink-secondary">Note: {correction.reviewerNote}</p>
           ) : null}
         </div>
       ) : null}
 
       {original || correction.requestedBreaks.length > 0 ? (
         <details className="mt-3 text-xs">
-          <summary className="cursor-pointer font-semibold text-indigo-600">
+          <summary className="cursor-pointer font-medium text-ink underline decoration-line-strong underline-offset-4">
             Snapshot and break detail
           </summary>
-          <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-3 text-slate-600">
+          <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface-muted p-3 text-ink-secondary">
             {original ? (
               <p>
-                <span className="font-medium text-slate-700">Original: </span>
+                <span className="font-medium text-ink">Original: </span>
                 {formatTimeRange(original.startedAt, original.endedAt, timezone)} ·{" "}
                 {original.breaks.length} break{original.breaks.length === 1 ? "" : "s"}
               </p>
@@ -178,7 +178,7 @@ export function CorrectionHistory({
         }
       />
       {history.error ? (
-        <div className="p-5">
+        <div className="p-4">
           <ErrorState message={history.error} onRetry={history.reload} />
         </div>
       ) : corrections.length === 0 && !history.loading ? (
@@ -188,7 +188,7 @@ export function CorrectionHistory({
           icon={<EditIcon className="h-5 w-5" />}
         />
       ) : (
-        <div className="space-y-3 p-5">
+        <div className="space-y-3 p-4">
           {corrections.map((correction) => (
             <CorrectionCard
               key={correction.id}

@@ -56,7 +56,14 @@ export async function createOrganization(
 export async function listOrganizationsForUser(userId: string) {
   const memberships = await Membership.findAll({
     where: { userId, status: { [Op.in]: ['ACTIVE', 'SUSPENDED'] } },
-    include: [{ model: Organization, as: 'organization', required: true }],
+    include: [
+      {
+        model: Organization,
+        as: 'organization',
+        required: true,
+        where: { deletedAt: null },
+      },
+    ],
     order: [
       ['createdAt', 'ASC'],
       ['id', 'ASC'],

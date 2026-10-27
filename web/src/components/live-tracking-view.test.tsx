@@ -1,11 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveTrackingView } from "@/components/live-tracking-view";
 import { WorkspaceProvider } from "@/components/workspace";
 import { apiRequest } from "@/lib/api-client";
+import { ApiError } from "@/lib/api-error";
 import type {
   MemberListItem,
   Organization,
+  Role,
   ScreenshotRequestSummary,
   SessionData,
   TimeSession,
@@ -14,6 +17,21 @@ import type {
 
 vi.mock("@/lib/api-client", () => ({
   apiRequest: vi.fn(),
+}));
+
+vi.mock("@/components/live-screen-viewer", () => ({
+  LiveScreenViewer: (props: {
+    employeeName: string;
+    autoStart?: boolean;
+    onClose: () => void;
+  }) => (
+    <div role="dialog" aria-label="Live screen viewer">
+      <p>{`${props.employeeName} · ${props.autoStart ? "auto" : "manual"}`}</p>
+      <button type="button" onClick={props.onClose}>
+        Close viewer
+      </button>
+    </div>
+  ),
 }));
 
 const mockedApiRequest = vi.mocked(apiRequest);
@@ -29,6 +47,7 @@ const organization: Organization = {
 };
 
 const session: SessionData = {
+  platformRole: null,
   user: {
     id: "admin-1",
     name: "Admin",
@@ -199,13 +218,17 @@ function mockLiveTracking(options: {
   row: TrackingStatusRow;
   enabled: boolean;
   request?: ScreenshotRequestSummary;
+  policyError?: unknown;
 }) {
   mockedApiRequest.mockImplementation(async (path, requestOptions) => {
     if (path.endsWith("/members")) {
       return { data: [member], meta: { page: 1, limit: 100, total: 1, totalPages: 1 } };
     }
     if (path.includes("/reports/tracking-status")) return page([options.row]);
-    if (path === "/admin/screenshot-policy") return policy(options.enabled);
+    if (path === "/admin/screenshot-policy") {
+      if (options.policyError) throw options.policyError;
+      return policy(options.enabled);
+    }
     if (path === "/admin/screenshot-requests") {
       return page(
         requestOptions?.query?.status === "PENDING" && options.request ? [options.request] : [],
@@ -215,9 +238,16 @@ function mockLiveTracking(options: {
   });
 }
 
-function renderView() {
+function sessionForRole(role: Role): SessionData {
+  return {
+    ...session,
+    memberships: [{ ...session.memberships[0], role }],
+  };
+}
+
+function renderView(viewSession: SessionData = session) {
   return render(
-    <WorkspaceProvider session={session}>
+    <WorkspaceProvider session={viewSession}>
       <LiveTrackingView />
     </WorkspaceProvider>,
   );
@@ -277,5 +307,71 @@ describe("LiveTrackingView", () => {
       await screen.findByText("Screen monitoring is disabled by the organization policy."),
     ).toBeInTheDocument();
     expect(screen.getByText("Monitoring policy disabled")).toBeInTheDocument();
+  });
+
+  it("shows View live screen to owners and opens the viewer ready to start", async () => {
+    mockLiveTracking({ row: trackingRow(), enabled: true });
+    renderView();
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole("button", { name: /View live screen/ });
+    await waitFor(() => expect(button).toBeEnabled());
+
+    await user.click(button);
+
+    const dialog = await screen.findByRole("dialog", { name: "Live screen viewer" });
+    expect(within(dialog).getByText("Ada Lovelace · auto")).toBeInTheDocument();
+  });
+
+  it("does not offer live viewing to roles without screenshot:live", async () => {
+    mockLiveTracking({ row: trackingRow(), enabled: true });
+    renderView(sessionForRole("MANAGER"));
+
+    expect(await screen.findByRole("link", { name: "Open review" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /View live screen/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the live action visible but explains when the agent is offline", async () => {
+    mockLiveTracking({ row: trackingRow({ online: false }), enabled: true });
+    renderView();
+
+    const button = await screen.findByRole("button", { name: /View live screen/ });
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(
+      screen.getByText("Live view requires the employee's desktop agent to be online."),
+    ).toBeInTheDocument();
+  });
+
+  it("explains when live viewing is disabled by policy", async () => {
+    mockLiveTracking({ row: trackingRow(), enabled: false });
+    renderView();
+
+    const button = await screen.findByRole("button", { name: /View live screen/ });
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(
+      screen.getByText("Live screen viewing is disabled by the organization policy."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the live action visible and reports a policy load failure", async () => {
+    mockLiveTracking({
+      row: trackingRow(),
+      enabled: true,
+      policyError: new ApiError({
+        status: 500,
+        code: "INTERNAL_ERROR",
+        message: "The monitoring policy is temporarily unavailable.",
+      }),
+    });
+    renderView();
+
+    const button = await screen.findByRole("button", { name: /View live screen/ });
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(await screen.findByText("Live view policy could not be loaded")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The monitoring policy could not be loaded, so live viewing cannot be authorized right now.",
+      ),
+    ).toBeInTheDocument();
   });
 });

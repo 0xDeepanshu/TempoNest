@@ -1,26 +1,25 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { apiRequest } from "@/lib/api-client";
 import {
-  addDays,
   daysBetween,
   formatDateRange,
   formatDateTime,
   formatDay,
   formatDuration,
   formatPercent,
-  todayInTimeZone,
 } from "@/lib/format";
+import { reportRangeFromUrl } from "@/lib/report-range";
 import type {
   ApplicationUsageResponse,
   DailyReport,
-  MemberListItem,
-  Paginated,
   SessionReportResponse,
 } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
-import { CalendarIcon, ChartIcon, ClockIcon } from "./icons";
+import { EmployeePicker } from "./employee-picker";
+import { ArrowRightIcon, CalendarIcon, ChartIcon, ClockIcon } from "./icons";
 import {
   Alert,
   Avatar,
@@ -35,7 +34,6 @@ import {
   Input,
   PageHeader,
   Pagination,
-  Select,
   StatCard,
   StatusBadge,
   TableShell,
@@ -47,33 +45,55 @@ import { NoOrganization, useWorkspace } from "./workspace";
 
 type ReportTab = "sessions" | "daily" | "applications";
 
-export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: string }) {
+const REPORT_TABS: ReportTab[] = ["sessions", "daily", "applications"];
+
+function reportUrl(
+  employeeId: string,
+  range: { from: string; to: string },
+  tab: ReportTab,
+): string {
+  const params = new URLSearchParams();
+  if (employeeId) params.set("employeeId", employeeId);
+  params.set("from", range.from);
+  params.set("to", range.to);
+  if (tab !== "sessions") params.set("tab", tab);
+  return `/admin/reports?${params.toString()}`;
+}
+
+export function ReportsView({
+  initialEmployeeId = "",
+  initialFrom = "",
+  initialTo = "",
+  initialTab = "sessions",
+}: {
+  initialEmployeeId?: string;
+  initialFrom?: string;
+  initialTo?: string;
+  initialTab?: string;
+}) {
   const { organization } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const timezone = organization?.timezone ?? "UTC";
-  const today = todayInTimeZone(timezone);
+  const initialRange = reportRangeFromUrl(initialFrom, initialTo, timezone);
+  const startingTab: ReportTab = REPORT_TABS.includes(initialTab as ReportTab)
+    ? (initialTab as ReportTab)
+    : "sessions";
 
   const [employeeId, setEmployeeId] = useState(initialEmployeeId);
-  const [draftFrom, setDraftFrom] = useState(addDays(today, -6));
-  const [draftTo, setDraftTo] = useState(today);
-  const [range, setRange] = useState({ from: addDays(today, -6), to: today });
-  const [tab, setTab] = useState<ReportTab>("sessions");
+  const [draftFrom, setDraftFrom] = useState(initialRange.from);
+  const [draftTo, setDraftTo] = useState(initialRange.to);
+  const [range, setRange] = useState(initialRange);
+  const [tab, setTab] = useState<ReportTab>(startingTab);
   const [page, setPage] = useState(1);
   const [rangeError, setRangeError] = useState<string | null>(null);
 
-  const members = useApi<Paginated<MemberListItem>>(
-    (signal) =>
-      apiRequest(`/organizations/${organizationId}/members`, {
-        signal,
-        query: { limit: 100, status: "ACTIVE" },
-      }),
-    [organizationId],
-    { enabled: Boolean(organizationId) },
-  );
-
-  const selectedMember = (members.data?.data ?? []).find(
-    (member) => member.userId === employeeId,
-  );
+  function rememberUrl(nextEmployeeId: string, nextRange: typeof range, nextTab: ReportTab) {
+    window.history.replaceState(
+      null,
+      "",
+      reportUrl(nextEmployeeId, nextRange, nextTab),
+    );
+  }
 
   const days = daysBetween(range.from, range.to);
   const tabTooLong =
@@ -127,8 +147,22 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
       setRangeError("Report ranges cannot exceed 366 days.");
       return;
     }
-    setRange({ from: draftFrom, to: draftTo });
+    const nextRange = { from: draftFrom, to: draftTo };
+    setRange(nextRange);
     setPage(1);
+    rememberUrl(employeeId, nextRange, tab);
+  }
+
+  function selectEmployee(nextEmployeeId: string) {
+    setEmployeeId(nextEmployeeId);
+    setPage(1);
+    rememberUrl(nextEmployeeId, range, tab);
+  }
+
+  function selectTab(nextTab: ReportTab) {
+    setTab(nextTab);
+    setPage(1);
+    rememberUrl(employeeId, range, nextTab);
   }
 
   const sessionRows = sessions.data?.data ?? [];
@@ -147,32 +181,40 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization.name} · ${timezone}`}
         title="Reports"
-        description="Server-calculated sessions, daily totals, and foreground application metadata. Report dates are organization-local."
+        description="Date-filtered, per-employee analysis of sessions, working time, breaks, and foreground application metadata. Use People for the directory and profile context."
+        actions={
+          employeeId ? (
+            <Link href={`/admin/employees/${employeeId}?from=${range.from}&to=${range.to}`}>
+              <Button variant="secondary">
+                Open employee profile
+                <ArrowRightIcon className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
+          ) : undefined
+        }
       />
 
       <Card>
-        <form onSubmit={applyRange} className="grid gap-3 p-5 lg:grid-cols-[1.4fr_1fr_1fr_auto] lg:items-end">
+        <CardHeader
+          title="Report filters"
+          description="Search the directory for one employee, then choose an organization-local date range."
+        />
+        <form
+          onSubmit={applyRange}
+          className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end"
+        >
           <Field label="Employee" htmlFor="report-employee">
-            <Select
+            <EmployeePicker
               id="report-employee"
+              organizationId={organizationId}
               value={employeeId}
-              onChange={(event) => {
-                setEmployeeId(event.target.value);
-                setPage(1);
-              }}
-              disabled={members.loading}
-            >
-              <option value="">Select an employee</option>
-              {(members.data?.data ?? []).map((member) => (
-                <option key={member.userId} value={member.userId}>
-                  {member.user.name} · {member.role.toLowerCase()}
-                </option>
-              ))}
-            </Select>
+              onChange={selectEmployee}
+              disabled={!organizationId}
+            />
           </Field>
           <Field label="From" htmlFor="report-from">
             <Input
@@ -195,13 +237,8 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
           <Button type="submit">Apply</Button>
         </form>
         {rangeError ? (
-          <div className="px-5 pb-4">
+          <div className="px-4 pb-4">
             <Alert tone="danger">{rangeError}</Alert>
-          </div>
-        ) : null}
-        {members.error ? (
-          <div className="px-5 pb-4">
-            <ErrorState message={members.error} onRetry={members.reload} />
           </div>
         ) : null}
       </Card>
@@ -209,19 +246,16 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
           value={tab}
-          onChange={(value) => {
-            setTab(value);
-            setPage(1);
-          }}
+          onChange={selectTab}
           tabs={[
             { value: "sessions", label: "Sessions" },
             { value: "daily", label: "Daily totals" },
             { value: "applications", label: "Applications" },
           ]}
         />
-        <p className="flex items-center gap-1.5 text-xs text-slate-500">
+        <p className="flex items-center gap-1.5 text-xs text-muted">
           <CalendarIcon className="h-3.5 w-3.5" />
-          {formatDateRange(range.from, range.to)} · {days} days · {selectedMember?.user.name ?? "—"}
+          {formatDateRange(range.from, range.to)} · {days} days · {timezone}
         </p>
       </div>
 
@@ -237,7 +271,7 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
         <Card>
           <EmptyState
             title="Select an employee"
-            description="Reports require an explicit employee because daily and application reports are per person."
+            description="Reports are per person. Search the directory above to choose an employee and see their date-range analysis."
             icon={<ChartIcon className="h-5 w-5" />}
           />
         </Card>
@@ -269,7 +303,7 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
           <Card>
             <CardHeader title="Session report" description="Sessions overlapping the range with working time net of breaks." />
             {sessions.error ? (
-              <div className="p-5">
+              <div className="p-4">
                 <ErrorState message={sessions.error} onRetry={sessions.reload} />
               </div>
             ) : sessionRows.length === 0 && !sessions.loading ? (
@@ -293,18 +327,18 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
                   </thead>
                   <tbody>
                     {sessionRows.map((session) => (
-                      <tr key={session.id} className="hover:bg-slate-50/60">
-                        <Td className="font-medium text-slate-900">
-                          {session.employee?.name ?? selectedMember?.user.name ?? "Employee"}
+                      <tr key={session.id} className="hover:bg-surface-muted">
+                        <Td className="font-medium text-ink">
+                          {session.employee?.name ?? "Employee"}
                         </Td>
-                        <Td className="text-xs text-slate-600">
+                        <Td className="text-xs text-ink-secondary">
                           {formatDateTime(session.startedAt, timezone)} –{" "}
                           {session.endedAt ? formatDateTime(session.endedAt, timezone) : "open"}
                         </Td>
-                        <Td className="font-medium">{formatDuration(session.workingSeconds)}</Td>
-                        <Td>{formatDuration(session.breakSeconds)}</Td>
+                        <Td className="font-medium tnum">{formatDuration(session.workingSeconds)}</Td>
+                        <Td className="tnum">{formatDuration(session.breakSeconds)}</Td>
                         <Td>
-                          <Badge tone={session.source === "ONLINE" ? "indigo" : "neutral"}>
+                          <Badge tone={session.source === "ONLINE" ? "outline" : "neutral"}>
                             {session.source === "ONLINE" ? "Online" : "Offline"}
                           </Badge>
                         </Td>
@@ -337,7 +371,7 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
           <Card>
             <CardHeader title="Daily report" description="One row per organization-local calendar day, including zero-activity days." />
             {daily.error ? (
-              <div className="p-5">
+              <div className="p-4">
                 <ErrorState message={daily.error} onRetry={daily.reload} />
               </div>
             ) : (
@@ -354,15 +388,15 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
                 </thead>
                 <tbody>
                   {dailyRows.map((row) => (
-                    <tr key={row.date} className="hover:bg-slate-50/60">
-                      <Td className="font-medium text-slate-900">{formatDay(row.date, { weekday: "short" })}</Td>
-                      <Td>{formatDuration(row.workedSeconds)}</Td>
-                      <Td>{formatDuration(row.breakSeconds)}</Td>
-                      <Td>{row.sessionCount}</Td>
-                      <Td className="text-xs text-slate-500">
+                    <tr key={row.date} className="hover:bg-surface-muted">
+                      <Td className="font-medium text-ink">{formatDay(row.date, { weekday: "short" })}</Td>
+                      <Td className="tnum">{formatDuration(row.workedSeconds)}</Td>
+                      <Td className="tnum">{formatDuration(row.breakSeconds)}</Td>
+                      <Td className="tnum">{row.sessionCount}</Td>
+                      <Td className="text-xs text-muted">
                         {formatDateTime(row.firstStartedAt, timezone)}
                       </Td>
-                      <Td className="text-xs text-slate-500">
+                      <Td className="text-xs text-muted">
                         {formatDateTime(row.lastEndedAt, timezone)}
                       </Td>
                     </tr>
@@ -380,22 +414,22 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
             title="Application usage"
             description={applications.data?.disclaimer ?? "Foreground application metadata only."}
           />
-          <CardBody className="grid gap-4 border-b border-slate-100 sm:grid-cols-2">
+          <CardBody className="grid gap-4 border-b border-line sm:grid-cols-2">
             <div>
-              <p className="text-xs text-slate-400">Tracked working time</p>
-              <p className="mt-1 text-lg font-bold text-slate-900">
+              <p className="text-xs text-muted">Tracked working time</p>
+              <p className="mt-1 text-lg font-semibold tnum text-ink">
                 {formatDuration(applications.data?.trackedWorkingSeconds)}
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400">Application time</p>
-              <p className="mt-1 text-lg font-bold text-slate-900">
+              <p className="text-xs text-muted">Application time</p>
+              <p className="mt-1 text-lg font-semibold tnum text-ink">
                 {formatDuration(applications.data?.totalApplicationSeconds)}
               </p>
             </div>
           </CardBody>
           {applications.error ? (
-            <div className="p-5">
+            <div className="p-4">
               <ErrorState message={applications.error} onRetry={applications.reload} />
             </div>
           ) : appRows.length === 0 && !applications.loading ? (
@@ -418,34 +452,34 @@ export function ReportsView({ initialEmployeeId = "" }: { initialEmployeeId?: st
                 </thead>
                 <tbody>
                   {appRows.map((row) => (
-                    <tr key={`${row.applicationIdentifier}-${row.applicationName}`} className="hover:bg-slate-50/60">
+                    <tr key={`${row.applicationIdentifier}-${row.applicationName}`} className="hover:bg-surface-muted">
                       <Td>
                         <div className="flex items-center gap-2.5">
                           <Avatar name={row.applicationName} size="sm" />
                           <div>
-                            <p className="font-medium text-slate-900">{row.applicationName}</p>
-                            <p className="font-mono text-[10px] text-slate-400">
+                            <p className="font-medium text-ink">{row.applicationName}</p>
+                            <p className="font-mono text-[10px] text-muted">
                               {row.applicationIdentifier}
                             </p>
                           </div>
                         </div>
                       </Td>
-                      <Td className="font-medium">{formatDuration(row.totalSeconds)}</Td>
+                      <Td className="font-medium tnum">{formatDuration(row.totalSeconds)}</Td>
                       <Td>
                         <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
+                          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-surface-hover">
                             <div
-                              className="h-full rounded-full bg-indigo-500"
+                              className="h-full rounded-full bg-ink"
                               style={{ width: `${Math.min(100, row.percentageOfTrackedTime)}%` }}
                             />
                           </div>
-                          <span className="text-xs text-slate-500">
+                          <span className="text-xs tnum text-muted">
                             {formatPercent(row.percentageOfTrackedTime)}
                           </span>
                         </div>
                       </Td>
-                      <Td>{row.eventCount}</Td>
-                      <Td>{row.sessionCount}</Td>
+                      <Td className="tnum">{row.eventCount}</Td>
+                      <Td className="tnum">{row.sessionCount}</Td>
                     </tr>
                   ))}
                 </tbody>

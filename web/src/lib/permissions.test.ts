@@ -32,6 +32,16 @@ describe("role permissions", () => {
     expect(isAdminAreaRole("MANAGER")).toBe(true);
   });
 
+  it("limits location history access to owners and admins", () => {
+    expect(hasPermission("OWNER", "attendance:location:read")).toBe(true);
+    expect(hasPermission("ADMIN", "attendance:location:read")).toBe(true);
+    expect(hasPermission("MANAGER", "attendance:location:read")).toBe(false);
+    expect(hasPermission("EMPLOYEE", "attendance:location:read")).toBe(false);
+    expect(hasPermission(undefined, "attendance:location:read")).toBe(false);
+    // Managers keep report access without inheriting precise-location access.
+    expect(hasPermission("MANAGER", "report:read")).toBe(true);
+  });
+
   it("handles unknown roles and any-of checks", () => {
     expect(hasPermission(undefined, "time:read")).toBe(false);
     expect(hasAnyPermission("EMPLOYEE", ["member:read", "time:read"])).toBe(true);

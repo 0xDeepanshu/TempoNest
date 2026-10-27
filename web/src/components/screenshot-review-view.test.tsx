@@ -32,6 +32,7 @@ const organization: Organization = {
 };
 
 const session: SessionData = {
+  platformRole: null,
   user: {
     id: "admin-1",
     name: "Admin",
@@ -217,10 +218,10 @@ function policy(enabled = true) {
   };
 }
 
-function renderView() {
+function renderView(initialEmployeeId = "employee-1") {
   return render(
     <WorkspaceProvider session={session}>
-      <ScreenshotReviewView initialEmployeeId="employee-1" />
+      <ScreenshotReviewView initialEmployeeId={initialEmployeeId} />
     </WorkspaceProvider>,
   );
 }
@@ -300,7 +301,7 @@ describe("ScreenshotReviewView", () => {
           data: {
             screenshot: shot,
             url: "https://private.example.test/short-lived",
-            expiresAt: "2026-10-24T12:05:00.000Z",
+            expiresAt: "2099-01-01T00:00:00.000Z",
           },
           serverTime: "2026-10-24T12:00:00.000Z",
         };
@@ -310,8 +311,9 @@ describe("ScreenshotReviewView", () => {
 
     renderView();
 
-    await user.click(await screen.findByRole("button", { name: "Open private preview" }));
+    await user.click(await screen.findByRole("button", { name: /Open screenshot captured/ }));
 
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(await screen.findByRole("img", { name: /Screenshot captured/ })).toHaveAttribute(
       "src",
       "https://private.example.test/short-lived",
@@ -344,6 +346,7 @@ describe("ScreenshotReviewView", () => {
 
     renderView();
 
+    await user.click(await screen.findByRole("button", { name: /^Requests/ }));
     await user.click(await screen.findByRole("button", { name: "Cancel request" }));
 
     await waitFor(() => {
@@ -352,5 +355,85 @@ describe("ScreenshotReviewView", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
+  });
+
+  it("loads an organization-wide library without an employee filter", async () => {
+    mockedApiRequest.mockImplementation(async (path) => {
+      if (path.endsWith("/members")) return page([member]);
+      if (path === "/admin/screenshot-policy") return policy(true);
+      if (path === "/admin/screenshot-requests") return page([]);
+      if (path === "/admin/screenshots") return page([]);
+      if (path === "/admin/screenshot-audit-events") return page([]);
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    renderView("");
+
+    expect(await screen.findByText("No screenshots captured yet")).toBeInTheDocument();
+    expect(screen.queryByText("Request a capture")).not.toBeInTheDocument();
+    expect(mockedApiRequest).toHaveBeenCalledWith(
+      "/admin/screenshots",
+      expect.objectContaining({
+        query: { employeeId: undefined, page: 1, limit: 12 },
+      }),
+    );
+    const trackingCalls = mockedApiRequest.mock.calls.filter(([path]) =>
+      String(path).includes("/reports/tracking-status"),
+    );
+    expect(trackingCalls).toHaveLength(0);
+  });
+
+  it("loads audited previews only for the selected screenshots", async () => {
+    const user = userEvent.setup();
+    const first = screenshot("shot-1");
+    const second = screenshot("shot-2");
+    second.capturedAt = "2026-10-24T11:35:00.000Z";
+    mockedApiRequest.mockImplementation(async (path, options) => {
+      if (path.endsWith("/members")) return page([member]);
+      if (path.includes("/reports/tracking-status")) return page([trackingRow()]);
+      if (path === "/admin/screenshot-policy") return policy(true);
+      if (path === "/admin/screenshot-requests") return page([]);
+      if (path === "/admin/screenshots") return page([first, second]);
+      if (path === "/admin/screenshot-audit-events") return page([]);
+      if (path.endsWith("/access") && options?.method === "POST") {
+        const id = path.split("/")[3];
+        return {
+          data: {
+            screenshot: id === first.id ? first : second,
+            url: `https://private.example.test/${id}`,
+            expiresAt: "2099-01-01T00:00:00.000Z",
+          },
+          serverTime: "2026-10-24T12:00:00.000Z",
+        };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    renderView();
+
+    await screen.findByRole("button", { name: /Open screenshot captured.*11:35/ });
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(3);
+    await user.click(checkboxes[2]);
+    expect((checkboxes[2] as HTMLInputElement).checked).toBe(true);
+    await user.click(await screen.findByRole("button", { name: "Load 1 selected" }));
+
+    await waitFor(() => {
+      expect(mockedApiRequest).toHaveBeenCalledWith(
+        `/admin/screenshots/${second.id}/access`,
+        expect.objectContaining({
+          method: "POST",
+          headers: { "X-Organization-Id": "org-1" },
+        }),
+      );
+    });
+    expect(mockedApiRequest).not.toHaveBeenCalledWith(
+      `/admin/screenshots/${first.id}/access`,
+      expect.anything(),
+    );
+    expect(await screen.findByRole("img", { name: /Screenshot captured/ })).toHaveAttribute(
+      "src",
+      `https://private.example.test/${second.id}`,
+    );
   });
 });

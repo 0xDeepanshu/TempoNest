@@ -78,6 +78,7 @@ Collection (paginated):
 | `time:read` | ✅ | ✅ | ✅ | ✅ |
 | `time:write` | ✅ | ✅ | ✅ | ✅ |
 | `report:read` | ✅ | ✅ | ✅ | — |
+| `attendance:location:read` | ✅ | ✅ | — | — |
 | `correction:review` | ✅ | ✅ | ✅ | — |
 | `agent:read` | ✅ | ✅ | ✅ | ✅ |
 | `agent:revoke` | ✅ | ✅ | — | — |
@@ -86,9 +87,11 @@ Collection (paginated):
 | `screenshot:manage` | ✅ | ✅ | — | — |
 | `screenshot:policy` | ✅ | ✅ | — | — |
 
-Additional constraints: no self role change/suspension/removal; `ADMIN` may manage only `MANAGER`/`EMPLOYEE`; only `OWNER` may administer `OWNER`/`ADMIN`; `OWNER` is not invitable; at least one active owner is required. Employees are always forced to their own employee ID for time/device lists, attendance summaries/corrections, current check-in, and evidence they created. Attendance correction review requires `correction:review`; self-review is always rejected. Attendance evidence access requires `time:read` and is limited to the owning employee or an organization reviewer. New mobile check-in/evidence-write routes additionally require a registered `MOBILE` device. Revoking a device is additionally allowed for its owner even without `agent:revoke`. Screenshot routes additionally enforce the organization’s policy role lists: route permissions are necessary but not sufficient, so an organization can narrow access but cannot grant it to a role that lacks the underlying permission.
+Additional constraints: no self role change/suspension/removal; `ADMIN` may manage only `MANAGER`/`EMPLOYEE`; only `OWNER` may administer `OWNER`/`ADMIN`; `OWNER` is not invitable; at least one active owner is required. Employees are always forced to their own employee ID for time/device lists, attendance summaries/corrections, current check-in, and evidence they created. Attendance correction review requires `correction:review`; self-review is always rejected. Attendance evidence access requires `time:read` and is limited to the owning employee or an organization reviewer. Viewing another employee's ON_SITE location history requires the dedicated `attendance:location:read` permission, which defaults to OWNER/ADMIN only and is intentionally not implied by `report:read`. New mobile check-in/evidence-write routes additionally require a registered `MOBILE` device. Revoking a device is additionally allowed for its owner even without `agent:revoke`. Screenshot routes additionally enforce the organization’s policy role lists: route permissions are necessary but not sufficient, so an organization can narrow access but cannot grant it to a role that lacks the underlying permission.
 
 Non-members receive `404 ORGANIZATION_NOT_FOUND` for organization-scoped routes.
+
+Platform administration is separate from this matrix. Every `/platform/*` route requires `users.platform_role = SUPERADMIN`, which organization ownership does not imply; the role is reloaded from the database on each request and cannot be asserted by the client. Organization-role checks never grant platform access, and non-platform callers receive `403 PLATFORM_ACCESS_REQUIRED`.
 
 ---
 
@@ -229,6 +232,7 @@ Requires authentication.
   "data": {
     "user": { "…": "…" },
     "memberships": [{ "…": "…", "organization": { "…": "…" } }],
+    "platformRole": null,
     "session": {
       "id": "…",
       "transport": "cookie",
@@ -239,7 +243,7 @@ Requires authentication.
 }
 ```
 
-`transport` is `"cookie"` or `"bearer"`.
+`transport` is `"cookie"` or `"bearer"`. `platformRole` is `"SUPERADMIN"` only for platform administrators; it is independent of memberships.
 
 ### `GET /auth/sessions`
 
@@ -703,6 +707,10 @@ If the employee has an open session whose last heartbeat is older than `SESSION_
 
 Requires `time:read`; always scoped to the caller. No agent credentials required, so the portal can display the current state.
 
+If the open session’s last heartbeat is older than `SESSION_STALE_SECONDS` (default 600 s), this read
+closes it at its last heartbeat before responding and returns `session: null`. This recovers sessions
+left open by a closed or crashed desktop; the ended session remains in history with those timestamps.
+
 `200 { "data": { "session": { … } | null, "serverTime": "…" } }`
 
 ### `GET /organizations/:organizationId/time-sessions`
@@ -1116,7 +1124,7 @@ Requirements:
 | --- | --- | --- | --- |
 | `WFH` | Not accepted | Not accepted | Optional; validated and recorded when supplied |
 | `WFO` | Required | Not accepted | Not accepted; a supplied `location` is rejected with `422 VALIDATION_ERROR` and no coordinates are persisted |
-| `ON_SITE` | Required | Required (a different evidence upload) | Required |
+| `ON_SITE` | Required | Optional legacy field; when supplied it must be a different upload | Required |
 
 WFO is location-free by policy: the mobile client does not need location permission, and
 the check-in record stores `null` latitude, longitude, accuracy, and recorded time. WFH
@@ -1130,7 +1138,7 @@ Location policy defaults (all configurable):
 - `recordedAt` may be at most `ATTENDANCE_LOCATION_FUTURE_SKEW_SECONDS` (60 s) in the
   future.
 
-There is no geofencing and no continuous background location tracking.
+There is no geofencing. Continuous location tracking is restricted to an active `ON_SITE` session; see [On-site location tracking](#on-site-location-tracking).
 
 ### Evidence lifecycle
 
@@ -1231,7 +1239,6 @@ Requires `time:write` plus a registered `MOBILE` agent.
   "checkInRequestId": "2f6f0f6e-7a8f-4a2b-9a17-0e0f4f9f0a11",
   "workMode": "ON_SITE",
   "selfieEvidenceId": "uuid",
-  "sitePhotoEvidenceId": "uuid",
   "location": {
     "latitude": 28.6139,
     "longitude": 77.209,
@@ -1261,7 +1268,7 @@ Requires `time:write` plus a registered `MOBILE` agent.
         "recordedAt": "2026-10-24T08:59:55.000Z"
       },
       "selfie": { "id": "uuid", "kind": "SELFIE", "status": "ATTACHED" },
-      "sitePhoto": { "id": "uuid", "kind": "SITE_PHOTO", "status": "ATTACHED" },
+      "sitePhoto": null,
       "createdAt": "2026-10-24T09:00:01.000Z",
       "updatedAt": "2026-10-24T09:00:01.000Z"
     },
@@ -1287,8 +1294,10 @@ Per-mode request bodies:
 { "checkInRequestId": "uuid", "workMode": "WFO", "selfieEvidenceId": "uuid" }
 ```
 
-ON_SITE uses the full example above (`selfieEvidenceId`, `sitePhotoEvidenceId`, and
-`location`). WFH omits both evidence fields and `location`; WFO omits
+ON_SITE uses the example above (`selfieEvidenceId` and `location`). A site photo is no
+longer captured or required; `sitePhotoEvidenceId` remains optional and is still accepted
+from older clients, so existing records with site photos keep returning them in
+`sitePhoto` (otherwise `null`). WFH omits both evidence fields and `location`; WFO omits
 `sitePhotoEvidenceId` and `location`. Do not send `location` for WFO: it is rejected
 rather than ignored, and no coordinates are stored. Repeating a successful WFO request
 requires only the same `checkInRequestId`, work mode, and selfie evidence ID; no GPS fix
@@ -1347,6 +1356,265 @@ tokens and cannot be used on `/screenshot-files`.
   proof than the server can provide.
 - Screenshot capture policy, authorization, storage, and audit remain independent of
   attendance evidence.
+
+---
+
+## On-site location tracking
+
+Continuous location tracking exists only for an active `ON_SITE` attendance session. It
+never runs for `WFH`/`WFO`, during a break, after checkout, or from another device. The
+server is the authority: the mobile client reconciles with
+`GET .../attendance/location/status` on every start, resume, foreground, and connectivity
+change, and stops tracking whenever the response has `shouldTrack: false`.
+
+### Lifecycle and server authority
+
+- A tracking record is created only by a status report or an accepted sample for an
+  `ON_SITE` session owned by the calling `MOBILE` agent. WFH/WFO sessions return
+  `409 LOCATION_TRACKING_REQUIRES_ON_SITE`; no coordinates are stored for them.
+- `POST .../location/status` records what the device reports about its OS-level tracker.
+  The server normalizes it against session state: an on-break session is stored as
+  `PAUSED`/`BREAK`, a stopped session returns `409 SESSION_NOT_ACTIVE`, and a stale
+  heartbeat returns `409 SESSION_STALE` until normal time-session recovery applies.
+  A racing report can therefore never mark a paused or finished session as active.
+- `POST .../location/samples` accepts a bounded batch. Each sample is validated and
+  recorded independently, so one bad fix never discards the rest of an offline queue.
+  Accepted samples also refresh `lastSampleAt` and the session heartbeat because they are
+  the liveness signal while the app is backgrounded.
+- The client stops on checkout, cancellation, authorization loss, break, or a session
+  mismatch. The server independently refuses samples outside these states, so a stale
+  local queue cannot write after checkout.
+- Displayed state is derived from server records only. `PERMISSION_UNAVAILABLE` means the
+  device reported denied permission; `STALE` means no report or sample arrived within
+  `ATTENDANCE_LOCATION_STALE_SECONDS` (180 s). Clients must not display tracking as active
+  merely because an `ON_SITE` session is open.
+
+### Sampling and configuration
+
+The reference mobile client samples approximately every 45 s or 50 m of movement,
+whichever comes first, and uploads batches of up to
+`ATTENDANCE_LOCATION_MAX_SAMPLES_PER_REQUEST` samples. Up to 500 pending samples are kept
+locally between uploads. All bounds are configurable:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ATTENDANCE_LOCATION_SAMPLE_MAX_ACCURACY_METERS` | 500 | Samples with worse accuracy are rejected |
+| `ATTENDANCE_LOCATION_MAX_SAMPLES_PER_REQUEST` | 50 | Maximum samples per upload |
+| `ATTENDANCE_LOCATION_STALE_SECONDS` | 180 | Age before the displayed state becomes `STALE` |
+| `ATTENDANCE_LOCATION_RETENTION_DAYS` | 30 | Precise sample retention |
+| `ATTENDANCE_LOCATION_PURGE_INTERVAL_SECONDS` | 21600 | Automatic purge cadence (6 hours) |
+
+### Idempotency and validation
+
+Every sample carries a client-generated UUID (`clientSampleId`). The database enforces
+`UNIQUE (time_session_id, client_sample_id)`, so offline retries are safe. Each sample in
+a batch returns exactly one result:
+
+- `ACCEPTED`;
+- `DUPLICATE` with `ALREADY_RECORDED` (stored by an earlier request) or
+  `DUPLICATE_IN_REQUEST` (repeated within the same batch);
+- `REJECTED` with `SAMPLE_IN_FUTURE`, `SAMPLE_BEFORE_SESSION`, `ACCURACY_TOO_LOW`, or
+  `SAMPLE_DURING_BREAK`.
+
+Coordinates are validated against their legal ranges, accuracy must be positive and at
+most the configured cap, and timestamps follow the same future-skew and session-start
+bounds as check-in. The organization, employee, and device are derived from the verified
+membership and agent credential. A session that does not belong to the caller, is not
+`ON_SITE`, or is not owned by the calling device is rejected; client-supplied
+organization, employee, or session IDs are never trusted.
+
+### `GET /organizations/:organizationId/attendance/location/status`
+
+Requires `time:read` plus a registered `MOBILE` agent. No body. This is the reconciliation
+endpoint used after restarts and permission changes:
+
+```json
+{
+  "data": {
+    "shouldTrack": true,
+    "reason": null,
+    "workMode": "ON_SITE",
+    "checkIn": { "id": "uuid", "workMode": "ON_SITE", "createdAt": "2026-10-24T09:00:01.000Z" },
+    "session": { "id": "uuid", "status": "ACTIVE", "..." : "normal time-session summary" },
+    "tracking": {
+      "status": "ACTIVE",
+      "reason": null,
+      "permission": "ALWAYS",
+      "backgroundAllowed": true,
+      "lastSampleAt": "2026-10-24T09:05:00.000Z",
+      "lastReportedAt": "2026-10-24T09:05:10.000Z",
+      "updatedAt": "2026-10-24T09:05:10.000Z"
+    },
+    "locationState": {
+      "state": "ACTIVE",
+      "reason": null,
+      "permission": "ALWAYS",
+      "backgroundAllowed": true,
+      "lastSampleAt": "2026-10-24T09:05:00.000Z",
+      "lastReportedAt": "2026-10-24T09:05:10.000Z",
+      "staleAfterSeconds": 180
+    }
+  },
+  "serverTime": "2026-10-24T09:05:11.000Z"
+}
+```
+
+`reason` explains a false `shouldTrack`: `NO_ACTIVE_SESSION`, `AGENT_MISMATCH`,
+`NO_CHECK_IN`, `WORK_MODE_NOT_ON_SITE`, `BREAK`, or `SESSION_ENDED`. `tracking` is `null`
+until the device has reported status or uploaded a sample. `locationState` is derived even
+when nothing has been reported yet (for example `STOPPED`/`NOT_STARTED`).
+
+### `POST /organizations/:organizationId/attendance/location/status`
+
+Requires `time:write` plus a registered `MOBILE` agent:
+
+```json
+{
+  "sessionId": "uuid",
+  "state": "ACTIVE",
+  "reason": null,
+  "permission": "ALWAYS",
+  "backgroundAllowed": true,
+  "lastSampleAt": "2026-10-24T09:05:00.000Z"
+}
+```
+
+`state` is `ACTIVE`, `PAUSED`, or `STOPPED`; `permission` is one of `ALWAYS`,
+`FOREGROUND_ONLY`, `DENIED`, or `UNKNOWN`. The response is
+`{ tracking, session, locationState }` plus `serverTime`. The server never stores `ACTIVE`
+for an on-break or stopped session and never resumes a stopped session. Errors:
+`409 LOCATION_TRACKING_REQUIRES_ON_SITE`, `409 SESSION_NOT_ACTIVE`, `409 SESSION_STALE`,
+`404 SESSION_NOT_FOUND`.
+
+### `POST /organizations/:organizationId/attendance/location/samples`
+
+Requires `time:write` plus the registered `MOBILE` agent that owns the session. The
+request is rate limited to 60 requests per minute per authenticated user and organization
+(`429 RATE_LIMITED`).
+
+```json
+{
+  "sessionId": "uuid",
+  "samples": [
+    {
+      "clientSampleId": "6f0a2c7e-8c3d-4a1e-9f2a-1b2c3d4e5f60",
+      "latitude": 28.6139,
+      "longitude": 77.209,
+      "accuracyMeters": 18.5,
+      "capturedAt": "2026-10-24T09:05:00.000Z",
+      "source": "DEVICE"
+    }
+  ]
+}
+```
+
+`source` is optional (`DEVICE` or `UNKNOWN`; defaults to `DEVICE`). Response (`201`):
+
+```json
+{
+  "data": {
+    "sessionId": "uuid",
+    "accepted": 1,
+    "duplicates": 0,
+    "rejected": 0,
+    "results": [{ "clientSampleId": "6f0a2c7e-...", "status": "ACCEPTED" }],
+    "session": { "id": "uuid", "status": "ACTIVE", "..." : "normal time-session summary" }
+  },
+  "serverTime": "2026-10-24T09:05:02.000Z"
+}
+```
+
+The whole batch shares the same session and ownership check, so a sample cannot be
+recorded for a different employee, organization, or device. Errors:
+`409 LOCATION_TRACKING_REQUIRES_ON_SITE`, `409 SESSION_NOT_ACTIVE`, `409 SESSION_STALE`,
+`404 SESSION_NOT_FOUND`.
+
+### `GET /organizations/:organizationId/attendance/check-ins/:checkInId/location-history`
+
+Requires `time:read` and either self-scope (the check-in belongs to the caller) or the
+dedicated `attendance:location:read` permission for another employee. The optional
+`limit` query is an integer from 1 to 2000 (default 1000). Returns the newest `limit`
+samples in chronological order, plus `totalSamples` and `truncated`:
+
+```json
+{
+  "data": {
+    "checkIn": {
+      "id": "uuid",
+      "employeeId": "uuid",
+      "sessionId": "uuid",
+      "workMode": "ON_SITE",
+      "createdAt": "2026-10-24T09:00:01.000Z",
+      "location": { "latitude": 28.6139, "longitude": 77.209, "accuracyMeters": 20, "recordedAt": "2026-10-24T08:59:55.000Z" }
+    },
+    "employee": { "id": "uuid", "name": "Employee Name", "email": "employee@example.com" },
+    "session": { "id": "uuid", "status": "STOPPED", "startedAt": "...", "endedAt": "...", "breaks": [], "..." : "normal time-session summary" },
+    "tracking": {
+      "status": "STOPPED",
+      "reason": "SESSION_ENDED",
+      "permission": "ALWAYS",
+      "backgroundAllowed": true,
+      "lastSampleAt": "...",
+      "lastReportedAt": "...",
+      "updatedAt": "..."
+    },
+    "locationState": {
+      "state": "STOPPED",
+      "reason": "SESSION_ENDED",
+      "permission": "ALWAYS",
+      "backgroundAllowed": true,
+      "lastSampleAt": "...",
+      "lastReportedAt": "...",
+      "staleAfterSeconds": 180
+    },
+    "samples": [
+      {
+        "id": "uuid",
+        "latitude": 28.6139,
+        "longitude": 77.209,
+        "accuracyMeters": 18.5,
+        "capturedAt": "2026-10-24T09:05:00.000Z",
+        "receivedAt": "2026-10-24T09:05:02.000Z",
+        "source": "DEVICE"
+      }
+    ],
+    "totalSamples": 1,
+    "truncated": false,
+    "retention": { "days": 30, "cutoff": "2026-09-24T09:05:02.000Z" }
+  },
+  "serverTime": "2026-10-24T09:05:02.000Z"
+}
+```
+
+Missing tracking data is not fabricated: the endpoint returns `200` with `tracking: null`,
+`samples: []`, and an honest `locationState` such as `STOPPED`/`NOT_STARTED`. Cross-tenant
+access is impossible: without membership in the requested organization the call fails with
+`404 ORGANIZATION_NOT_FOUND`, and a check-in ID outside the resolved organization returns
+`404 ATTENDANCE_CHECK_IN_NOT_FOUND`. An `EMPLOYEE` requesting another employee's history
+gets the same `404` to avoid leaking existence, while a role without the permission gets
+`403 PERMISSION_DENIED`. A non-ON_SITE check-in returns
+`422 LOCATION_HISTORY_NOT_AVAILABLE`.
+
+Every non-self view writes `ATTENDANCE_LOCATION_HISTORY_VIEWED` with the returned sample
+count, total count, truncation flag, and limit. Audit metadata never contains coordinates.
+`attendance:location:read` defaults to `OWNER` and `ADMIN` only. It is not implied by
+`report:read`; `MANAGER` and `EMPLOYEE` do not receive it. Employees always retain
+self-access, which is not audited as an administrator view.
+
+### Location retention and limitations
+
+- Continuous-tracking samples older than `ATTENDANCE_LOCATION_RETENTION_DAYS` (default 30)
+  are deleted by the periodic maintenance loop every
+  `ATTENDANCE_LOCATION_PURGE_INTERVAL_SECONDS` (default 6 hours). Tracking rows for
+  sessions that ended before the cutoff are removed as well; the check-in and session
+  records themselves are retained under the attendance policy. `retention.cutoff` in the
+  history response states the active window, and `retention.days` is the configured value.
+- Attendance photos and location samples are separate records with separate policies. The
+  photo retention gap above still applies.
+- The server validates coordinates, accuracy, and timestamps, but cannot prove that a
+  device clock is honest, that a location fix is truthful, or that the app was not
+  restricted by the OS. Clients must report permission and background restrictions
+  honestly and must not present the history as stronger proof than the server provides.
 
 ---
 
@@ -1659,6 +1927,252 @@ On reconnect, `connected.pendingScreenshotRequests` lists active requests for th
 
 ---
 
+## Admin live screen viewing
+
+Live viewing is an **admin-only, time-boxed relay** layered on the same monitoring policy. It never starts automatically: the viewer must first create a session and obtain a one-time ticket over authenticated HTTP, then connect to the dedicated binary WebSocket relay. Frames never travel over the JSON agent socket and are never stored.
+
+### Authorization
+
+- Route permission: `screenshot:live` (OWNER/ADMIN in the built-in matrix).
+- Start additionally requires the actor role in policy `requestRoles`; ticket issuance requires it in `viewRoles`.
+- The policy must be enabled; when `employeeAcknowledgementRequired` is set, the employee must have acknowledged the current disclosure version.
+- The employee must be an active member with an active, heartbeat-fresh time session on a non-revoked `ELECTRON` desktop agent. Mobile agents are never live targets.
+- The organization must be active and not soft-deleted. Organization suspension, membership loss, role removal, policy disable, session end, agent disconnect, and expiry all terminate an active relay.
+
+### `POST /admin/employees/:employeeId/screen-live-sessions`
+
+Creates (or reuses) the single active live session for one employee.
+
+Optional body: `{}` (strict; no client-supplied agent, session, or organization identity).
+
+`201` for a new session, `200` when an active, still-eligible session is reused:
+
+```json
+{
+  "data": {
+    "session": {
+      "id": "…",
+      "organizationId": "…",
+      "employeeId": "…",
+      "desktopAgentId": "…",
+      "timeSessionId": "…",
+      "startedByUserId": "…",
+      "status": "ACTIVE",
+      "startedAt": "…",
+      "expiresAt": "…",
+      "endedAt": null,
+      "terminationReason": null,
+      "employee": { "id": "…", "name": "Ada Lovelace", "email": "ada@example.com" },
+      "desktopAgent": { "id": "…", "name": "Ada laptop", "platform": "win32" },
+      "createdAt": "…",
+      "updatedAt": "…"
+    },
+    "delivery": {
+      "agentOnline": true,
+      "delivered": true,
+      "note": "The live capture command was sent to the desktop agent."
+    },
+    "reused": false
+  },
+  "serverTime": "…"
+}
+```
+
+The JSON agent channel receives only the `screen.live.start` control command. If the agent is offline, `delivered` is `false` and the pending command is exposed on reconnect as `connected.pendingScreenLiveSession`; capture still starts only when the agent validates the session and connects to the binary relay.
+
+Errors: `403 SCREEN_LIVE_POLICY_DISABLED`, `403 PERMISSION_DENIED`, `403 SCREEN_LIVE_ROLE_NOT_ALLOWED`, `403 ORGANIZATION_SUSPENDED`, `404 EMPLOYEE_NOT_FOUND` (also for cross-organization IDs), `409 SCREENSHOT_POLICY_ACKNOWLEDGEMENT_REQUIRED`, `409 NO_ELIGIBLE_SCREEN_LIVE_SESSION`, `409 INVALID_SCREEN_LIVE_AGENT`.
+
+### `POST /admin/screen-live-sessions/:sessionId/viewer-tickets`
+
+Issues a single-use viewer ticket for the authenticated administrator. Only its HMAC hash is stored; the plaintext is returned once.
+
+Request body: `{}` (strict). `201`:
+
+```json
+{
+  "data": {
+    "ticket": "opaque-single-use-ticket",
+    "expiresAt": "…",
+    "websocketPath": "/api/v1/ws/screen-live",
+    "session": { "…": "…" },
+    "viewer": {
+      "id": "…",
+      "screenLiveSessionId": "…",
+      "userId": "…",
+      "joinedAt": null,
+      "leftAt": null,
+      "lastSeenAt": null,
+      "disconnectedReason": null
+    }
+  },
+  "serverTime": "…"
+}
+```
+
+The ticket TTL is `SCREEN_LIVE_VIEWER_TICKET_TTL_SECONDS` (default 60 s) and never exceeds the session expiry. Reconnecting or reconnecting after a dropped socket requires a **fresh ticket**; a ticket is consumed by the first successful `authenticate` WebSocket message.
+
+Errors: `404 SCREEN_LIVE_SESSION_NOT_FOUND`, `403 SCREEN_LIVE_POLICY_DISABLED`, `403 PERMISSION_DENIED`, `403 SCREEN_LIVE_ROLE_NOT_ALLOWED`, `409 SCREEN_LIVE_SESSION_NOT_ACTIVE`, `409 SCREEN_LIVE_TIME_SESSION_ENDED`.
+
+### `POST /admin/screen-live-sessions/:sessionId/stop`
+
+Idempotent viewer stop. Requires `screenshot:live` and the policy’s `requestRoles`. The server marks the session `ENDED` with reason `VIEWER_STOPPED`, tells the agent `live.stop`, closes viewers with `4000`, and audits the stop.
+
+Request body: `{}` (strict). `200`:
+
+```json
+{ "data": { "session": { "…": "…", "status": "ENDED", "terminationReason": "VIEWER_STOPPED" }, "stopped": true }, "serverTime": "…" }
+```
+
+`stopped` is `false` when the session was already terminal. Errors include `404 SCREEN_LIVE_SESSION_NOT_FOUND`, `403 PERMISSION_DENIED`, `403 SCREEN_LIVE_ROLE_NOT_ALLOWED`, and `403 SCREEN_LIVE_POLICY_DISABLED`.
+
+### Binary WebSocket relay
+
+Two upgrade-only endpoints, both outside the request/response envelope:
+
+| Endpoint | Client | Authorization |
+| --- | --- | --- |
+| `/api/v1/ws/screen-live` | Browser viewer | One-time ticket sent in the first WebSocket message; the durable session/user/policy state is rechecked before the socket joins. |
+| `/api/v1/ws/screen-stream?liveSessionId=…` | Desktop agent | `Authorization: Bearer …` plus `X-Agent-Id` and `X-Agent-Key`; the session must belong to that agent/employee and be active. |
+
+The viewer upgrade itself carries **no credentials, ticket, or session cookie**. After the upgrade the
+browser must send exactly one text message within 5 seconds:
+
+```json
+{ "type": "authenticate", "ticket": "opaque-single-use-ticket" }
+```
+
+A binary message, malformed JSON, a missing/invalid ticket, or a handshake timeout is answered with
+`live.error` and close code `4001`; no frames are forwarded before authentication succeeds. Tickets
+never appear in the URL, so proxy access logs, browser history, and referrers cannot capture them.
+
+Upgrade failures return a short JSON body `{ "error": { "code": "…", "message": "…" } }` with an HTTP
+status for transport-level refusals only: `403 ORIGIN_NOT_ALLOWED`, `400 INVALID_LIVE_SESSION_ID`
+(agent), `503 RELAY_UNAVAILABLE`, `503 RELAY_BUSY`, and agent authentication failures
+(`401 UNAUTHENTICATED`, `403 AGENT_REVOKED`, `403 ORGANIZATION_SUSPENDED`,
+`409 SCREEN_LIVE_TIME_SESSION_ENDED`). Viewer ticket outcomes are reported after the upgrade via
+`live.error`: `SCREEN_LIVE_TICKET_REQUIRED`, `SCREEN_LIVE_TICKET_INVALID`,
+`SCREEN_LIVE_TICKET_EXPIRED`, `SCREEN_LIVE_AUTH_REQUIRED`, `SCREEN_LIVE_AUTH_TIMEOUT`,
+`SCREEN_LIVE_SESSION_ENDED`, `SCREEN_LIVE_TIME_SESSION_ENDED`, `SCREEN_LIVE_ROLE_NOT_ALLOWED`,
+`SCREEN_LIVE_POLICY_DISABLED`, `MEMBERSHIP_INACTIVE`, `ACCOUNT_DISABLED`, `AGENT_REVOKED`, and
+`ORGANIZATION_SUSPENDED`.
+
+Server → viewer (JSON text):
+
+```json
+{ "type": "live.ready", "serverTime": "…", "session": { "…": "…" }, "viewer": { "…": "…" } }
+{ "type": "live.started", "serverTime": "…" }
+{ "type": "live.ended", "reason": "EXPIRED", "serverTime": "…" }
+{ "type": "live.error", "code": "SCREEN_LIVE_TICKET_EXPIRED", "message": "…", "serverTime": "…" }
+{ "type": "pong", "serverTime": "…" }
+```
+
+After `live.ready`, the relay forwards raw JPEG frames as **binary** messages. `live.started` is sent
+immediately before the first frame. After authentication, viewer → server accepts only text
+`{ "type": "ping" }` or `{ "type": "stop" }`; binary viewer messages close the socket with `1003`. A WS
+`stop` detaches only that viewer (close code `1000`) and is audited; ending the shared session requires
+`POST /admin/screen-live-sessions/:sessionId/stop`, which enforces the policy’s `requestRoles` and ends
+it with `VIEWER_STOPPED`. Other viewers of the same session are unaffected.
+
+Viewer close codes: `1000` (viewer stop), `4000` (session ended), `4001` (authentication or ticket
+failure), `4003` (access revoked during revalidation). A `live.ended` or `live.error` message precedes
+the close whenever possible. The relay revalidates connected viewers about once a minute and the agent
+stream once a minute; revoked authorization closes the affected socket instead of waiting for session
+expiry.
+
+Server → agent on the stream:
+
+```json
+{ "type": "live.ready", "serverTime": "…", "liveSessionId": "…", "expiresAt": "…", "maxFps": 2, "maxFrameBytes": 2097152 }
+{ "type": "live.stop", "reason": "VIEWER_STOPPED", "serverTime": "…" }
+{ "type": "pong", "serverTime": "…" }
+```
+
+The agent must wait for `live.ready` before capturing, then send JPEG binaries no faster than `maxFps` and no larger than `maxFrameBytes`. The relay rejects empty, oversized, or non-JPEG frames; a non-JPEG payload closes the agent stream with `4003 INVALID_FRAME`. Slow viewers are skipped (frames dropped) once their buffered bytes exceed `SCREEN_LIVE_VIEWER_BUFFER_LIMIT_BYTES`. The agent stops capture on `live.stop`, expiry, socket loss, session detach, or shutdown.
+
+### Agent control messages (JSON agent socket)
+
+Only control messages use the existing JSON agent channel:
+
+```json
+{ "type": "screen.live.start", "liveSessionId": "…", "timeSessionId": "…", "expiresAt": "…", "maxFps": 2, "maxFrameWidth": 1600, "maxFrameBytes": 2097152, "streamPath": "/api/v1/ws/screen-stream" }
+{ "type": "screen.live.failed", "liveSessionId": "…", "code": "CAPTURE_FAILED", "message": "optional sanitized text" }
+```
+
+The server acknowledges a failure with `screen.live.failed` and may return `screen.live.error` with `INVALID_LIVE_SESSION_ID` or an authorization error. Only the authenticated agent that owns the session can report a failure; the failure terminates the session with reason `AGENT_FAILED`.
+
+### Lifecycle and termination
+
+Status values: `ACTIVE`, `ENDED`. Reasons: `VIEWER_STOPPED`, `ALL_VIEWERS_LEFT`, `AGENT_DISCONNECTED`, `AGENT_FAILED`, `EXPIRED`, `POLICY_DISABLED`, `SESSION_ENDED`, `ORGANIZATION_SUSPENDED`, `AGENT_REVOKED`, `SERVER_SHUTDOWN`.
+
+| Trigger | Behavior |
+| --- | --- |
+| Viewer presses Stop or closes the dialog (the web client calls the REST stop endpoint) | Session ends with `VIEWER_STOPPED`; the agent receives `live.stop`; connected viewers receive `live.ended` and close with `4000`. |
+| Viewer sends WS `stop` or its socket drops | That viewer leaves and is audited; the session ends with `ALL_VIEWERS_LEFT` after `SCREEN_LIVE_VIEWER_GRACE_SECONDS` if no viewer reconnects. |
+| Last viewer disconnects | Terminates after `SCREEN_LIVE_VIEWER_GRACE_SECONDS` if no viewer reconnects, with `ALL_VIEWERS_LEFT`. |
+| Agent stream disconnects | Terminates after `SCREEN_LIVE_AGENT_GRACE_SECONDS` if the agent does not reconnect, with `AGENT_DISCONNECTED`. |
+| Agent reports capture failure | Session ends with `AGENT_FAILED`; viewers receive `live.ended`. |
+| `expiresAt` reached | `EXPIRED`; sessions are also expired by maintenance and at startup. |
+| Work session ends or becomes invalid | The agent stops capture; ticket issuance/consumption also rejects with `SCREEN_LIVE_TIME_SESSION_ENDED` and ends the session. |
+| Policy disabled, role removed, membership inactive, or organization suspended | Connected viewers receive `live.ended` + `4003 ACCESS_REVOKED` during revalidation; the session then ends via the normal viewer/agent grace path. |
+| Server graceful shutdown | All `ACTIVE` sessions become `SERVER_SHUTDOWN`; sockets close with `1001`. |
+
+Every session and viewer transition is audited (`SCREEN_LIVE_SESSION_STARTED`, `SCREEN_LIVE_VIEWER_JOINED`, `SCREEN_LIVE_VIEWER_LEFT`, `SCREEN_LIVE_SESSION_STOPPED`, `SCREEN_LIVE_ACCESS_DENIED`) with actor, target employee, session/viewer IDs, timestamps, and sanitized metadata. Frame bytes, tickets, and image URLs are never recorded.
+
+### Deployment notes
+
+- Set `NEXT_PUBLIC_API_WS_URL` in the web app to the browser-reachable backend origin (`ws://` locally, `wss://` in production). It is baked in at build time.
+- Reverse proxies, CDNs, and firewalls must allow WebSocket upgrades on both relay paths, forward `Upgrade`/`Connection`, permit `Origin`, and use idle timeouts longer than the 30-second liveness sweep.
+- The relay is process-local and holds frames in memory. Multiple API instances require sticky routing for both endpoints or a shared pub/sub bridge. There is no TURN/STUN dependency.
+- Approximate bandwidth is `frame size × fps` per active viewer (for example, a 300 KB JPEG at 2 fps is about 0.6 MB/s per viewer). Limits should be sized accordingly; the relay never queues frames beyond the per-viewer buffer cap.
+
+---
+
+## Platform administration
+
+Platform routes are available only to an authenticated user whose database `users.platform_role` is `SUPERADMIN`. Organization roles (`OWNER`/`ADMIN`) grant no platform authority, and platform routes do not require or accept `X-Organization-Id`. The role is re-read on every request, so granting or revoking it takes effect immediately. Provision it with the server-only CLI (`npm run platform:grant -- <email>` / `npm run platform:revoke -- <email>`); there is no HTTP provisioning endpoint, default account, or hardcoded credential.
+
+Every platform mutation appends to `platform_audit_events` with the actor, action, target organization ID and name snapshot, before/after metadata, IP, and user agent. Tokens, credentials, storage keys, and private URLs are never recorded. Responses use the standard `{data}` / `{data,meta}` envelopes.
+
+### `GET /platform/overview`
+
+Returns `{ total, active, suspended, deleted }`. `active`/`suspended` exclude soft-deleted organizations; `deleted` counts soft-deleted rows.
+
+### `GET /platform/organizations`
+
+Query: `page`, `limit`, `status` (`ALL|ACTIVE|SUSPENDED|DELETED`, default `ALL`), `q` (name, slug, or exact UUID). Returns summaries with `id`, `name`, `slug`, `status` (`ACTIVE|SUSPENDED|DELETED`), `timezone`, `createdAt`, `updatedAt`, `deletedAt`, `memberCount` (non-removed memberships), and `activeMemberCount`. Newest first.
+
+### `GET /platform/organizations/:organizationId`
+
+Returns one summary. Platform access does not require membership in the organization. Unknown IDs return `404 ORGANIZATION_NOT_FOUND`.
+
+### `PATCH /platform/organizations/:organizationId`
+
+Body `{ "name": "…" }` (trimmed, 2–120 characters, strict). Changes the display name only; UUID, slug, memberships, and all tenant data are preserved. Audits `ORGANIZATION_RENAMED` with before/after. Errors: `409 ORGANIZATION_NAME_UNCHANGED`, `409 ORGANIZATION_DELETED`.
+
+### `POST /platform/organizations/:organizationId/suspend`
+
+Sets `status=SUSPENDED` and audits `ORGANIZATION_SUSPENDED`. Live agent sockets on the current process close with `4003`; other instances reject on their next heartbeat revalidation. All organization-scoped REST calls (including reads), WebSocket upgrades, desktop-agent authentication, invitation preview/acceptance, and signed screenshot/attendance downloads then fail with `403 ORGANIZATION_SUSPENDED`. Sessions and data are retained. Errors: `409 ORGANIZATION_ALREADY_SUSPENDED`, `409 ORGANIZATION_DELETED`.
+
+### `POST /platform/organizations/:organizationId/reactivate`
+
+Restores `status=ACTIVE` and audits `ORGANIZATION_REACTIVATED`. Membership and user states are unchanged. Errors: `409 ORGANIZATION_ALREADY_ACTIVE`, `409 ORGANIZATION_DELETED`.
+
+### `DELETE /platform/organizations/:organizationId`
+
+Body:
+
+```json
+{ "confirmationName": "Exact organization name", "password": "current superadmin password" }
+```
+
+Soft deletes `organizations.deleted_at` inside a transaction after verifying the exact name and the caller's password (step-up). Audits `ORGANIZATION_SOFT_DELETED` with `retention: "tenant_data_preserved"`. Tenant rows, private storage objects, memberships, sessions, and audit history are retained; nothing is cascaded or purged. Further mutations return `409 ORGANIZATION_DELETED`. There is no permanent-delete endpoint; recovery is an engineering operation. Errors: `400 ORGANIZATION_NAME_MISMATCH`, `403 REAUTH_FAILED`, `409 ORGANIZATION_ALREADY_DELETED`. This route uses the sensitive-action rate limiter.
+
+### `GET /platform/audit-events`
+
+Query: `page`, `limit`, optional `organizationId`, and optional `action` (`ORGANIZATION_RENAMED|ORGANIZATION_SUSPENDED|ORGANIZATION_REACTIVATED|ORGANIZATION_SOFT_DELETED`). Returns newest first with `actor` (`id`, `name`, `email`, or `null`), `organization` (`id` may be `null` after an FK `SET NULL`; the name snapshot is retained), `metadata`, `ipAddress`, `userAgent`, and `createdAt`.
+
+---
+
 ## Agent WebSocket
 
 `ws://<host>/api/v1/ws/agent` (or `wss://` behind TLS). Authenticate during the HTTP upgrade with all three credentials:
@@ -1743,6 +2257,7 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 400 | `INVALID_JSON` | Body is not valid JSON |
 | 400 | `ORGANIZATION_CONTEXT_REQUIRED` | Missing `X-Organization-Id` |
 | 400 | `ORGANIZATION_CONTEXT_INVALID` | Header is not a UUID |
+| 400 | `ORGANIZATION_NAME_MISMATCH` | Typed organization name does not match for platform soft delete |
 | 400 | `INVITATION_INVALID` | Unknown or malformed invitation token |
 | 401 | `UNAUTHENTICATED` | No valid credentials supplied |
 | 401 | `INVALID_CREDENTIALS` | Wrong e-mail or password |
@@ -1755,6 +2270,8 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 401 | `SESSION_REVOKED` | Session was revoked |
 | 403 | `FORBIDDEN` | Generic authorization failure |
 | 403 | `PERMISSION_DENIED` | Role lacks the required permission |
+| 403 | `PLATFORM_ACCESS_REQUIRED` | Caller is not an active `SUPERADMIN` platform administrator |
+| 403 | `REAUTH_FAILED` | Password confirmation failed for a platform soft delete |
 | 403 | `ROLE_MANAGEMENT_FORBIDDEN` | Role hierarchy prevents managing target |
 | 403 | `ROLE_ASSIGNMENT_FORBIDDEN` | Role cannot be granted by this actor |
 | 403 | `CANNOT_MODIFY_SELF` | Self role/status change blocked |
@@ -1770,7 +2287,7 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 403 | `MOBILE_AGENT_REQUIRED` | New mobile check-in/evidence-write route called by a non-`MOBILE` device |
 | 404 | `ROUTE_NOT_FOUND` | Unknown route |
 | 404 | `NOT_FOUND` | Generic missing resource |
-| 404 | `ORGANIZATION_NOT_FOUND` | Organization missing or caller is not a member |
+| 404 | `ORGANIZATION_NOT_FOUND` | Organization missing, unknown to the platform lookup, or caller is not a member |
 | 404 | `MEMBERSHIP_NOT_FOUND` | Membership missing (or removed) |
 | 404 | `INVITATION_NOT_FOUND` | Invitation missing in this organization |
 | 404 | `SESSION_NOT_FOUND` | Session does not belong to the caller |
@@ -1782,6 +2299,12 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 404 | `ATTENDANCE_EVIDENCE_NOT_FOUND` | Evidence missing, outside the organization, or not owned by the employee/device |
 | 404 | `ATTENDANCE_EVIDENCE_UPLOAD_INVALID` | Attendance upload token is unknown, consumed, or belongs to another device |
 | 404 | `ATTENDANCE_EVIDENCE_LINK_INVALID` | Signed attendance evidence URL is invalid, tampered, or expired |
+| 404 | `ATTENDANCE_CHECK_IN_NOT_FOUND` | Check-in is missing, outside the organization, or not visible to the caller |
+| 409 | `ORGANIZATION_ALREADY_ACTIVE` | Platform reactivation target is already active |
+| 409 | `ORGANIZATION_ALREADY_SUSPENDED` | Platform suspension target is already suspended |
+| 409 | `ORGANIZATION_ALREADY_DELETED` | Platform soft delete target is already deleted |
+| 409 | `ORGANIZATION_DELETED` | Organization is soft-deleted and read-only |
+| 409 | `ORGANIZATION_NAME_UNCHANGED` | Platform rename uses the current name |
 | 409 | `CONFLICT` | Generic uniqueness/constraint conflict |
 | 409 | `EMAIL_ALREADY_EXISTS` | Registration e-mail already used |
 | 409 | `ALREADY_MEMBER` | Accepting an invitation while already active |
@@ -1793,6 +2316,8 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 409 | `ACTIVE_SESSION_EXISTS` | Employee already has a fresh open session |
 | 409 | `AGENT_SESSION_EXISTS` | Agent already has an open session |
 | 409 | `SESSION_NOT_ACTIVE` | Session is stopped or otherwise not usable |
+| 409 | `SESSION_STALE` | Location reporting targets a session whose heartbeat is stale; recover the session first |
+| 409 | `LOCATION_TRACKING_REQUIRES_ON_SITE` | Continuous tracking was requested for a non-ON_SITE or missing check-in |
 | 409 | `SESSION_ALREADY_STOPPED` | Offline stop targets a stopped session |
 | 409 | `BREAK_ALREADY_ACTIVE` | Session already has an open break |
 | 409 | `NO_ACTIVE_BREAK` | Break end has no open break |
@@ -1852,6 +2377,7 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 422 | `LOCATION_ACCURACY_TOO_LOW` | Location accuracy exceeds the configured maximum |
 | 422 | `LOCATION_FIX_TOO_OLD` | Location timestamp is older than the configured window |
 | 422 | `LOCATION_FIX_IN_FUTURE` | Location timestamp is too far in the future |
+| 422 | `LOCATION_HISTORY_NOT_AVAILABLE` | Location history was requested for a check-in that is not ON_SITE |
 | 422 | `SCREENSHOT_CONTENT_TYPE_MISMATCH` | Upload type differs from the claimed/expected type |
 | 422 | `SCREENSHOT_DISCLOSURE_VERSION_REQUIRED` | Acknowledged disclosure text changed without a new version |
 | 429 | `RATE_LIMITED` | Rate limit exceeded |

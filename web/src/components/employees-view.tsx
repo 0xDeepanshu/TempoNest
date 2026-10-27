@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { apiRequest } from "@/lib/api-client";
 import { formatDate } from "@/lib/format";
+import { hasPermission } from "@/lib/permissions";
 import type { MemberListItem, Paginated, Role } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { ArrowRightIcon, SearchIcon, UsersIcon } from "./icons";
@@ -21,6 +22,7 @@ import {
   Pagination,
   RoleBadge,
   Select,
+  StatusBadge,
   TableShell,
   Td,
   Th,
@@ -28,7 +30,7 @@ import {
 import { NoOrganization, useWorkspace } from "./workspace";
 
 export function EmployeesView() {
-  const { organization } = useWorkspace();
+  const { organization, membership } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -56,18 +58,25 @@ export function EmployeesView() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization.name} · ${organization.timezone}`}
         title="People"
-        description="Active, suspended, and removed memberships. Use the employee page for attendance and tracking history."
+        description="Employee directory with membership and account status. Open a profile for current tracking and a recent activity summary; use Reports for date-range analysis."
+        actions={
+          hasPermission(membership?.role, "report:read") ? (
+            <Link href="/admin/reports">
+              <Button variant="secondary">Open reports</Button>
+            </Link>
+          ) : undefined
+        }
       />
 
       <Card>
-        <form onSubmit={applyFilters} className="grid gap-3 p-5 lg:grid-cols-[1fr_170px_170px_auto] lg:items-end">
+        <form onSubmit={applyFilters} className="grid gap-3 p-4 lg:grid-cols-[1fr_170px_170px_auto] lg:items-end">
           <Field label="Search" htmlFor="member-search">
             <div className="relative">
-              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
               <Input
                 id="member-search"
                 value={query}
@@ -121,7 +130,7 @@ export function EmployeesView() {
             members.data ? `${members.data.meta.total} membership${members.data.meta.total === 1 ? "" : "s"}` : "Loading…"
           }
           actions={
-            <Link href="/admin/organization" className="text-xs font-semibold text-indigo-600">
+            <Link href="/admin/organization" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
               Manage members
             </Link>
           }
@@ -146,13 +155,13 @@ export function EmployeesView() {
               </thead>
               <tbody>
                 {rows.map((member) => (
-                  <tr key={member.id} className="hover:bg-slate-50/60">
+                  <tr key={member.id} className="hover:bg-surface-muted">
                     <Td>
                       <div className="flex items-center gap-2.5">
                         <Avatar name={member.user.name} size="sm" />
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-slate-900">{member.user.name}</p>
-                          <p className="truncate text-xs text-slate-500">{member.user.email}</p>
+                          <p className="truncate font-medium text-ink">{member.user.name}</p>
+                          <p className="truncate text-xs text-muted">{member.user.email}</p>
                         </div>
                       </div>
                     </Td>
@@ -160,13 +169,16 @@ export function EmployeesView() {
                       <RoleBadge role={member.role} />
                     </Td>
                     <Td>
-                      <MembershipStatusBadge status={member.status} />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <MembershipStatusBadge status={member.status} />
+                        <StatusBadge status={member.user.status} />
+                      </div>
                     </Td>
-                    <Td className="text-xs text-slate-500">{formatDate(member.createdAt, organization.timezone)}</Td>
+                    <Td className="text-xs text-muted">{formatDate(member.createdAt, organization.timezone)}</Td>
                     <Td className="text-right">
                       <Link
                         href={`/admin/employees/${member.userId}`}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
                       >
                         View
                         <ArrowRightIcon className="h-3 w-3" />

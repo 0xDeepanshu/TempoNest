@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { backendApiUrl } from "./backend";
 import type { SessionData } from "./types";
 
@@ -32,5 +32,18 @@ export const getSession = cache(async (): Promise<SessionData | null> => {
 export async function requireSession(): Promise<SessionData> {
   const session = await getSession();
   if (!session) redirect("/login");
+  return session;
+}
+
+/**
+ * Hides the platform console from anyone without the database-backed platform
+ * role. The backend re-checks the role on every /platform request, so this guard
+ * is only an early exit for rendering.
+ */
+export async function requirePlatformAdmin(): Promise<SessionData> {
+  const session = await requireSession();
+  if (session.user.status !== "ACTIVE" || session.platformRole !== "SUPERADMIN") {
+    notFound();
+  }
   return session;
 }

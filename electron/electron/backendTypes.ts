@@ -166,6 +166,35 @@ export interface ScreenshotPolicyDisclosure {
   updatedAt: string
 }
 
+/** Server -> agent command that opens the dedicated binary live stream. */
+export interface ScreenLiveStartCommand {
+  type: 'screen.live.start'
+  liveSessionId: string
+  timeSessionId: string
+  expiresAt: string
+  maxFps: number
+  maxFrameWidth: number
+  maxFrameBytes: number
+  streamPath: string
+}
+
+/** Re-delivered on agent reconnect so capture can resume after a drop. */
+export interface PendingScreenLiveSession {
+  liveSessionId: string
+  timeSessionId: string
+  expiresAt: string
+  maxFps: number
+  maxFrameWidth: number
+  maxFrameBytes: number
+  streamPath: string
+}
+
+export interface ScreenLiveSocketError {
+  code?: string
+  message?: string
+  liveSessionId?: string
+}
+
 export type OfflineEventType = 'SESSION_START' | 'BREAK_START' | 'BREAK_END' | 'SESSION_STOP'
 
 export interface OfflineEvent {

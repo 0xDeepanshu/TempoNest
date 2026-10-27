@@ -62,7 +62,9 @@ export function WorkspaceProvider({
   const activeMemberships = useMemo(
     () =>
       session.memberships.filter(
-        (membership) => membership.status === "ACTIVE" && membership.organization,
+        (membership) =>
+          membership.status === "ACTIVE" &&
+          membership.organization?.status === "ACTIVE",
       ),
     [session.memberships],
   );
@@ -106,7 +108,49 @@ export function useWorkspace(): WorkspaceValue {
   return value;
 }
 
+function SuspendedOrganization({ name }: { name: string }) {
+  return (
+    <div className="mx-auto max-w-xl py-8">
+      <Card className="overflow-hidden">
+        <div className="border-b border-line bg-surface-muted px-5 py-4">
+          <h1 className="text-lg font-semibold tracking-tight text-ink">
+            Organization suspended
+          </h1>
+          <p className="mt-1 text-sm leading-6 text-muted">
+            Your membership in <strong>{name}</strong> is active, but the organization has
+            been suspended by the platform administrator.
+          </p>
+        </div>
+        <div className="space-y-3 p-5 text-sm leading-6 text-ink-secondary">
+          <p>
+            Access to attendance, reports, corrections, screenshots, and desktop agents is
+            blocked until the organization is reactivated.
+          </p>
+          <p className="text-xs text-muted">
+            No organization data has been deleted. Contact your TempoNest platform
+            administrator to reactivate the organization.
+          </p>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 export function NoOrganization() {
+  const { session } = useWorkspace();
+  const suspendedOrganization = session.memberships.find(
+    (membership) =>
+      membership.status === "ACTIVE" &&
+      membership.organization?.status === "SUSPENDED",
+  )?.organization;
+
+  if (suspendedOrganization) {
+    return <SuspendedOrganization name={suspendedOrganization.name} />;
+  }
+  return <CreateOrganization />;
+}
+
+function CreateOrganization() {
   const router = useRouter();
   const browserTimezone =
     typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
@@ -139,14 +183,16 @@ export function NoOrganization() {
   return (
     <div className="mx-auto max-w-xl py-8">
       <Card className="overflow-hidden">
-        <div className="border-b border-slate-100 bg-slate-50 px-6 py-5">
-          <h1 className="text-lg font-bold text-slate-900">Create your organization</h1>
-          <p className="mt-1 text-sm leading-6 text-slate-500">
+        <div className="border-b border-line bg-surface-muted px-5 py-4">
+          <h1 className="text-lg font-semibold tracking-tight text-ink">
+            Create your organization
+          </h1>
+          <p className="mt-1 text-sm leading-6 text-muted">
             Your account is not an active member of an organization yet. Create one to start
             managing attendance and time tracking.
           </p>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4 p-6">
+        <form onSubmit={handleSubmit} className="space-y-4 p-5">
           {error ? <Alert tone="danger">{error}</Alert> : null}
           <Field label="Organization name" htmlFor="organization-name" required>
             <Input
@@ -175,7 +221,7 @@ export function NoOrganization() {
           <Button type="submit" loading={loading}>
             Create organization
           </Button>
-          <p className="text-xs leading-5 text-slate-500">
+          <p className="text-xs leading-5 text-muted">
             If someone already invited you, ask them for the invitation link. Invited accounts
             join with the role chosen by the organization administrator.
           </p>
@@ -197,14 +243,16 @@ export function AccessDenied({
   return (
     <div className="mx-auto max-w-2xl py-10">
       <Card className="p-8 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 text-amber-600">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-line bg-surface-muted text-muted">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-6 w-6">
             <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
             <path d="M10.3 3.9 2.5 17.4A2 2 0 0 0 4.2 20h15.6a2 2 0 0 0 1.7-2.6L13.7 3.9a2 2 0 0 0-3.4 0Z" />
           </svg>
         </div>
-        <h1 className="mt-4 text-lg font-bold text-slate-900">You do not have access</h1>
-        <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+        <h1 className="mt-4 text-lg font-semibold tracking-tight text-ink">
+          You do not have access
+        </h1>
+        <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted">
           {organization ? (
             <>
               Your <strong>{membership?.role.toLowerCase()}</strong> role in{" "}
@@ -218,7 +266,7 @@ export function AccessDenied({
         <div className="mt-5">
           <Link
             href="/dashboard"
-            className="inline-flex h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700"
+            className="inline-flex h-9 items-center rounded-lg bg-ink px-4 text-[13px] font-medium text-on-strong transition hover:bg-ink-secondary"
           >
             Back to dashboard
           </Link>

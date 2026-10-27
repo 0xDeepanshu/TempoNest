@@ -222,7 +222,14 @@ export function toSessionSummary(session: SessionModel, currentSessionId: string
 export async function getUserMemberships(userId: string) {
   const memberships = await Membership.findAll({
     where: { userId, status: { [Op.in]: ['ACTIVE', 'SUSPENDED'] } },
-    include: [{ model: Organization, as: 'organization', required: true }],
+    include: [
+      {
+        model: Organization,
+        as: 'organization',
+        required: true,
+        where: { deletedAt: null },
+      },
+    ],
     order: [
       ['createdAt', 'ASC'],
       ['id', 'ASC'],

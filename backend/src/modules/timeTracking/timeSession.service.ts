@@ -1,6 +1,7 @@
 import { Op, Transaction, UniqueConstraintError } from 'sequelize';
 import { sequelize, AgentSyncEvent, Break, DesktopAgent, TimeSession, User } from '../../database';
 import { config } from '../../config/env';
+import { logger } from '../../config/logger';
 import { AppError } from '../../utils/errors';
 import { paginate } from '../../utils/pagination';
 import { secondsBetween } from '../../utils/time';
@@ -375,10 +376,49 @@ export async function getCurrentSession(
   organizationId: string,
   employeeId: string,
 ): Promise<TimeSessionModel | null> {
-  return TimeSession.findOne({
+  const session = await TimeSession.findOne({
     where: { organizationId, employeeId, endedAt: null },
     include: sessionIncludes,
   });
+  if (!session) return null;
+
+  const staleAfterMs = config.timeTracking.sessionStaleSeconds * 1000;
+  if (Date.now() - session.lastHeartbeatAt.getTime() <= staleAfterMs) return session;
+
+  // The desktop may have been closed or crashed without stopping. Recover the
+  // session at its last heartbeat instead of reporting it as running for hours.
+  try {
+    const closed = await serializeByKey(`employee:${employeeId}`, () =>
+      sequelize.transaction(async (transaction) => {
+        await lockEmployee(transaction, employeeId);
+        const locked = await TimeSession.findOne({
+          where: { id: session.id, endedAt: null },
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+        if (!locked) return null;
+        if (Date.now() - locked.lastHeartbeatAt.getTime() <= staleAfterMs) return null;
+
+        const cutoff = new Date(
+          Math.max(locked.startedAt.getTime(), locked.lastHeartbeatAt.getTime()),
+        );
+        await closeActiveBreak(transaction, locked.id, cutoff, true);
+        await locked.update(
+          { endedAt: cutoff, status: 'STOPPED', lastHeartbeatAt: cutoff },
+          { transaction },
+        );
+        return locked;
+      }),
+    );
+    if (!closed) return null;
+
+    const full = await loadSession(closed.id);
+    publishSession(full);
+    return null;
+  } catch (error) {
+    logger.warn({ err: error, sessionId: session.id }, 'failed to recover stale time session');
+    return session;
+  }
 }
 
 export async function getSessionForActor(options: {

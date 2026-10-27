@@ -216,12 +216,12 @@ export function getInitials(name: string): string {
 
 export function initialsColor(seed: string): string {
   const palette = [
-    "bg-indigo-100 text-indigo-700",
-    "bg-emerald-100 text-emerald-700",
-    "bg-amber-100 text-amber-700",
-    "bg-sky-100 text-sky-700",
-    "bg-rose-100 text-rose-700",
-    "bg-violet-100 text-violet-700",
+    "bg-surface-hover text-ink-secondary",
+    "bg-surface-muted text-ink",
+    "border border-line-strong bg-surface text-ink-secondary",
+    "bg-surface-hover text-ink",
+    "bg-surface-muted text-ink-secondary",
+    "border border-line bg-surface-hover text-ink",
   ];
   let hash = 0;
   for (const character of seed) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;

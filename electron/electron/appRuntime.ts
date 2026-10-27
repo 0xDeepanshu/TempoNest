@@ -12,8 +12,9 @@ import { AgentManager } from './agentManager'
 import { AuthManager } from './authManager'
 import { getApiBaseUrl, getWebSocketUrl } from './config'
 import { toUserFacingError } from './errors'
+import { LiveScreenService } from './liveScreenService'
 import { OfflineQueue } from './offlineQueue'
-import { capturePrimaryScreen } from './screenCapture'
+import { captureLiveFrame, capturePrimaryScreen } from './screenCapture'
 import { ScreenshotService } from './screenshotService'
 import { SecureStore } from './secureStore'
 import { TrackingController } from './trackingController'
@@ -58,6 +59,7 @@ export class AppRuntime {
   private readonly auth: AuthManager
   private readonly tracking: TrackingController
   private readonly screenshots: ScreenshotService
+  private readonly liveScreen: LiveScreenService
   private readonly authUnsubscribe: () => void
   private readonly trackingUnsubscribe: () => void
   private readonly statusUnsubscribe: () => void
@@ -87,12 +89,23 @@ export class AppRuntime {
       },
       capture: capturePrimaryScreen
     })
+    this.liveScreen = new LiveScreenService({
+      getCredentials: () => {
+        const token = this.auth.getAccessToken()
+        const agent = agents.getCredentials()
+        if (!token || !agent) return null
+        return { accessToken: token, agentId: agent.id, agentKey: agent.key }
+      },
+      refreshAccessToken: () => this.auth.refreshAccessToken(),
+      capture: captureLiveFrame
+    })
     this.tracking = new TrackingController({
       auth: this.auth,
       agents,
       queue,
       websocketUrl: getWebSocketUrl(),
-      screenshots: this.screenshots
+      screenshots: this.screenshots,
+      liveScreen: this.liveScreen
     })
 
     this.authUnsubscribe = this.auth.onSessionChanged((session) => {

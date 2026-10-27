@@ -19,3 +19,26 @@ export function createApiRateLimiter(options?: { windowMs?: number; max?: number
     },
   });
 }
+
+/**
+ * Counts failed step-up confirmations (for example password re-entry before a
+ * destructive platform action) without penalizing successful operations.
+ */
+export function createSensitiveActionRateLimiter(options?: { windowMs?: number; max?: number }) {
+  return rateLimit({
+    windowMs: options?.windowMs ?? 15 * 60_000,
+    limit: options?.max ?? 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    handler: (req, res) => {
+      res.status(429).json({
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'Too many confirmation attempts. Please try again later.',
+        },
+        requestId: req.requestId,
+      });
+    },
+  });
+}

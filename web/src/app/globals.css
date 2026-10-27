@@ -1,34 +1,163 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  color-scheme: light;
+  --canvas: #f5f5f3;
+  --surface: #ffffff;
+  --surface-muted: #fafaf9;
+  --surface-hover: #f0f0ed;
+  --ink: #0a0a0a;
+  --ink-secondary: #404040;
+  --muted: #71716e;
+  --line: #e5e5e2;
+  --line-strong: #d2d2ce;
+  --on-strong: #ffffff;
+  --overlay: rgb(10 10 10 / 0.4);
+  --success: #157347;
+  --success-surface: #f0faf4;
+  --success-border: #b7e4c9;
+  --warning: #8a5a00;
+  --warning-surface: #fdf8ed;
+  --warning-border: #ecd9a8;
+  --danger: #b42318;
+  --danger-surface: #fdf1f0;
+  --danger-border: #f0c2be;
+  --media: #0a0a0a;
+  --media-foreground: #d4d4d4;
+  --media-danger: #f0a7a1;
+  --brand: #0a0a0a;
+  --brand-foreground: #ffffff;
+  --brand-ink: #0a0a0a;
+  --brand-muted: #a3a3a3;
+  --brand-border: rgb(255 255 255 / 0.16);
+}
+
+.dark {
+  color-scheme: dark;
+  --canvas: #0d0d0d;
+  --surface: #161616;
+  --surface-muted: #1c1c1c;
+  --surface-hover: #242424;
+  --ink: #f4f4f2;
+  --ink-secondary: #d0d0cc;
+  --muted: #9d9d97;
+  --line: #2a2a2a;
+  --line-strong: #3b3b3b;
+  --on-strong: #0d0d0d;
+  --overlay: rgb(0 0 0 / 0.66);
+  --success: #74d9a4;
+  --success-surface: #14251b;
+  --success-border: #2a5c3e;
+  --warning: #e3b341;
+  --warning-surface: #26200f;
+  --warning-border: #5c4a1d;
+  --danger: #f08a82;
+  --danger-surface: #2a1513;
+  --danger-border: #5e2a25;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-hover: var(--surface-hover);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-on-strong: var(--on-strong);
+  --color-overlay: var(--overlay);
+  --color-success: var(--success);
+  --color-success-surface: var(--success-surface);
+  --color-success-border: var(--success-border);
+  --color-warning: var(--warning);
+  --color-warning-surface: var(--warning-surface);
+  --color-warning-border: var(--warning-border);
+  --color-danger: var(--danger);
+  --color-danger-surface: var(--danger-surface);
+  --color-danger-border: var(--danger-border);
+  --color-media: var(--media);
+  --color-media-foreground: var(--media-foreground);
+  --color-media-danger: var(--media-danger);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-muted: var(--brand-muted);
+  --color-brand-border: var(--brand-border);
+  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-html {
-  scroll-behavior: smooth;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    background: var(--canvas);
+    scrollbar-color: var(--line-strong) var(--canvas);
+  }
+
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-}
-
-::selection {
-  background: #c7d2fe;
-  color: #1e1b4b;
+@utility tnum {
+  font-variant-numeric: tabular-nums;
 }
 
 input[type="datetime-local"]::-webkit-calendar-picker-indicator,
-input[type="date"]::-webkit-calendar-picker-indicator {
-  opacity: 0.55;
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
   cursor: pointer;
+}
+
+/* The picker owns its clear affordance; suppress the native duplicate. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
 }

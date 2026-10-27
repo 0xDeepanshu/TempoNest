@@ -39,7 +39,14 @@ export async function loadOrganizationContext(
       return next(AppError.forbidden('Your membership is not active', 'MEMBERSHIP_INACTIVE'));
     }
 
-    if (membership.organization.status === 'SUSPENDED' && req.method !== 'GET') {
+    // Soft-deleted organizations behave as if they no longer exist to tenants.
+    if (membership.organization.deletedAt) {
+      return next(AppError.notFound('Organization not found', 'ORGANIZATION_NOT_FOUND'));
+    }
+
+    // Suspension blocks reads as well as writes. Any existing session loses
+    // tenant access immediately, without touching sessions used for other orgs.
+    if (membership.organization.status !== 'ACTIVE') {
       return next(AppError.forbidden('This organization is suspended', 'ORGANIZATION_SUSPENDED'));
     }
 

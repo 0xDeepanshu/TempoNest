@@ -12,13 +12,14 @@ export interface OrganizationAttributes {
   slug: string;
   status: OrganizationStatus;
   timezone: string;
+  deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export type OrganizationCreationAttributes = Optional<
   OrganizationAttributes,
-  'id' | 'status' | 'timezone' | 'createdAt' | 'updatedAt'
+  'id' | 'status' | 'timezone' | 'deletedAt' | 'createdAt' | 'updatedAt'
 >;
 
 export class Organization
@@ -30,6 +31,7 @@ export class Organization
   declare slug: string;
   declare status: OrganizationStatus;
   declare timezone: string;
+  declare deletedAt: Date | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 
@@ -66,6 +68,14 @@ export function initOrganization(sequelize: Sequelize): typeof Organization {
         allowNull: false,
         defaultValue: 'UTC',
       },
+      deletedAt: {
+        // Soft-delete marker. A deleted organization and every tenant-owned
+        // record remain in place; access is blocked by the organization context
+        // while platform administrators can still inspect and audit it.
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'deleted_at',
+      },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
@@ -84,6 +94,7 @@ export function initOrganization(sequelize: Sequelize): typeof Organization {
       indexes: [
         { name: 'organizations_slug_unique', unique: true, fields: ['slug'] },
         { name: 'organizations_status_idx', fields: ['status'] },
+        { name: 'organizations_deleted_at_idx', fields: ['deleted_at'] },
       ],
     },
   );

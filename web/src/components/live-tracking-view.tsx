@@ -15,7 +15,8 @@ import type {
   TrackingStatusRow,
 } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
-import { CameraIcon, PulseIcon, UsersIcon } from "./icons";
+import { CameraIcon, MonitorIcon, PulseIcon, UsersIcon } from "./icons";
+import { LiveScreenViewer } from "./live-screen-viewer";
 import { ScreenshotRequestButton } from "./screenshot-request-button";
 import {
   Alert,
@@ -52,9 +53,11 @@ export function LiveTrackingView() {
   const role = membership?.role;
   const canViewScreenshots = hasPermission(role, "screenshot:read");
   const canRequestScreenshots = hasPermission(role, "screenshot:request");
+  const canLive = hasPermission(role, "screenshot:live");
 
   const [employeeId, setEmployeeId] = useState("");
   const [page, setPage] = useState(1);
+  const [liveTarget, setLiveTarget] = useState<TrackingStatusRow | null>(null);
 
   const members = useApi<Paginated<MemberListItem>>(
     (signal) =>
@@ -84,7 +87,9 @@ export function LiveTrackingView() {
       }),
     [organizationId],
     {
-      enabled: Boolean(organizationId) && hasPermission(role, "screenshot:policy"),
+      enabled:
+        Boolean(organizationId) &&
+        (hasPermission(role, "screenshot:policy") || canLive),
     },
   );
 
@@ -127,7 +132,13 @@ export function LiveTrackingView() {
   const working = rows.filter((row) => row.state === "WORKING").length;
   const onBreak = rows.filter((row) => row.state === "ON_BREAK").length;
   const pendingCount = pendingByEmployee.size;
-  const monitoringEnabled = policy.data?.data.policy.enabled === true;
+  const policyValue = policy.data?.data.policy;
+  const monitoringEnabled = policyValue?.enabled === true;
+  const liveRoleAllowed =
+    role !== undefined &&
+    policyValue !== undefined &&
+    policyValue.requestRoles.includes(role) &&
+    policyValue.viewRoles.includes(role);
   const screenshotStateUnavailable = Boolean(pending.error || claimed.error);
 
   function refreshAll() {
@@ -137,11 +148,11 @@ export function LiveTrackingView() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization.name} · ${timezone}`}
         title="Live tracking"
-        description="Durable online state, active sessions, heartbeat freshness, and pending screenshot requests. Online state comes from the last agent heartbeat, not an in-memory viewer connection."
+        description="Durable online state, active sessions, heartbeat freshness, and pending screenshot requests. Owners and administrators can also start a live screen view for an eligible employee. Online state comes from the last agent heartbeat, not an in-memory viewer connection."
         actions={
           <Button variant="secondary" size="sm" onClick={refreshAll}>
             Refresh status
@@ -150,9 +161,10 @@ export function LiveTrackingView() {
       />
 
       <Alert tone="info" title="Visible, explicit monitoring">
-        Online and session state is shown through server timestamps. A screenshot request is
-        explicit, one at a time, visible in the employee&apos;s desktop app, and requires an active
-        work session with a fresh heartbeat. This page does not stream a screen.
+        A screenshot request is explicit, one at a time, visible in the employee&apos;s desktop app,
+        and requires an active work session with a fresh heartbeat. Live screen viewing is separate:
+        an owner or administrator starts it deliberately from the employee&apos;s row, it is limited
+        by the monitoring policy and session lifetime, and it is recorded in the audit history.
       </Alert>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -193,7 +205,7 @@ export function LiveTrackingView() {
       </div>
 
       <Card>
-        <div className="grid gap-3 p-5 sm:grid-cols-[1fr_auto] sm:items-end">
+        <div className="grid gap-3 p-4 sm:grid-cols-[1fr_auto] sm:items-end">
           <Field label="Employee" htmlFor="live-employee">
             <Select
               id="live-employee"
@@ -212,14 +224,14 @@ export function LiveTrackingView() {
               ))}
             </Select>
           </Field>
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-muted">
             {tracking.data
               ? `${tracking.data.meta.total} employee${tracking.data.meta.total === 1 ? "" : "s"} · heartbeat stale after ${tracking.data.heartbeatStaleAfterSeconds}s`
               : "Loading server tracking state…"}
           </p>
         </div>
         {members.error ? (
-          <div className="px-5 pb-4">
+          <div className="px-4 pb-4">
             <Alert tone="warning">
               The employee filter could not be loaded. Tracking rows still show the server names.
             </Alert>
@@ -238,17 +250,17 @@ export function LiveTrackingView() {
         </Alert>
       ) : null}
 
+      {canLive && policy.error ? (
+        <Alert tone="warning" title="Live view policy could not be loaded">
+          Live viewing remains available for authorized roles, but no session can start until the
+          monitoring policy loads. {policy.error}
+        </Alert>
+      ) : null}
+
       <Card>
         <CardHeader
           title="Employees"
           description="One row per active membership. Offline employees remain visible with their last known heartbeat."
-          actions={
-            <Link href="/admin/screenshots">
-              <Button variant="ghost" size="sm">
-                Review screenshots
-              </Button>
-            </Link>
-          }
         />
         {tracking.loading && rows.length === 0 ? (
           <LoadingBlock label="Loading tracking status" rows={5} />
@@ -292,20 +304,45 @@ export function LiveTrackingView() {
                           ? "The employee's desktop agent was revoked."
                           : undefined;
 
+                let liveDisabledReason: string | undefined;
+                if (policy.loading && !policyValue) {
+                  liveDisabledReason = "Checking the live view policy…";
+                } else if (!policyValue) {
+                  liveDisabledReason =
+                    "The monitoring policy could not be loaded, so live viewing cannot be authorized right now.";
+                } else if (!monitoringEnabled) {
+                  liveDisabledReason = "Live screen viewing is disabled by the organization policy.";
+                } else if (!liveRoleAllowed) {
+                  liveDisabledReason =
+                    "The monitoring policy does not permit your role to start live viewing.";
+                } else if (!row.activeSession) {
+                  liveDisabledReason =
+                    "Live view requires an active work session in the desktop app.";
+                } else if (!row.online) {
+                  liveDisabledReason =
+                    "Live view requires the employee's desktop agent to be online.";
+                } else if (row.heartbeatStale) {
+                  liveDisabledReason =
+                    "The session heartbeat is stale. Live view will be available after the next heartbeat.";
+                } else if (row.agent?.status === "REVOKED") {
+                  liveDisabledReason =
+                    "Live view is unavailable because the employee's desktop agent was revoked.";
+                }
+
                 return (
-                  <tr key={row.employee.id}>
+                  <tr key={row.employee.id} className="hover:bg-surface-muted">
                     <Td>
                       <div className="flex items-center gap-2.5">
                         <Avatar name={row.employee.name} size="sm" />
                         <div className="min-w-0">
-                          <p className="truncate text-xs font-semibold text-slate-900">
+                          <p className="truncate text-xs font-medium text-ink">
                             {row.employee.name}
                           </p>
-                          <p className="truncate text-[11px] text-slate-500">
+                          <p className="truncate text-[11px] text-muted">
                             {row.employee.email}
                           </p>
                           {member ? (
-                            <p className="mt-0.5 text-[10px] uppercase tracking-wide text-slate-400">
+                            <p className="mt-0.5 text-[10px] uppercase tracking-wide text-muted">
                               {member.role}
                             </p>
                           ) : null}
@@ -317,7 +354,7 @@ export function LiveTrackingView() {
                         <TrackingBadge state={row.state} />
                         <Badge tone={row.online ? "success" : "neutral"}>
                           <span
-                            className={`h-1.5 w-1.5 rounded-full ${row.online ? "bg-emerald-500" : "bg-slate-400"}`}
+                            className={`h-1.5 w-1.5 rounded-full ${row.online ? "bg-success" : "bg-muted"}`}
                             aria-hidden
                           />
                           {row.online ? "Online" : "Offline"}
@@ -327,26 +364,26 @@ export function LiveTrackingView() {
                     <Td>
                       {row.activeSession ? (
                         <div>
-                          <p className="text-xs font-medium text-slate-800">
+                          <p className="text-xs font-medium tnum text-ink">
                             {formatTimeRange(
                               row.activeSession.startedAt,
                               row.activeSession.endedAt,
                               timezone,
                             )}
                           </p>
-                          <p className="mt-0.5 text-[11px] text-slate-500">
+                          <p className="mt-0.5 text-[11px] tnum text-muted">
                             {formatDuration(row.activeSession.durationSeconds)} elapsed
                           </p>
                         </div>
                       ) : (
-                        <span className="text-xs text-slate-400">No active session</span>
+                        <span className="text-xs text-muted">No active session</span>
                       )}
                     </Td>
                     <Td>
-                      <p className="text-xs text-slate-700">
+                      <p className="text-xs text-ink-secondary">
                         {heartbeatLabel(row, timezone)}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-slate-500">
+                      <p className="mt-0.5 text-[11px] text-muted">
                         {row.heartbeatStale
                           ? "Stale heartbeat"
                           : row.lastSeenAt
@@ -357,10 +394,10 @@ export function LiveTrackingView() {
                     <Td>
                       {row.agent ? (
                         <div>
-                          <p className="text-xs font-medium text-slate-800">
+                          <p className="text-xs font-medium text-ink">
                             {row.agent.name}
                           </p>
-                          <p className="mt-0.5 text-[11px] text-slate-500">
+                          <p className="mt-0.5 text-[11px] text-muted">
                             {[row.agent.platform, row.agent.appVersion]
                               .filter(Boolean)
                               .join(" · ") || "Desktop agent"}
@@ -373,7 +410,7 @@ export function LiveTrackingView() {
                           </Badge>
                         </div>
                       ) : (
-                        <span className="text-xs text-slate-400">Not registered</span>
+                        <span className="text-xs text-muted">Not registered</span>
                       )}
                     </Td>
                     {canViewScreenshots ? (
@@ -381,22 +418,42 @@ export function LiveTrackingView() {
                         {request ? (
                           <div>
                             <StatusBadge status={request.status} />
-                            <p className="mt-1 text-[11px] text-slate-500">
+                            <p className="mt-1 text-[11px] text-muted">
                               {request.status === "CLAIMED"
                                 ? "Agent claimed the request"
                                 : "Waiting for the agent"}
                             </p>
-                            <p className="text-[10px] text-slate-400">
+                            <p className="text-[10px] text-muted">
                               Expires {formatDateTime(request.expiresAt, timezone)}
                             </p>
                           </div>
                         ) : (
-                          <span className="text-xs text-slate-400">None pending</span>
+                          <span className="text-xs text-muted">None pending</span>
                         )}
                       </Td>
                     ) : null}
                     <Td className="text-right">
                       <div className="flex flex-col items-end gap-2">
+                        {canLive ? (
+                          <div className="space-y-1">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              disabled={Boolean(liveDisabledReason)}
+                              title={liveDisabledReason}
+                              onClick={() => setLiveTarget(row)}
+                            >
+                              <MonitorIcon className="h-3.5 w-3.5" />
+                              View live screen
+                            </Button>
+                            {liveDisabledReason ? (
+                              <p className="max-w-[15rem] text-right text-[11px] leading-5 text-muted">
+                                {liveDisabledReason}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
                         {canRequestScreenshots ? (
                           <ScreenshotRequestButton
                             employeeId={row.employee.id}
@@ -412,10 +469,9 @@ export function LiveTrackingView() {
                         ) : null}
                         <Link
                           href={`/admin/screenshots?employeeId=${encodeURIComponent(row.employee.id)}`}
+                          className="text-xs font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
                         >
-                          <Button variant="ghost" size="sm">
-                            Open review
-                          </Button>
+                          Open review
                         </Link>
                       </div>
                     </Td>
@@ -425,7 +481,7 @@ export function LiveTrackingView() {
             </tbody>
           </TableShell>
         )}
-        <div className="px-5 pb-4">
+        <div className="px-4 pb-4">
           <Pagination
             page={tracking.data?.meta.page ?? page}
             totalPages={tracking.data?.meta.totalPages ?? 1}
@@ -433,6 +489,18 @@ export function LiveTrackingView() {
           />
         </div>
       </Card>
+
+      {liveTarget ? (
+        <LiveScreenViewer
+          employeeId={liveTarget.employee.id}
+          employeeName={liveTarget.employee.name}
+          organizationId={organizationId}
+          timezone={timezone}
+          autoStart
+          onClose={() => setLiveTarget(null)}
+          onEnded={refreshAll}
+        />
+      ) : null}
     </div>
   );
 }

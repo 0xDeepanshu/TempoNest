@@ -126,7 +126,7 @@ export function RegisterForm() {
           <button
             type="button"
             onClick={() => setShowPassword((value) => !value)}
-            className="absolute inset-y-0 right-2 my-auto h-6 rounded px-2 text-[11px] font-semibold text-slate-500 hover:bg-slate-100"
+            className="absolute inset-y-0 right-2 my-auto h-6 rounded px-2 text-[11px] font-semibold text-muted hover:bg-surface-hover hover:text-ink"
           >
             {showPassword ? "Hide" : "Show"}
           </button>
@@ -152,11 +152,11 @@ export function RegisterForm() {
         Create account
       </Button>
 
-      <p className="text-center text-xs leading-5 text-slate-500">
+      <p className="text-center text-xs leading-5 text-muted">
         Already have an account?{" "}
         <Link
           href={`/login${next !== "/dashboard" ? `?next=${encodeURIComponent(next)}` : ""}`}
-          className="font-semibold text-indigo-600 hover:text-indigo-700"
+          className="font-semibold text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
         >
           Sign in
         </Link>
@@ -167,21 +167,23 @@ export function RegisterForm() {
 
 export function RegisterPanel() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12 sm:px-8">
+    <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-12 sm:px-8">
       <div className="w-full max-w-md">
         <div className="mb-8 flex items-center gap-2.5">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-base font-black text-white">
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-base font-semibold text-on-strong">
             T
           </span>
           <div>
-            <p className="text-lg font-bold tracking-tight text-slate-900">TempoNest</p>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+            <p className="text-lg font-semibold tracking-tight text-ink">TempoNest</p>
+            <p className="text-[10px] font-medium uppercase tracking-widest text-muted">
               Work portal
             </p>
           </div>
         </div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Create your account</h1>
-        <p className="mb-6 mt-1 text-sm leading-5 text-slate-500">
+        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-ink">
+          Create your account
+        </h1>
+        <p className="mb-6 mt-1 text-sm leading-5 text-muted">
           Register with the email address that received the invitation. You will join the
           organization after accepting the invitation token.
         </p>

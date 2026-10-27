@@ -3,6 +3,9 @@ import type { IncomingMessage } from 'node:http'
 import type {
   BackendTimeSession,
   PendingScreenshotRequest,
+  PendingScreenLiveSession,
+  ScreenLiveSocketError,
+  ScreenLiveStartCommand,
   ScreenshotCommand
 } from './backendTypes'
 
@@ -18,6 +21,7 @@ export interface ConnectedPayload {
   state: string
   session: BackendTimeSession | null
   pendingScreenshotRequests?: PendingScreenshotRequest[]
+  pendingScreenLiveSession?: PendingScreenLiveSession | null
   heartbeatIntervalSeconds?: number
 }
 
@@ -36,6 +40,11 @@ interface AgentSocketOptions {
   onScreenshotPending?: (requests: PendingScreenshotRequest[]) => void
   onScreenshotCancelled?: (requestId: string) => void
   onScreenshotError?: (error: { code?: string; message?: string; requestId?: string }) => void
+  onScreenLiveStart?: (command: ScreenLiveStartCommand) => void
+  onScreenLivePending?: (pending: PendingScreenLiveSession | null) => void
+  onScreenLiveStop?: (liveSessionId: string, reason?: string) => void
+  onScreenLiveError?: (error: ScreenLiveSocketError) => void
+  onScreenLiveDisconnected?: () => void
 }
 
 const MAX_BACKOFF_MS = 30_000
@@ -105,6 +114,8 @@ export class AgentSocket {
       this.options.onConnectionChanged(false)
       if (this.intentionalClose) return
 
+      this.options.onScreenLiveDisconnected?.()
+
       const reason = reasonBuffer.toString()
       if (code === 4003) {
         this.options.onBlocked(reason || 'ACCESS_BLOCKED', reason || 'Access was blocked.')
@@ -153,6 +164,26 @@ export class AgentSocket {
     }
   }
 
+  /**
+   * Reports that local live capture failed. Frames never use this channel; it
+   * carries only a bounded, non-secret failure code and message.
+   */
+  sendScreenLiveFailure(liveSessionId: string, code: string, message: string): void {
+    if (!this.isOpen) return
+    try {
+      this.socket?.send(
+        JSON.stringify({
+          type: 'screen.live.failed',
+          liveSessionId,
+          code,
+          message: message.slice(0, 500)
+        })
+      )
+    } catch {
+      // The server expires the live session independently on disconnect.
+    }
+  }
+
   private sendHeartbeat(): void {
     if (!this.isOpen) return
     try {
@@ -192,6 +223,33 @@ export class AgentSocket {
       if (connected.pendingScreenshotRequests?.length) {
         this.options.onScreenshotPending?.(connected.pendingScreenshotRequests)
       }
+      this.options.onScreenLivePending?.(connected.pendingScreenLiveSession ?? null)
+      return
+    }
+
+    if (type === 'screen.live.start') {
+      this.options.onScreenLiveStart?.(payload as unknown as ScreenLiveStartCommand)
+      return
+    }
+
+    if (type === 'screen.live.stop') {
+      const liveSessionId = payload.liveSessionId
+      if (typeof liveSessionId === 'string') {
+        this.options.onScreenLiveStop?.(
+          liveSessionId,
+          typeof payload.reason === 'string' ? payload.reason : undefined
+        )
+      }
+      return
+    }
+
+    if (type === 'screen.live.error' || type === 'screen.live.failed') {
+      this.options.onScreenLiveError?.({
+        code: typeof payload.code === 'string' ? payload.code : undefined,
+        message: typeof payload.message === 'string' ? payload.message : undefined,
+        liveSessionId:
+          typeof payload.liveSessionId === 'string' ? payload.liveSessionId : undefined
+      })
       return
     }
 

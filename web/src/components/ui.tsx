@@ -19,21 +19,21 @@ type ButtonSize = "sm" | "md" | "lg";
 
 const buttonVariants: Record<ButtonVariant, string> = {
   primary:
-    "bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 focus-visible:outline-indigo-600 disabled:bg-indigo-300",
+    "bg-ink text-on-strong hover:bg-ink-secondary focus-visible:outline-ink disabled:bg-line-strong disabled:text-muted",
   secondary:
-    "border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50 focus-visible:outline-slate-500 disabled:text-slate-400",
+    "border border-line-strong bg-surface text-ink hover:bg-surface-muted focus-visible:outline-ink disabled:bg-surface-muted disabled:text-muted",
   ghost:
-    "text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-slate-500",
+    "text-ink-secondary hover:bg-surface-hover hover:text-ink focus-visible:outline-ink disabled:text-muted",
   danger:
-    "bg-rose-600 text-white shadow-sm hover:bg-rose-700 focus-visible:outline-rose-600 disabled:bg-rose-300",
+    "bg-danger text-on-strong hover:bg-danger/90 focus-visible:outline-danger disabled:bg-line-strong disabled:text-muted",
   subtle:
-    "bg-indigo-50 text-indigo-700 hover:bg-indigo-100 focus-visible:outline-indigo-600 disabled:text-indigo-300",
+    "bg-surface-hover text-ink hover:bg-line focus-visible:outline-ink disabled:text-muted",
 };
 
 const buttonSizes: Record<ButtonSize, string> = {
-  sm: "h-8 px-3 text-xs",
-  md: "h-10 px-4 text-sm",
-  lg: "h-11 px-5 text-sm",
+  sm: "h-8 px-2.5 text-xs",
+  md: "h-9 px-3.5 text-[13px]",
+  lg: "h-10 px-4 text-sm",
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -54,7 +54,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed",
         buttonVariants[variant],
         buttonSizes[size],
         className,
@@ -62,7 +62,7 @@ export function Button({
       disabled={disabled || loading}
       {...props}
     >
-      {loading ? <Spinner className="h-4 w-4" /> : null}
+      {loading ? <Spinner className="h-3.5 w-3.5" /> : null}
       {children}
     </button>
   );
@@ -70,13 +70,7 @@ export function Button({
 
 export function Card({ className, children, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      className={cn(
-        "rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
-        className,
-      )}
-      {...props}
-    >
+    <div className={cn("rounded-xl border border-line bg-surface", className)} {...props}>
       {children}
     </div>
   );
@@ -96,14 +90,14 @@ export function CardHeader({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4",
+        "flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-3.5",
         className,
       )}
     >
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+        <h2 className="text-[13px] font-semibold text-ink">{title}</h2>
         {description ? (
-          <p className="mt-0.5 text-xs leading-5 text-slate-500">{description}</p>
+          <p className="mt-0.5 text-xs leading-5 text-muted">{description}</p>
         ) : null}
       </div>
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
@@ -113,29 +107,22 @@ export function CardHeader({
 
 export function CardBody({ className, children, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("p-5", className)} {...props}>
+    <div className={cn("p-4", className)} {...props}>
       {children}
     </div>
   );
 }
 
-type BadgeTone =
-  | "neutral"
-  | "success"
-  | "warning"
-  | "danger"
-  | "info"
-  | "indigo"
-  | "outline";
+type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info" | "indigo" | "outline";
 
 const badgeTones: Record<BadgeTone, string> = {
-  neutral: "bg-slate-100 text-slate-700 ring-slate-200",
-  success: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  warning: "bg-amber-50 text-amber-700 ring-amber-200",
-  danger: "bg-rose-50 text-rose-700 ring-rose-200",
-  info: "bg-sky-50 text-sky-700 ring-sky-200",
-  indigo: "bg-indigo-50 text-indigo-700 ring-indigo-200",
-  outline: "bg-white text-slate-600 ring-slate-300",
+  neutral: "bg-surface-muted text-ink-secondary ring-line-strong",
+  success: "bg-success-surface text-success ring-success-border",
+  warning: "bg-warning-surface text-warning ring-warning-border",
+  danger: "bg-danger-surface text-danger ring-danger-border",
+  info: "bg-surface-hover text-ink-secondary ring-line-strong",
+  indigo: "bg-ink text-on-strong ring-ink",
+  outline: "bg-surface text-ink-secondary ring-line-strong",
 };
 
 export function Badge({
@@ -150,7 +137,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset",
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-4 ring-1 ring-inset",
         badgeTones[tone],
         className,
       )}
@@ -165,6 +152,7 @@ export function StatusBadge({ status }: { status: string }) {
     ACTIVE: { tone: "success", label: "Active" },
     SUSPENDED: { tone: "warning", label: "Suspended" },
     REMOVED: { tone: "neutral", label: "Removed" },
+    DELETED: { tone: "danger", label: "Deleted" },
     PENDING: { tone: "warning", label: "Pending" },
     APPROVED: { tone: "success", label: "Approved" },
     REJECTED: { tone: "danger", label: "Rejected" },
@@ -187,8 +175,8 @@ export function StatusBadge({ status }: { status: string }) {
 export function RoleBadge({ role }: { role: Role }) {
   const map: Record<Role, BadgeTone> = {
     OWNER: "indigo",
-    ADMIN: "info",
-    MANAGER: "success",
+    ADMIN: "neutral",
+    MANAGER: "outline",
     EMPLOYEE: "outline",
   };
   return (
@@ -229,22 +217,22 @@ export function Field({
 }) {
   return (
     <div className={cn("space-y-1.5", className)}>
-      <label htmlFor={htmlFor} className="block text-xs font-semibold text-slate-700">
+      <label htmlFor={htmlFor} className="block text-xs font-medium text-ink-secondary">
         {label}
-        {required ? <span className="ml-0.5 text-rose-500">*</span> : null}
+        {required ? <span className="ml-0.5 text-danger">*</span> : null}
       </label>
       {children}
       {error ? (
-        <p className="text-xs font-medium text-rose-600">{error}</p>
+        <p className="text-xs font-medium text-danger">{error}</p>
       ) : hint ? (
-        <p className="text-xs leading-5 text-slate-500">{hint}</p>
+        <p className="text-xs leading-5 text-muted">{hint}</p>
       ) : null}
     </div>
   );
 }
 
 const inputClass =
-  "block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-500";
+  "block w-full rounded-lg border border-line-strong bg-surface px-2.5 py-2 text-[13px] text-ink outline-none transition placeholder:text-muted focus:border-ink focus:ring-2 focus:ring-ink/10 focus-visible:outline-none disabled:bg-surface-muted disabled:text-muted";
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={cn(inputClass, className)} {...props} />;
@@ -277,13 +265,15 @@ export function PageHeader({
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div>
         {eyebrow ? (
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-600">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{title}</h1>
+        <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-ink sm:text-[26px]">
+          {title}
+        </h1>
         {description ? (
-          <p className="mt-1.5 max-w-3xl text-sm leading-6 text-slate-500">{description}</p>
+          <p className="mt-1 max-w-3xl text-[13px] leading-5 text-muted">{description}</p>
         ) : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
@@ -305,23 +295,23 @@ export function StatCard({
   icon?: ReactNode;
 }) {
   const accents: Record<string, string> = {
-    indigo: "bg-indigo-50 text-indigo-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    amber: "bg-amber-50 text-amber-600",
-    sky: "bg-sky-50 text-sky-600",
-    rose: "bg-rose-50 text-rose-600",
-    slate: "bg-slate-100 text-slate-600",
+    indigo: "bg-surface-hover text-ink",
+    emerald: "bg-surface-hover text-ink",
+    amber: "bg-surface-hover text-ink",
+    sky: "bg-surface-hover text-ink",
+    rose: "bg-surface-hover text-ink",
+    slate: "bg-surface-hover text-ink",
   };
   return (
-    <Card className="p-5">
+    <Card className="p-4" data-accent={accent}>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">{label}</p>
         {icon ? (
-          <span className={cn("rounded-lg p-1.5", accents[accent])}>{icon}</span>
+          <span className={cn("rounded-md p-1.5", accents[accent])}>{icon}</span>
         ) : null}
       </div>
-      <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900">{value}</p>
-      {hint ? <p className="mt-1 text-xs leading-5 text-slate-500">{hint}</p> : null}
+      <p className="mt-1.5 text-[22px] font-semibold tnum tracking-tight text-ink">{value}</p>
+      {hint ? <p className="mt-1 text-xs leading-5 text-muted">{hint}</p> : null}
     </Card>
   );
 }
@@ -329,7 +319,7 @@ export function StatCard({
 export function TableShell({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className={cn("overflow-x-auto", className)}>
-      <table className="w-full min-w-[640px] border-collapse text-left text-sm">{children}</table>
+      <table className="w-full min-w-[560px] border-collapse text-left text-[13px]">{children}</table>
     </div>
   );
 }
@@ -339,7 +329,7 @@ export function Th({ children, className }: { children?: ReactNode; className?: 
     <th
       scope="col"
       className={cn(
-        "whitespace-nowrap border-b border-slate-200 bg-slate-50/80 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500",
+        "whitespace-nowrap border-b border-line bg-surface-muted px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted",
         className,
       )}
     >
@@ -350,7 +340,7 @@ export function Th({ children, className }: { children?: ReactNode; className?: 
 
 export function Td({ children, className }: { children?: ReactNode; className?: string }) {
   return (
-    <td className={cn("border-b border-slate-100 px-4 py-3 align-top text-slate-700", className)}>
+    <td className={cn("border-b border-line px-3 py-2.5 align-middle text-ink-secondary", className)}>
       {children}
     </td>
   );
@@ -365,13 +355,13 @@ export function Avatar({
 }) {
   const sizes = {
     sm: "h-7 w-7 text-[10px]",
-    md: "h-9 w-9 text-xs",
-    lg: "h-12 w-12 text-sm",
+    md: "h-8 w-8 text-[11px]",
+    lg: "h-11 w-11 text-sm",
   };
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-full font-bold",
+        "inline-flex shrink-0 items-center justify-center rounded-full font-semibold",
         sizes[size],
         initialsColor(name),
       )}
@@ -394,17 +384,17 @@ export function EmptyState({
   icon?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+    <div className="flex flex-col items-center justify-center px-6 py-10 text-center">
       {icon ? (
-        <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-surface-muted text-muted">
           {icon}
         </div>
       ) : null}
-      <p className="text-sm font-semibold text-slate-900">{title}</p>
+      <p className="text-[13px] font-semibold text-ink">{title}</p>
       {description ? (
-        <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">{description}</p>
+        <p className="mt-1 max-w-sm text-xs leading-5 text-muted">{description}</p>
       ) : null}
-      {action ? <div className="mt-4">{action}</div> : null}
+      {action ? <div className="mt-3">{action}</div> : null}
     </div>
   );
 }
@@ -430,13 +420,13 @@ export function Spinner({ className }: { className?: string }) {
 
 export function LoadingBlock({ label = "Loading…", rows = 3 }: { label?: string; rows?: number }) {
   return (
-    <div className="space-y-3 p-5" aria-busy="true" aria-label={label}>
+    <div className="space-y-3 p-4" aria-busy="true" aria-label={label}>
       {Array.from({ length: rows }).map((_, index) => (
         <div key={index} className="flex items-center gap-3">
-          <div className="h-9 w-9 animate-pulse rounded-full bg-slate-100" />
+          <div className="h-8 w-8 animate-pulse rounded-full bg-surface-hover" />
           <div className="flex-1 space-y-2">
-            <div className="h-3 w-1/3 animate-pulse rounded bg-slate-100" />
-            <div className="h-3 w-2/3 animate-pulse rounded bg-slate-100" />
+            <div className="h-2.5 w-1/3 animate-pulse rounded bg-surface-hover" />
+            <div className="h-2.5 w-2/3 animate-pulse rounded bg-surface-hover" />
           </div>
         </div>
       ))}
@@ -456,7 +446,7 @@ export function ErrorState({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800",
+        "flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger-border bg-danger-surface px-3.5 py-2.5 text-[13px] text-danger",
         className,
       )}
       role="alert"
@@ -484,13 +474,13 @@ export function Alert({
   className?: string;
 }) {
   const tones = {
-    info: "border-sky-200 bg-sky-50 text-sky-900",
-    success: "border-emerald-200 bg-emerald-50 text-emerald-900",
-    warning: "border-amber-200 bg-amber-50 text-amber-900",
-    danger: "border-rose-200 bg-rose-50 text-rose-900",
+    info: "border-line bg-surface-muted text-ink-secondary",
+    success: "border-success-border bg-success-surface text-success",
+    warning: "border-warning-border bg-warning-surface text-warning",
+    danger: "border-danger-border bg-danger-surface text-danger",
   };
   return (
-    <div className={cn("rounded-xl border px-4 py-3 text-sm", tones[tone], className)} role="status">
+    <div className={cn("rounded-lg border px-3.5 py-2.5 text-[13px]", tones[tone], className)} role="status">
       {title ? <p className="font-semibold">{title}</p> : null}
       {children ? <div className={cn(title && "mt-1", "text-xs leading-5")}>{children}</div> : null}
     </div>
@@ -509,22 +499,25 @@ export function Tabs<T extends string>({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1", className)}>
+    <div
+      className={cn("inline-flex flex-wrap gap-0.5 rounded-lg border border-line bg-surface p-0.5", className)}
+    >
       {tabs.map((tab) => (
         <button
           key={tab.value}
           type="button"
           onClick={() => onChange(tab.value)}
+          aria-pressed={value === tab.value}
           className={cn(
-            "rounded-md px-3 py-1.5 text-xs font-semibold transition",
+            "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
             value === tab.value
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-500 hover:text-slate-800",
+              ? "bg-ink text-on-strong"
+              : "text-muted hover:bg-surface-muted hover:text-ink",
           )}
         >
           {tab.label}
           {tab.count !== undefined ? (
-            <span className="ml-1.5 text-[10px] text-slate-400">{tab.count}</span>
+            <span className="ml-1.5 text-[10px] font-normal opacity-70">{tab.count}</span>
           ) : null}
         </button>
       ))}
@@ -543,8 +536,8 @@ export function Pagination({
 }) {
   if (totalPages <= 1) return null;
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
-      <span>
+    <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-2.5 text-xs text-muted">
+      <span className="tnum">
         Page {page} of {totalPages}
       </span>
       <div className="flex gap-2">
@@ -571,9 +564,9 @@ export function Pagination({
 
 export function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="grid grid-cols-[130px_1fr] gap-3 py-2 text-sm">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="min-w-0 font-medium text-slate-800">{value}</dd>
+    <div className="grid grid-cols-[140px_1fr] gap-3 border-b border-line py-2 text-[13px] last:border-0">
+      <dt className="text-muted">{label}</dt>
+      <dd className="min-w-0 font-medium text-ink">{value}</dd>
     </div>
   );
 }

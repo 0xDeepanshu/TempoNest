@@ -16,6 +16,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "smoke": "tsx scripts/smoke.ts",
+    "platform:grant": "tsx scripts/platform-role.ts grant",
+    "platform:revoke": "tsx scripts/platform-role.ts revoke",
     "db:create": "sequelize-cli db:create",
     "db:drop": "sequelize-cli db:drop",
     "db:migrate": "sequelize-cli db:migrate",

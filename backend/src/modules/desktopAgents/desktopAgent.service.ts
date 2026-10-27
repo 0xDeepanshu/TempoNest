@@ -8,6 +8,8 @@ import { paginate } from '../../utils/pagination';
 import { hasPermission } from '../memberships/permissions';
 import { serializeByKey } from '../../utils/serialize';
 import { agentHub } from '../../realtime/agentHub';
+import { terminateActiveScreenLiveSessionsForAgent } from '../screenshots/screenLive.service';
+import { logger } from '../../config/logger';
 import { toDesktopAgentSummary } from './desktopAgent.mapper';
 import type { RegisterAgentInput } from './desktopAgent.schemas';
 import type { DesktopAgent as DesktopAgentModel } from './desktopAgent.model';
@@ -92,7 +94,6 @@ export async function authenticateAgent(agentId: string, agentKey: string) {
     throw AppError.forbidden('This desktop agent has been revoked', 'AGENT_REVOKED');
   }
 
-  await touchAgent(agent);
   const withRelations = await DesktopAgent.findByPk(agent.id, {
     include: [
       { model: Organization, as: 'organization' },
@@ -100,7 +101,16 @@ export async function authenticateAgent(agentId: string, agentKey: string) {
     ],
   });
 
-  return withRelations ?? agent;
+  if (
+    !withRelations?.organization ||
+    withRelations.organization.deletedAt ||
+    withRelations.organization.status !== 'ACTIVE'
+  ) {
+    throw AppError.forbidden('This organization is suspended', 'ORGANIZATION_SUSPENDED');
+  }
+
+  await touchAgent(agent);
+  return withRelations;
 }
 
 /**
@@ -241,6 +251,9 @@ export async function revokeDesktopAgent(
   });
 
   // Live sockets are process-local; durable denial is enforced by revoked_at.
+  await terminateActiveScreenLiveSessionsForAgent(agent.id).catch((error) =>
+    logger.warn({ err: error, agentId: agent.id }, 'failed to end live sessions on agent revoke'),
+  );
   agentHub.publishToAgent(agent.id, {
     type: 'agent.revoked',
     serverTime: now.toISOString(),

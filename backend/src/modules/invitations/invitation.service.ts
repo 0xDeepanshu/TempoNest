@@ -195,6 +195,13 @@ export async function previewInvitation(token: string) {
 
   assertInvitationUsable(invitation);
 
+  if (invitation.organization!.deletedAt || invitation.organization!.status !== 'ACTIVE') {
+    throw AppError.forbidden(
+      'This organization is not accepting invitations',
+      'ORGANIZATION_SUSPENDED',
+    );
+  }
+
   return {
     organization: toOrganizationSummary(invitation.organization!),
     email: invitation.email,
@@ -229,8 +236,8 @@ export async function acceptInvitation(
       );
     }
 
-    if (invitation.organization.status !== 'ACTIVE') {
-      throw AppError.forbidden('This organization is suspended', 'ORGANIZATION_SUSPENDED');
+    if (invitation.organization.deletedAt || invitation.organization.status !== 'ACTIVE') {
+      throw AppError.forbidden('This organization is not accepting invitations', 'ORGANIZATION_SUSPENDED');
     }
 
     const existingMembership = await Membership.findOne({

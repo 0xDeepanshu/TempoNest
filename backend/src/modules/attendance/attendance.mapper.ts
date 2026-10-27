@@ -1,4 +1,5 @@
 import { secondsBetween } from '../../utils/time';
+import { toTimeSessionSummary } from '../timeTracking/timeSession.mapper';
 import type { AttendanceCorrectionRequest as AttendanceCorrectionModel } from './attendanceCorrection.model';
 import type { AttendanceEvidence as AttendanceEvidenceModel } from './attendanceEvidence.model';
 import type { AttendanceCheckIn as AttendanceCheckInModel } from './attendanceCheckIn.model';
@@ -115,3 +116,28 @@ export function toAttendanceCheckInSummary(checkIn: AttendanceCheckInModel) {
 }
 
 export type AttendanceCheckInSummary = ReturnType<typeof toAttendanceCheckInSummary>;
+
+/**
+ * Admin-facing check-in view. The employee and session are loaded explicitly;
+ * evidence remains metadata-only and still never exposes storage keys.
+ */
+export function toAttendanceCheckInAdminSummary(
+  checkIn: AttendanceCheckInModel,
+  now = new Date(),
+) {
+  return {
+    ...toAttendanceCheckInSummary(checkIn),
+    employee: checkIn.employee
+      ? {
+          id: checkIn.employee.id,
+          name: checkIn.employee.name,
+          email: checkIn.employee.email,
+        }
+      : null,
+    session: checkIn.timeSession
+      ? toTimeSessionSummary(checkIn.timeSession, now)
+      : null,
+  };
+}
+
+export type AttendanceCheckInAdminSummary = ReturnType<typeof toAttendanceCheckInAdminSummary>;

@@ -1,219 +1,162 @@
-# Live screen streaming — design assessment (not implemented)
+# Live screen viewing — implementation and operations
 
-Status: **proposal only**. No live-streaming endpoint, viewer, capture pipeline, or portal screen
-exists. Screenshot requests remain the only supported monitoring capability. Do not start
-implementation until the open decisions and approval gate at the end are resolved.
+Status: **implemented** as an administrator-only, time-boxed WebSocket relay. The transport decision is
+a dedicated authenticated binary relay; WebRTC/TURN is intentionally not used. Continuous frames never
+travel over the JSON agent socket.
 
 The existing screenshot contract (explicit request, claim-gated capture, visible employee state,
-private storage, retention, audit) is the baseline. Live streaming must not weaken it. In
-particular, a stream is not a periodic screenshot loop and must never run without an explicit,
-visible, policy-authorized session.
+private storage, retention, audit) remains the baseline. Live viewing reuses the same organization
+policy, role matrix, disclosure acknowledgement, tenant scoping, and audit trail. Frame bytes are
+never persisted.
 
 ---
 
 ## 1. Goals
 
-- Allow an authorized OWNER/ADMIN to request a **bounded, live view** of one employee’s primary
-  display only while the employee has an active, heartbeat-fresh work session.
-- Make initiation and termination obvious to the employee in the desktop app.
-- Keep frame data off the API server and out of application logs.
-- Require the same organization scoping, disclosure, acknowledgement, role policy, audit, and
-  revocation checks as screenshots.
-- Fail closed: offline agent, stale session, disabled policy, missing consent, revoked device, or
-  lost authorization terminates the stream.
-- Enforce expiry and concurrency limits server-side, not only in the portal.
+- Allow an authorized OWNER/ADMIN to view one employee’s primary display only during an active,
+  heartbeat-fresh work session.
+- Require an explicit administrator start action and, on the desktop, the server’s start command.
+- Keep frames in memory only: no recording, replay, object storage, database rows, or logs.
+- Fail closed on policy disable, role loss, missing acknowledgement, stale/absent session, revoked
+  agent, suspended organization, expiry, or lost authorization.
+- Enforce duration, frame rate, size, and backpressure limits server-side.
 
-## 2. Explicit non-goals
+## 2. Non-goals
 
-- No covert or always-on viewing.
-- No recording, replay, or storage of a stream by default.
-- No audio, cursor history, keystrokes, clipboard, window titles, URLs, or file contents.
-- No multi-employee gallery, bulk viewing, or background browser tab that keeps capturing.
-- No mobile/native viewer in the first iteration.
-- No reuse of screenshot upload tokens as stream authorization.
+- No covert or always-on viewing; no employee-facing controls were added.
+- No audio, input, clipboard, window titles, URLs, or file contents.
+- No automatic, bulk, timer-based, or multi-employee capture.
+- No stream recording by default, and no feature to enable recording.
+- No mobile/native viewer in this iteration.
+- No reuse of screenshot upload tokens as live authorization.
 
-## 3. Proposed lifecycle
+## 3. Components
 
-1. **Request.** An authorized admin selects an employee in the portal and confirms a start action.
-   The backend checks `screenshot:policy`, role policy, employee acknowledgement, active session,
-   fresh heartbeat, agent status, concurrent viewer limits, and cooldown. It creates a short-lived
-   `screen_stream_sessions` row with `PENDING`, a random stream ID, requester, employee, agent,
-   maximum duration, and expiry.
-2. **Notify.** The agent socket receives `screenStream.request` with the stream ID, expiry, and a
-   one-time join challenge. The desktop app shows a persistent indicator naming the organization
-   and the fact that an administrator is viewing the screen.
-3. **Accept.** The agent acknowledges over the authenticated socket. The backend marks the stream
-   `ACTIVE` only if the employee is still eligible. The viewer receives a short-lived,
-   single-use viewer token bound to the stream, user, organization, and role.
-4. **Transport.** Frames travel over an encrypted, ephemeral channel (see section 5). The API
-   server never sees frame bytes after signaling.
-5. **Terminate.** Any of these ends the stream and revokes tokens immediately: viewer stop, agent
-   stop, expiry, session end, stale heartbeat, policy disable, role removal, device revocation,
-   organization suspension, logout, socket loss beyond grace, or concurrency violation.
-6. **Audit.** Start, accept, connect, disconnect, stop reason, duration, and viewer identity are
-   recorded. Frame content is never audited or stored.
-
-## 4. Authorization and policy
-
-Add a dedicated policy surface rather than overloading screenshots implicitly:
-
-```text
-streamingEnabled              boolean, default false
-streamRoles                   OWNER/ADMIN only by default
-maxDurationSeconds            60–300, default 120
-maxConcurrentViewers          1 default, hard cap 2
-idleTimeoutSeconds            15
-frameRateCap                  2–5 fps default 2
-resolutionCap                 e.g. 1280×720
-employeeAcknowledgementRequired  reuse screenshot disclosure or separate stream disclosure
-auditRetentionDays            reuse screenshot audit retention
-```
-
-Rules:
-
-- Route permission alone is insufficient; the role must also appear in `streamRoles`.
-- Streaming is disabled by default and stays disabled until an owner explicitly enables it.
-- The employee disclosure must state that live viewing is possible, who can start it, the maximum
-  duration, and whether frames are recorded (default: no).
-- If acknowledgement is required, the current disclosure version must be acknowledged before a
-  stream request is accepted.
-- A stream cannot start during a break unless policy explicitly permits it. Default: no.
-- A stream cannot start without an active session and fresh heartbeat at both request and accept.
-- Device revocation, membership suspension, or organization suspension terminates every stream.
-
-## 5. Transport options
-
-### Option A — WebRTC (recommended for production)
-
-- Agent creates a peer connection and offers a display track using Electron
-  `desktopCapturer` + `getUserMedia`/`MediaStream`.
-- Signaling uses authenticated WebSocket messages or HTTPS; media uses DTLS-SRTP.
-- Use a TURN server with short-lived credentials; do not rely on public STUN alone.
-- The viewer receives a single-use token and connects from the portal.
-- Server enforces stream expiry by closing signaling and revoking TURN credentials.
-
-Trade-offs: lowest latency and bandwidth; more operational complexity (TURN, NAT, codec
-compatibility). Requires careful TURN credential isolation.
-
-### Option B — WebSocket JPEG frames (fallback)
-
-- Agent sends downscaled JPEG frames over a dedicated WSS connection; viewer receives them over a
-  separate authenticated connection.
-- Server relays frames in memory only, or uses a direct agent→viewer path with signed tokens.
-- Lower implementation complexity, higher bandwidth and server CPU; latency and fan-out are worse.
-- Must cap frame size, rate, and total bytes; drop frames rather than queue unboundedly.
-
-Trade-offs: simpler to build and reason about, but the relay becomes a privacy-sensitive data path
-and a denial-of-service target. If chosen, frames must never be written to disk, logs, or error
-reports.
-
-**Recommendation:** approve WebRTC for the first production implementation, with an explicit
-feature flag and a kill switch. Do not ship the WebSocket relay as an implicit fallback without a
-separate review.
-
-## 6. Backend changes (not implemented)
-
-- New `screen_stream_sessions` and `screen_stream_audit` rows (or reuse `audit_events` with new
-  actions) with organization, employee, agent, requester, state, timestamps, stop reason, and
-  expiry. No frame bytes and no storage keys.
-- Endpoints, all with `X-Organization-Id` and role/policy checks:
-  - `POST /admin/employees/:employeeId/screen-streams` — request a session.
-  - `GET /admin/screen-streams/:streamId` — scoped status for the requester.
-  - `POST /admin/screen-streams/:streamId/stop` — idempotent viewer stop.
-  - `POST /agent/screen-streams/:streamId/accept` and `/stop` — agent transitions.
-  - Signaling/offer/answer/ICE relay over the existing agent socket or a dedicated ephemeral
-    channel; never expose TURN secrets to the browser beyond the scoped session.
-- Server-side timers/workers expire sessions even if both clients disconnect.
-- Cleanup on startup, like screenshot maintenance.
-- Rate limits: per organization, per admin, per employee, and global concurrent streams.
-- Structured audit actions: `SCREEN_STREAM_REQUESTED`, `SCREEN_STREAM_ACCEPTED`,
-  `SCREEN_STREAM_VIEWER_CONNECTED`, `SCREEN_STREAM_STOPPED`, `SCREEN_STREAM_EXPIRED`,
-  `SCREEN_STREAM_FAILED`, `SCREEN_STREAM_DENIED`.
-- Never log SDP with embedded credentials, ICE candidates containing private network details in
-  production logs, frame bytes, or viewer tokens.
-
-## 7. Electron changes
-
-- Add a `ScreenStreamService` in the main process, separate from screenshot capture.
-- Capture only the primary display, with a resolution and frame-rate cap.
-- Show a persistent, non-dismissible indicator while streaming, including who started it and the
-  remaining time. Provide a local “Stop sharing” action that immediately ends the stream.
-- Stop playback when the window is minimized? No — but stop when the OS permission is revoked,
-  the display is locked, the machine sleeps, or the agent loses authorization.
-- Never expose media tracks, frame bytes, TURN credentials, or stream tokens to the renderer.
-- Do not start automatically on a request without displaying the indicator and validating policy,
-  session, heartbeat, and consent.
-- A stream request alone is not permission to capture until the server accepts the agent’s
-  acknowledgement and the employee is eligible.
-
-## 8. Portal changes
-
-- Add a separate “Live view” action on the employee row, gated by a dedicated permission and
-  policy. Do not reuse the screenshot button silently.
-- Show a confirmation dialog with duration, disclosure, and a clear statement that the employee
-  will see an indicator.
-- While active: elapsed time, remaining time, viewer identity, stop button, connection state, and
-  a warning that closing the page stops the stream.
-- Show denied states distinctly: policy disabled, role not allowed, employee offline, no active
-  session, stale heartbeat, revoked agent, acknowledgement required, concurrent limit reached.
-- Never cache frames, expose tokens in URLs, or keep the stream alive in a background tab.
-- Stop on page hide, logout, organization switch, or role loss.
-
-## 9. Privacy and compliance
-
-- Streaming increases legal and ethical risk versus one-shot screenshots. Require explicit
-  organization policy, employee disclosure, and documented consent where required by law.
-- Default to no recording. If recording is ever proposed, treat it as a separate data-retention
-  feature requiring its own approval, storage design, retention limits, and audit.
-- Provide an employee-accessible record of when streams occurred.
-- Region-specific requirements (works councils, monitoring notice, consent) must be reviewed
-  before enablement. The product must not imply that a single acknowledgement covers every
-  jurisdiction.
-
-## 10. Failure and abuse cases
-
-| Case | Required behavior |
+| Layer | Responsibility |
 | --- | --- |
-| Agent offline | Request fails with a clear offline state; no queued stream starts silently later. |
-| Session ends or heartbeat stales | Terminate within one idle timeout; audit reason. |
-| Policy disabled mid-stream | Terminate immediately and revoke tokens. |
-| Role removed or membership suspended | Terminate immediately; deny reconnect. |
-| Device revoked | Terminate; agent clears any stream state and local media. |
-| Viewer closes tab or loses network | Agent stops sending within the grace window; session expires server-side. |
-| Agent crashes | Session expires; viewer sees a terminal state, not a frozen frame. |
-| TURN/relay overload | Reject new sessions; never degrade by recording or queuing frames. |
-| Token replay | Single-use viewer token, bound to stream/user/organization, short TTL. |
-| Cross-organization ID probing | 404/403 consistently; never reveal another organization’s session. |
-| Concurrent viewer limit exceeded | Deny with an explicit limit error; do not silently share the stream. |
+| Backend REST | Create/reuse one active session per employee, issue single-use viewer tickets, stop sessions, persist lifecycle and audit rows. |
+| Backend relay | Accept unauthenticated viewer upgrades only long enough to receive a first-message ticket, revalidate durable authorization, fan JPEG binaries from one agent socket to authorized viewers, enforce limits and grace timers. |
+| JSON agent socket | Delivers only `screen.live.start` control commands; receives sanitized `screen.live.failed` reports. Never carries frames. |
+| Electron main process | Captures the primary display with `desktopCapturer`, encodes bounded JPEG frames, connects to the agent stream only after `live.ready`, stops on every terminal condition. No renderer UI or IPC surface was added. |
+| Next.js admin portal | Deliberate Start action, ticket request, direct browser WebSocket, connecting/live/reconnecting/ended/unavailable/restricted states, last-frame time, explicit Stop. |
 
-## 11. Testing requirements before enablement
+The web BFF proxies HTTP only. The browser connects directly to the backend relay using
+`NEXT_PUBLIC_API_WS_URL`, because a server-side proxy would make the Next.js process part of the
+frame data path.
 
-- Authorization matrix for every role and policy combination, including `viewRoles` exclusions.
-- Cross-organization denial for request, status, signaling, stop, and audit.
-- Policy-disabled, acknowledgement-required, stale-heartbeat, no-session, break, and revoked-device
-  denials at both request and accept.
-- Expiry, viewer stop, local stop, logout, role loss, policy disable, and agent crash during an
-  active stream.
-- Concurrent viewer limits and rate limits under load.
-- No frame bytes in logs, database, error reports, or browser storage.
-- No long-lived or reusable tokens; reconnect requires a fresh authorization.
-- Manual verification on Windows, macOS, and Linux, including screen-lock and sleep behavior.
-- Load testing of signaling and TURN, not just the API.
+## 4. Lifecycle
 
-## 12. Approval gate and open decisions
+1. An administrator selects an employee in the existing screenshot review page and presses
+   **View live screen**, then **Start live view**.
+2. `POST /admin/employees/:employeeId/screen-live-sessions` validates policy, role, acknowledgement,
+   membership, organization state, time-session freshness, and desktop agent. It creates or reuses
+   the employee’s single active session (default maximum 900 seconds) and publishes
+   `screen.live.start` to that exact agent.
+3. The administrator requests a ticket:
+   `POST /admin/screen-live-sessions/:sessionId/viewer-tickets`. Only an HMAC hash is stored; the
+   plaintext ticket is returned once with a short TTL (default 60 seconds).
+4. The browser opens `wss://<backend>/api/v1/ws/screen-live` **without any credential in the URL**, then
+   sends `{"type":"authenticate","ticket":"…"}` as its first message. The relay consumes the ticket,
+   rechecks durable session, user, membership, organization, policy, work-session, and agent state, and
+   only then attaches the socket to the session. Unauthenticated sockets time out after 5 seconds and
+   may not send binary data.
+5. The agent opens `/api/v1/ws/screen-stream?liveSessionId=…` with its bearer token and agent
+   credentials. It waits for the relay’s `live.ready`, then sends JPEG frames no faster than
+   `maxFps`, no larger than `maxFrameBytes`, and optionally downscaled to `maxFrameWidth`.
+6. The relay validates each frame, fans it out to authorized viewers of that session, and advances
+   the viewer from `live.ready` to `live.started` on the first frame.
+7. Any terminal condition writes an `ENDED` session with a reason, notifies viewers with
+   `live.ended`, tells the agent `live.stop`, and closes the sockets.
 
-Implementation must not start until these are decided and recorded:
+Reconnect behavior:
 
-1. Is live streaming a product requirement, or is explicit screenshot capture sufficient?
-2. Which transport is approved: WebRTC only, WebSocket relay only, or both?
-3. Maximum duration, frame rate, resolution, and concurrent viewers.
-4. Whether recording is ever allowed (recommended: no).
-5. Whether streaming shares the screenshot disclosure or needs a separate versioned disclosure.
-6. Which jurisdictions/tenants may enable it, and what consent evidence is required.
-7. TURN provider, data region, retention of signaling metadata, and incident response ownership.
-8. Kill-switch owner and process for disabling streaming for one organization or globally.
-9. UI/UX review of the employee indicator and the admin confirmation flow.
-10. Security review of token binding, TURN credentials, and cross-tenant isolation.
+- A viewer reconnect requires a **fresh ticket**; tickets are single-use.
+- An agent reconnect reuses the same `liveSessionId` and is re-authorized at every upgrade.
+- The session survives short disconnects only inside the configured grace windows; after that it is
+  terminated, so a frozen frame can never outlive authorization.
 
-Until all ten are resolved and the separate design is approved, keep live streaming out of the
-codebase and keep the portal copy stating that no screen is streamed.
+## 5. Policy, roles, and tenant isolation
+
+- Route permission: `screenshot:live` (OWNER/ADMIN by default).
+- Start also requires the role in policy `requestRoles`; ticket issuance also requires it in
+  `viewRoles`.
+- The monitoring policy must be enabled. If `employeeAcknowledgementRequired` is set, the current
+  disclosure version must be acknowledged.
+- The target must be an active member with an active, heartbeat-fresh time session on a non-revoked
+  `ELECTRON` agent. Mobile agents are never targets.
+- Cross-organization IDs return `404` indistinguishably from missing IDs.
+- Organization suspension, membership loss, role removal, policy disable, desktop-agent revocation, or
+  session end terminates an active relay; connected viewers and the agent stream are revalidated about
+  once a minute, and the durable termination causes are `POLICY_DISABLED`, `ORGANIZATION_SUSPENDED`,
+  `AGENT_REVOKED`, and `SESSION_ENDED` in addition to the transport reasons.
+
+Multiple authorized administrators may attach to the same active session (each with their own
+ticket), but there is only one session per employee at a time. There is no bulk or gallery view.
+
+## 6. Data handling and audit
+
+- Frames exist only in relay memory and in the viewer’s browser as an in-memory object URL. They are
+  not written to PostgreSQL, object storage, the filesystem, browser storage, or logs.
+- Tickets are stored only as HMAC hashes and are cleared on consumption. Agent credentials and
+  session cookies are never placed in the frame path.
+- Audit actions: `SCREEN_LIVE_SESSION_STARTED`, `SCREEN_LIVE_VIEWER_JOINED`,
+  `SCREEN_LIVE_VIEWER_LEFT`, `SCREEN_LIVE_SESSION_STOPPED`, `SCREEN_LIVE_ACCESS_DENIED`.
+  Metadata contains IDs, role, reason, timestamps, limits, and expiry only.
+- API and relay logs redact authorization, cookies, agent keys, and query strings; frame bytes and
+  tickets are never logged.
+
+## 7. Limits and defaults
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| `SCREEN_LIVE_MAX_SESSION_SECONDS` | 900 | 60–3600 |
+| `SCREEN_LIVE_VIEWER_TICKET_TTL_SECONDS` | 60 | 15–300, capped by session expiry |
+| `SCREEN_LIVE_MAX_FPS` | 2 | 1–10; relay drops frames that arrive too fast |
+| `SCREEN_LIVE_MAX_FRAME_BYTES` | 2 MiB | 64 KiB–8 MiB; also the agent relay `maxPayload` |
+| `SCREEN_LIVE_MAX_FRAME_WIDTH` | 1600 | 640–3840; the agent downscales before sending |
+| `SCREEN_LIVE_VIEWER_BUFFER_LIMIT_BYTES` | 1 MiB | Per viewer; frames are dropped, not queued |
+| `SCREEN_LIVE_AGENT_GRACE_SECONDS` | 10 | Agent reconnect window |
+| `SCREEN_LIVE_VIEWER_GRACE_SECONDS` | 8 | Viewer reconnect window |
+
+The relay sweep (every 30 seconds) pings sockets and revalidates each viewer and each agent stream
+about once a minute. A viewer upgrade carries no ticket; the ticket (if any) arrives only in the first
+application message within 5 seconds, and binary data before authentication is rejected. Viewer auth
+failures close with `4001`, ended sessions with `4000`, and revoked access with `4003`.
+
+## 8. Deployment and networking
+
+- Set `NEXT_PUBLIC_API_WS_URL` in `web/.env` to the browser-reachable backend origin
+  (`ws://localhost:4000` locally, `wss://api.example.com` in production). It is embedded at build
+  time, so rebuild the web app after changing it. The web origin must also be listed in the
+  backend’s `CORS_ORIGINS`, because viewer upgrades enforce the same origin allowlist.
+- Reverse proxies, CDNs, load balancers, and firewalls must allow HTTP/1.1 WebSocket upgrades on
+  `/api/v1/ws/screen-live` and `/api/v1/ws/screen-stream`, forward `Upgrade`/`Connection`/`Origin`,
+  allow at least the configured frame size, and use idle timeouts longer than the 30-second sweep.
+- No TURN/STUN server, media codec negotiation, or extra signaling service is required.
+- Approximate bandwidth is `frame size × fps` per viewer. A 300 KB JPEG at 2 fps is roughly
+  0.6 MB/s (about 4.8 Mbit/s) per viewer. Size limits and viewer count accordingly.
+- The relay is **process-local**. Multi-instance deployments require sticky routing for both
+  WebSocket paths or a shared pub/sub frame bridge. Durable session rows do not carry frames.
+
+## 9. Platform-specific limitations
+
+- **Windows:** `desktopCapturer` captures the primary display; OS screen-capture permissions and
+  secure desktops (for example, the lock screen) can prevent capture.
+- **macOS:** the user must grant Screen Recording permission to the app. Without it, capture fails
+  and the session ends with a sanitized failure; macOS may require a restart after the grant.
+- **Linux:** X11 generally works; Wayland compositors may restrict or require a portal and may offer
+  limited source support. Distro/desktop-environment behavior must be verified.
+- Only the primary display is captured. Multi-monitor layouts show only that display.
+- Frames are JPEG snapshots at a low frame rate, not smooth video. There is no audio.
+- Screen lock, display sleep, machine sleep, permission revocation, or network loss stops capture;
+  the viewer sees an ended/unavailable state rather than a frozen frame.
+
+## 10. Verification status
+
+Automated coverage includes backend lifecycle/authorization/relay tests, Electron capture-service
+tests with a fake capture/socket, and web viewer tests with mocked HTTP/WebSocket/object URLs.
+
+**Real desktop-to-browser streaming has not been verified by an automated test.** It requires a
+manual end-to-end run with the backend, web portal, and Electron app on a supported desktop,
+including permission grant/revocation, screen lock, sleep, network loss, session end, expiry, and
+multi-monitor behavior. Do not claim live capture works in production based only on unit tests.

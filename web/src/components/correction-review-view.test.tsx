@@ -28,6 +28,7 @@ const organization: Organization = {
 };
 
 const session: SessionData = {
+  platformRole: null,
   user: {
     id: "reviewer-1",
     name: "Reviewer",

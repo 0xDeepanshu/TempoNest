@@ -14,9 +14,14 @@ import { initScreenshotPolicyAcknowledgement } from '../modules/screenshots/scre
 import { initScreenshotRequest } from '../modules/screenshots/screenshotRequest.model';
 import { initScreenshot } from '../modules/screenshots/screenshot.model';
 import { initAuditEvent } from '../modules/screenshots/auditEvent.model';
+import { initScreenLiveSession } from '../modules/screenshots/screenLiveSession.model';
+import { initScreenLiveViewer } from '../modules/screenshots/screenLiveViewer.model';
+import { initPlatformAuditEvent } from '../modules/platform/platformAuditEvent.model';
 import { initAttendanceCorrectionRequest } from '../modules/attendance/attendanceCorrection.model';
 import { initAttendanceEvidence } from '../modules/attendance/attendanceEvidence.model';
 import { initAttendanceCheckIn } from '../modules/attendance/attendanceCheckIn.model';
+import { initAttendanceLocationSample } from '../modules/attendance/attendanceLocationSample.model';
+import { initAttendanceLocationTracking } from '../modules/attendance/attendanceLocationTracking.model';
 
 export function initModels(sequelize: Sequelize) {
   const Organization = initOrganization(sequelize);
@@ -34,9 +39,14 @@ export function initModels(sequelize: Sequelize) {
   const ScreenshotRequest = initScreenshotRequest(sequelize);
   const Screenshot = initScreenshot(sequelize);
   const AuditEvent = initAuditEvent(sequelize);
+  const ScreenLiveSession = initScreenLiveSession(sequelize);
+  const ScreenLiveViewer = initScreenLiveViewer(sequelize);
+  const PlatformAuditEvent = initPlatformAuditEvent(sequelize);
   const AttendanceCorrectionRequest = initAttendanceCorrectionRequest(sequelize);
   const AttendanceEvidence = initAttendanceEvidence(sequelize);
   const AttendanceCheckIn = initAttendanceCheckIn(sequelize);
+  const AttendanceLocationSample = initAttendanceLocationSample(sequelize);
+  const AttendanceLocationTracking = initAttendanceLocationTracking(sequelize);
 
   Organization.hasMany(Membership, {
     foreignKey: 'organizationId',
@@ -92,6 +102,21 @@ export function initModels(sequelize: Sequelize) {
     foreignKey: 'organizationId',
     as: 'auditEvents',
     onDelete: 'CASCADE',
+  });
+  Organization.hasMany(ScreenLiveSession, {
+    foreignKey: 'organizationId',
+    as: 'screenLiveSessions',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(ScreenLiveViewer, {
+    foreignKey: 'organizationId',
+    as: 'screenLiveViewers',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(PlatformAuditEvent, {
+    foreignKey: 'targetOrganizationId',
+    as: 'platformAuditEvents',
+    onDelete: 'SET NULL',
   });
   Organization.hasMany(AttendanceCorrectionRequest, {
     foreignKey: 'organizationId',
@@ -157,6 +182,26 @@ export function initModels(sequelize: Sequelize) {
   User.hasMany(AuditEvent, {
     foreignKey: 'actorUserId',
     as: 'screenshotAuditActions',
+    onDelete: 'SET NULL',
+  });
+  User.hasMany(ScreenLiveSession, {
+    foreignKey: 'employeeId',
+    as: 'screenLiveSessions',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(ScreenLiveSession, {
+    foreignKey: 'startedByUserId',
+    as: 'startedScreenLiveSessions',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(ScreenLiveViewer, {
+    foreignKey: 'userId',
+    as: 'screenLiveViewers',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(PlatformAuditEvent, {
+    foreignKey: 'actorUserId',
+    as: 'platformAuditActions',
     onDelete: 'SET NULL',
   });
   User.hasMany(AttendanceCorrectionRequest, {
@@ -248,6 +293,11 @@ export function initModels(sequelize: Sequelize) {
     as: 'attendanceCheckIns',
     onDelete: 'CASCADE',
   });
+  DesktopAgent.hasMany(ScreenLiveSession, {
+    foreignKey: 'desktopAgentId',
+    as: 'screenLiveSessions',
+    onDelete: 'CASCADE',
+  });
 
   TimeSession.belongsTo(Organization, {
     foreignKey: 'organizationId',
@@ -293,6 +343,11 @@ export function initModels(sequelize: Sequelize) {
     foreignKey: 'attachedSessionId',
     as: 'attendanceEvidence',
     onDelete: 'SET NULL',
+  });
+  TimeSession.hasMany(ScreenLiveSession, {
+    foreignKey: 'timeSessionId',
+    as: 'screenLiveSessions',
+    onDelete: 'CASCADE',
   });
 
   Break.belongsTo(Organization, {
@@ -443,6 +498,64 @@ export function initModels(sequelize: Sequelize) {
     onDelete: 'SET NULL',
   });
 
+  ScreenLiveSession.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  ScreenLiveSession.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  ScreenLiveSession.belongsTo(User, {
+    foreignKey: 'startedByUserId',
+    as: 'startedBy',
+    onDelete: 'CASCADE',
+  });
+  ScreenLiveSession.belongsTo(DesktopAgent, {
+    foreignKey: 'desktopAgentId',
+    as: 'desktopAgent',
+    onDelete: 'CASCADE',
+  });
+  ScreenLiveSession.belongsTo(TimeSession, {
+    foreignKey: 'timeSessionId',
+    as: 'timeSession',
+    onDelete: 'CASCADE',
+  });
+  ScreenLiveSession.hasMany(ScreenLiveViewer, {
+    foreignKey: 'screenLiveSessionId',
+    as: 'viewers',
+    onDelete: 'CASCADE',
+  });
+
+  ScreenLiveViewer.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  ScreenLiveViewer.belongsTo(ScreenLiveSession, {
+    foreignKey: 'screenLiveSessionId',
+    as: 'session',
+    onDelete: 'CASCADE',
+  });
+  ScreenLiveViewer.belongsTo(User, {
+    foreignKey: 'userId',
+    as: 'user',
+    onDelete: 'CASCADE',
+  });
+
+  PlatformAuditEvent.belongsTo(Organization, {
+    foreignKey: 'targetOrganizationId',
+    as: 'targetOrganization',
+    onDelete: 'SET NULL',
+  });
+  PlatformAuditEvent.belongsTo(User, {
+    foreignKey: 'actorUserId',
+    as: 'actor',
+    onDelete: 'SET NULL',
+  });
+
   AttendanceCorrectionRequest.belongsTo(Organization, {
     foreignKey: 'organizationId',
     as: 'organization',
@@ -521,6 +634,89 @@ export function initModels(sequelize: Sequelize) {
     onDelete: 'SET NULL',
   });
 
+  Organization.hasMany(AttendanceLocationSample, {
+    foreignKey: 'organizationId',
+    as: 'attendanceLocationSamples',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(AttendanceLocationTracking, {
+    foreignKey: 'organizationId',
+    as: 'attendanceLocationTracking',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(AttendanceLocationSample, {
+    foreignKey: 'employeeId',
+    as: 'attendanceLocationSamples',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(AttendanceLocationTracking, {
+    foreignKey: 'employeeId',
+    as: 'attendanceLocationTracking',
+    onDelete: 'CASCADE',
+  });
+  DesktopAgent.hasMany(AttendanceLocationSample, {
+    foreignKey: 'desktopAgentId',
+    as: 'attendanceLocationSamples',
+    onDelete: 'CASCADE',
+  });
+  DesktopAgent.hasMany(AttendanceLocationTracking, {
+    foreignKey: 'desktopAgentId',
+    as: 'attendanceLocationTracking',
+    onDelete: 'CASCADE',
+  });
+  TimeSession.hasMany(AttendanceLocationSample, {
+    foreignKey: 'timeSessionId',
+    as: 'attendanceLocationSamples',
+    onDelete: 'CASCADE',
+  });
+  TimeSession.hasOne(AttendanceLocationTracking, {
+    foreignKey: 'timeSessionId',
+    as: 'attendanceLocationTracking',
+    onDelete: 'CASCADE',
+  });
+
+  AttendanceLocationSample.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  AttendanceLocationSample.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  AttendanceLocationSample.belongsTo(DesktopAgent, {
+    foreignKey: 'desktopAgentId',
+    as: 'desktopAgent',
+    onDelete: 'CASCADE',
+  });
+  AttendanceLocationSample.belongsTo(TimeSession, {
+    foreignKey: 'timeSessionId',
+    as: 'timeSession',
+    onDelete: 'CASCADE',
+  });
+
+  AttendanceLocationTracking.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  AttendanceLocationTracking.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  AttendanceLocationTracking.belongsTo(DesktopAgent, {
+    foreignKey: 'desktopAgentId',
+    as: 'desktopAgent',
+    onDelete: 'CASCADE',
+  });
+  AttendanceLocationTracking.belongsTo(TimeSession, {
+    foreignKey: 'timeSessionId',
+    as: 'timeSession',
+    onDelete: 'CASCADE',
+  });
+
   return {
     Organization,
     User,
@@ -537,9 +733,14 @@ export function initModels(sequelize: Sequelize) {
     ScreenshotRequest,
     Screenshot,
     AuditEvent,
+    ScreenLiveSession,
+    ScreenLiveViewer,
+    PlatformAuditEvent,
     AttendanceCorrectionRequest,
     AttendanceEvidence,
     AttendanceCheckIn,
+    AttendanceLocationSample,
+    AttendanceLocationTracking,
   };
 }
 

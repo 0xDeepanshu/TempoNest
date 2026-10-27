@@ -70,6 +70,22 @@ const envSchema = z
     SCREENSHOT_S3_SECRET_ACCESS_KEY: optionalString,
     SCREENSHOT_S3_FORCE_PATH_STYLE: booleanFromEnv.default('false'),
 
+    // Live screen viewing is an admin-only, time-boxed relay. Frames are held
+    // in memory only and are never written to storage or PostgreSQL.
+    SCREEN_LIVE_MAX_SESSION_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+    SCREEN_LIVE_VIEWER_TICKET_TTL_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
+    SCREEN_LIVE_MAX_FPS: z.coerce.number().int().min(1).max(10).default(2),
+    SCREEN_LIVE_MAX_FRAME_BYTES: z.coerce.number().int().min(65_536).max(8_388_608).default(2_097_152),
+    SCREEN_LIVE_MAX_FRAME_WIDTH: z.coerce.number().int().min(640).max(3840).default(1600),
+    SCREEN_LIVE_VIEWER_BUFFER_LIMIT_BYTES: z.coerce
+      .number()
+      .int()
+      .min(65_536)
+      .max(16_777_216)
+      .default(1_048_576),
+    SCREEN_LIVE_AGENT_GRACE_SECONDS: z.coerce.number().int().min(1).max(60).default(10),
+    SCREEN_LIVE_VIEWER_GRACE_SECONDS: z.coerce.number().int().min(1).max(60).default(8),
+
     // Mobile attendance evidence is uploaded to the same private object store
     // as screenshots, but has its own request lifetime and location policy.
     ATTENDANCE_UPLOAD_TTL_SECONDS: z.coerce.number().int().min(10).max(3600).default(120),
@@ -82,6 +98,22 @@ const envSchema = z
       .default(500),
     ATTENDANCE_LOCATION_MAX_AGE_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
     ATTENDANCE_LOCATION_FUTURE_SKEW_SECONDS: z.coerce.number().int().min(0).max(600).default(60),
+    // Continuous ON_SITE tracking uses its own bounds. Samples worse than the
+    // accuracy cap are rejected; precise history is purged after retention.
+    ATTENDANCE_LOCATION_SAMPLE_MAX_ACCURACY_METERS: z.coerce
+      .number()
+      .positive()
+      .max(100_000)
+      .default(500),
+    ATTENDANCE_LOCATION_MAX_SAMPLES_PER_REQUEST: z.coerce.number().int().min(1).max(200).default(50),
+    ATTENDANCE_LOCATION_STALE_SECONDS: z.coerce.number().int().min(60).max(3600).default(180),
+    ATTENDANCE_LOCATION_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+    ATTENDANCE_LOCATION_PURGE_INTERVAL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(300)
+      .max(604_800)
+      .default(21_600),
 
     ARGON2_MEMORY_KIB: z.coerce.number().int().min(8 * 2).max(1_048_576).default(19_456),
     ARGON2_TIME_COST: z.coerce.number().int().min(1).max(20).default(2),
@@ -297,6 +329,18 @@ export const config = {
       forcePathStyle: env.SCREENSHOT_S3_FORCE_PATH_STYLE,
     },
   },
+  screenLive: {
+    maxSessionSeconds: env.SCREEN_LIVE_MAX_SESSION_SECONDS,
+    viewerTicketTtlSeconds: env.SCREEN_LIVE_VIEWER_TICKET_TTL_SECONDS,
+    maxFps: env.SCREEN_LIVE_MAX_FPS,
+    maxFrameBytes: env.SCREEN_LIVE_MAX_FRAME_BYTES,
+    maxFrameWidth: env.SCREEN_LIVE_MAX_FRAME_WIDTH,
+    viewerBufferLimitBytes: env.SCREEN_LIVE_VIEWER_BUFFER_LIMIT_BYTES,
+    agentGraceMs: env.SCREEN_LIVE_AGENT_GRACE_SECONDS * 1000,
+    viewerGraceMs: env.SCREEN_LIVE_VIEWER_GRACE_SECONDS * 1000,
+    viewerPath: '/ws/screen-live',
+    agentPath: '/ws/screen-stream',
+  },
   attendance: {
     uploadTtlSeconds: env.ATTENDANCE_UPLOAD_TTL_SECONDS,
     evidenceTtlSeconds: env.ATTENDANCE_EVIDENCE_TTL_SECONDS,
@@ -304,6 +348,11 @@ export const config = {
     locationMaxAccuracyMeters: env.ATTENDANCE_LOCATION_MAX_ACCURACY_METERS,
     locationMaxAgeSeconds: env.ATTENDANCE_LOCATION_MAX_AGE_SECONDS,
     locationFutureSkewSeconds: env.ATTENDANCE_LOCATION_FUTURE_SKEW_SECONDS,
+    trackingMaxAccuracyMeters: env.ATTENDANCE_LOCATION_SAMPLE_MAX_ACCURACY_METERS,
+    trackingMaxSamplesPerRequest: env.ATTENDANCE_LOCATION_MAX_SAMPLES_PER_REQUEST,
+    trackingStaleSeconds: env.ATTENDANCE_LOCATION_STALE_SECONDS,
+    locationRetentionDays: env.ATTENDANCE_LOCATION_RETENTION_DAYS,
+    locationPurgeIntervalMs: env.ATTENDANCE_LOCATION_PURGE_INTERVAL_SECONDS * 1000,
   },
   logLevel: env.LOG_LEVEL,
   paths: {

@@ -25,6 +25,7 @@ import type { AuthManager } from './authManager'
 import { HEARTBEAT_FALLBACK_MS, MAX_SYNC_BATCH } from './config'
 import { ApiError, NetworkError, toUserFacingError } from './errors'
 import type { OfflineQueue } from './offlineQueue'
+import type { LiveScreenSocketHandler } from './liveScreenService'
 import type { ScreenshotSocketHandler } from './screenshotService'
 
 const DEFAULTS: TrackingRuntimeStatus = {
@@ -123,6 +124,7 @@ interface TrackingControllerOptions {
   queue: OfflineQueue
   websocketUrl: string
   screenshots?: ScreenshotSocketHandler
+  liveScreen?: LiveScreenSocketHandler
 }
 
 /**
@@ -136,6 +138,7 @@ export class TrackingController {
   private readonly queue: OfflineQueue
   private readonly socket: AgentSocket
   private readonly screenshots?: ScreenshotSocketHandler
+  private readonly liveScreen?: LiveScreenSocketHandler
   private session: AuthSession | null = null
   private snapshot: TrackingSnapshot = emptySnapshot()
   private status: TrackingRuntimeStatus = { ...DEFAULTS }
@@ -155,6 +158,7 @@ export class TrackingController {
     this.agents = options.agents
     this.queue = options.queue
     this.screenshots = options.screenshots
+    this.liveScreen = options.liveScreen
 
     this.socket = new AgentSocket({
       url: options.websocketUrl,
@@ -173,7 +177,18 @@ export class TrackingController {
       onScreenshotRequest: (command) => this.screenshots?.handleRequest(command),
       onScreenshotPending: (requests) => this.screenshots?.handlePending(requests),
       onScreenshotCancelled: (requestId) => this.screenshots?.handleCancelled(requestId),
-      onScreenshotError: (error) => this.screenshots?.handleServerError(error)
+      onScreenshotError: (error) => this.screenshots?.handleServerError(error),
+      onScreenLiveStart: (command) => this.liveScreen?.handleStart(command),
+      onScreenLivePending: (pending) => this.liveScreen?.handlePending(pending),
+      onScreenLiveStop: (liveSessionId, reason) =>
+        this.liveScreen?.handleStop(liveSessionId, reason),
+      onScreenLiveError: (error) => this.liveScreen?.handleServerError(error),
+      onScreenLiveDisconnected: () => this.liveScreen?.handleDisconnected()
+    })
+
+    this.liveScreen?.setControlChannel({
+      sendScreenLiveFailure: (liveSessionId, code, message) =>
+        this.socket.sendScreenLiveFailure(liveSessionId, code, message)
     })
 
     this.fallbackHeartbeat = setInterval(() => {
@@ -240,6 +255,7 @@ export class TrackingController {
   detachSession(clearQueuedEvents = false): void {
     this.session = null
     this.blocked = false
+    this.liveScreen?.detachSession()
     this.socket.disconnect(true)
     if (clearQueuedEvents) this.queue.clear()
     this.agents.forgetAgent()
@@ -253,6 +269,7 @@ export class TrackingController {
     this.shuttingDown = true
     clearInterval(this.fallbackHeartbeat)
     clearInterval(this.reconnectSweep)
+    this.liveScreen?.dispose()
     this.socket.disconnect()
   }
 
@@ -269,6 +286,7 @@ export class TrackingController {
     this.shuttingDown = true
     clearInterval(this.fallbackHeartbeat)
     clearInterval(this.reconnectSweep)
+    this.liveScreen?.detachSession()
 
     this.shutdownPromise = this.enqueue(() => this.stopActiveSessionForShutdown())
       .catch(() => undefined)
@@ -670,6 +688,7 @@ export class TrackingController {
   private handleConnected(payload: ConnectedPayload): void {
     this.updateStatus({ connection: 'online', message: null, pendingEvents: this.queue.count() })
     this.screenshots?.handleConnected(payload.serverTime)
+    this.liveScreen?.handleConnected(payload.serverTime)
     if (this.queue.count() > 0) {
       void this.enqueue(async () => {
         const flushed = await this.flushQueue()
@@ -976,6 +995,7 @@ export class TrackingController {
   private async blockAccess(code: string, message: string): Promise<void> {
     if (this.blocked) return
     this.blocked = true
+    this.liveScreen?.detachSession()
     this.socket.disconnect()
     this.agents.forgetAgent()
     this.sessionAliases.clear()

@@ -43,22 +43,29 @@ TempoNest/
    - Network interruptions do not lose tracked work. Offline mutations are buffered into a durable queue.
    - Batched synchronization through `/time-sessions/sync` resolves with an immutable idempotency ledger (`applied`, `duplicate`, `conflict`).
 
-4. **Mobile Attendance Check-Ins & Evidence**
+4. **Mobile Attendance Check-Ins, Evidence & On-Site Location**
    - Multi-mode employee attendance check-ins (`WFH`, `WFO`, `ON_SITE`) for mobile and desktop agents.
-   - Enforces tamper-resistant evidence uploads (selfies, site photos) and location accuracy/freshness verification.
-   - Audited signed access for review by organization managers and administrators.
+   - Enforces tamper-resistant selfie evidence uploads and location accuracy/freshness verification; historical site-photo evidence remains viewable.
+   - Continuous location tracking only during an active, permission-granted `ON_SITE` session: it pauses on breaks, stops at checkout, reconciles with the server after restarts, and is never reported as active when the OS or permission state prevents it.
+   - Precise samples are retained for 30 days by default (configurable) and purged automatically every 6 hours; organization-wide history requires the dedicated `attendance:location:read` permission (`OWNER`/`ADMIN` by default), and non-self views are audited without coordinates.
+   - Audited signed access for review of attendance evidence by organization managers and administrators.
 
 5. **Transparent, Admin-Initiated Screenshots**
    - Individual, administrator-initiated captures only during active work sessions.
    - Strictly opt-in per organization with mandatory disclosure text and employee acknowledgement.
    - Storage uses short-lived, HMAC-signed upload/download URLs backed by private local storage or S3 buckets.
 
-6. **Attendance Summaries & Correction Workflow**
+6. **Admin Live Screen Viewing**
+   - Explicit, time-boxed viewing of one active employee session, gated by the screenshot policy and `screenshot:live`.
+   - Frames travel only over a dedicated binary WebSocket relay; the JSON agent socket carries control commands, never media.
+   - Short-lived single-use tickets, in-memory only frames, enforced fps/size/backpressure limits, and full lifecycle audit.
+
+7. **Attendance Summaries & Correction Workflow**
    - Daily, weekly, and monthly attendance rollups bounded by organization timezones.
    - Employees submit correction requests for missed or modified sessions.
    - Managers/admins review with atomic overlap validation and full audit logging.
 
-7. **Hierarchical RBAC & Security Infrastructure**
+8. **Hierarchical RBAC & Security Infrastructure**
    - Strictly enforced role matrix: `OWNER`, `ADMIN`, `MANAGER`, and `EMPLOYEE`.
    - Argon2id password hashing, opaque server-side session tokens with HMAC peppers, CSRF protection, and rate limiting.
 
@@ -120,6 +127,8 @@ npm run dev
 ```
 
 The web portal acts as a same-origin BFF forwarding requests from `http://localhost:3000/api/v1/...` to `BACKEND_API_URL` (`http://localhost:4000`).
+
+Set `NEXT_PUBLIC_API_WS_URL` in `web/.env.local` to the browser-reachable backend origin (`ws://localhost:4000` locally, `wss://api.example.com` in production). It is used only for the admin live-screen relay, is baked in at build time, and requires a rebuild when changed. In production, the reverse proxy must support WebSocket upgrades on `/api/v1/ws/screen-live` and `/api/v1/ws/screen-stream`; no TURN/STUN service is used.
 
 ---
 

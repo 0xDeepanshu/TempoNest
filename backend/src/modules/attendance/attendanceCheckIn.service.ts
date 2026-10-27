@@ -1,11 +1,21 @@
-import { Transaction, UniqueConstraintError } from 'sequelize';
-import { sequelize, AttendanceCheckIn, AttendanceEvidence } from '../../database';
+import { Op, Transaction, UniqueConstraintError } from 'sequelize';
+import { DateTime, IANAZone } from 'luxon';
+import {
+  sequelize,
+  AttendanceCheckIn,
+  AttendanceEvidence,
+  Break,
+  TimeSession,
+  User,
+} from '../../database';
 import { config } from '../../config/env';
 import { AppError } from '../../utils/errors';
+import { paginate } from '../../utils/pagination';
 import { serializeByKey } from '../../utils/serialize';
 import { screenshotStorage } from '../screenshots/storage';
 import { normalizeContentType } from '../screenshots/screenshot.validation';
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
+import { ensureEmployee } from '../reporting/reporting.service';
 import {
   getCurrentSession,
   getSessionForActor,
@@ -14,19 +24,35 @@ import {
   startSessionInTransaction,
 } from '../timeTracking/timeSession.service';
 import { toTimeSessionSummary } from '../timeTracking/timeSession.mapper';
-import { toAttendanceCheckInSummary } from './attendance.mapper';
+import {
+  toAttendanceCheckInAdminSummary,
+  toAttendanceCheckInSummary,
+} from './attendance.mapper';
 import { validateAttendanceEvidenceFile } from './attendanceEvidence.validation';
 import type { AttendanceCheckIn as AttendanceCheckInModel } from './attendanceCheckIn.model';
 import type { AttendanceEvidence as AttendanceEvidenceModel } from './attendanceEvidence.model';
 import type { DesktopAgent as DesktopAgentModel } from '../desktopAgents/desktopAgent.model';
+import type { Organization as OrganizationModel } from '../organizations/organization.model';
 import type {
   AttendanceCheckInInput,
+  AttendanceCheckInListQuery,
   AttendanceLocationInput,
 } from './attendance.schemas';
 
 const checkInIncludes = [
   { model: AttendanceEvidence, as: 'selfieEvidence', required: false },
   { model: AttendanceEvidence, as: 'sitePhotoEvidence', required: false },
+];
+
+const adminCheckInIncludes = [
+  ...checkInIncludes,
+  { model: User, as: 'employee', required: true, attributes: ['id', 'name', 'email'] },
+  {
+    model: TimeSession,
+    as: 'timeSession',
+    required: true,
+    include: [{ model: Break, as: 'breaks', required: false }],
+  },
 ];
 
 type CheckInResult = {
@@ -466,5 +492,59 @@ export async function getCurrentAttendance(options: {
   return {
     checkIn: checkInRecord ? toAttendanceCheckInSummary(checkInRecord) : null,
     session: toTimeSessionSummary(session),
+  };
+}
+
+export async function listAttendanceCheckIns(options: {
+  organization: OrganizationModel;
+  query: AttendanceCheckInListQuery;
+}) {
+  const { organization, query } = options;
+  const where: Record<string | symbol, unknown> = { organizationId: organization.id };
+
+  if (query.employeeId) {
+    await ensureEmployee(organization.id, query.employeeId);
+    where.employeeId = query.employeeId;
+  }
+  if (query.workMode) where.workMode = query.workMode;
+
+  if (query.from || query.to) {
+    const zone = IANAZone.isValidZone(organization.timezone)
+      ? organization.timezone
+      : 'UTC';
+    const start = query.from
+      ? DateTime.fromISO(query.from, { zone }).startOf('day').toUTC().toJSDate()
+      : undefined;
+    const end = query.to
+      ? DateTime.fromISO(query.to, { zone }).plus({ days: 1 }).startOf('day').toUTC().toJSDate()
+      : undefined;
+
+    where.createdAt = {
+      ...(start ? { [Op.gte]: start } : {}),
+      ...(end ? { [Op.lt]: end } : {}),
+    };
+  }
+
+  const result = await AttendanceCheckIn.findAndCountAll({
+    where,
+    include: adminCheckInIncludes,
+    order: [
+      ['createdAt', 'DESC'],
+      ['id', 'ASC'],
+    ],
+    limit: query.limit,
+    offset: (query.page - 1) * query.limit,
+    distinct: true,
+  });
+
+  const now = new Date();
+  return {
+    ...paginate(
+      result.rows.map((checkIn) => toAttendanceCheckInAdminSummary(checkIn, now)),
+      result.count,
+      query.page,
+      query.limit,
+    ),
+    timezone: organization.timezone,
   };
 }

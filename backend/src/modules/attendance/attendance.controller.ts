@@ -10,7 +10,11 @@ import {
   rejectAttendanceCorrection,
 } from './attendanceCorrection.service';
 import { getAttendanceSummary } from './attendanceSummary.service';
-import { checkIn, getCurrentAttendance } from './attendanceCheckIn.service';
+import {
+  checkIn,
+  getCurrentAttendance,
+  listAttendanceCheckIns,
+} from './attendanceCheckIn.service';
 import {
   createAttendanceEvidenceAccess,
   createAttendanceEvidenceUpload,
@@ -19,13 +23,23 @@ import {
   storeAttendanceEvidenceUpload,
 } from './attendanceEvidence.service';
 import {
+  getAttendanceLocationHistory,
+  getAttendanceLocationStatus,
+  ingestAttendanceLocationSamples,
+  reportAttendanceLocationStatus,
+} from './attendanceLocation.service';
+import {
   assertAttendanceEvidenceContentType,
 } from './attendanceEvidence.validation';
 import { normalizeContentType } from '../screenshots/screenshot.validation';
 import type {
   ApproveAttendanceCorrectionInput,
   AttendanceCheckInInput,
+  AttendanceCheckInListQuery,
   AttendanceCorrectionListQuery,
+  AttendanceLocationHistoryQuery,
+  AttendanceLocationSamplesInput,
+  AttendanceLocationStatusInput,
   AttendanceSummaryQuery,
   CreateAttendanceCorrectionInput,
   CreateAttendanceEvidenceInput,
@@ -126,10 +140,64 @@ export const checkInAttendance = asyncHandler(async (req: Request, res: Response
   });
 });
 
+export const listCheckIns = asyncHandler(async (req: Request, res: Response) => {
+  const result = await listAttendanceCheckIns({
+    organization: req.organization!.organization,
+    query: req.query as unknown as AttendanceCheckInListQuery,
+  });
+
+  res.status(200).json({ ...result, serverTime: now() });
+});
+
 export const currentCheckIn = asyncHandler(async (req: Request, res: Response) => {
   const result = await getCurrentAttendance({
     organizationId: req.organization!.organization.id,
     employeeId: req.auth!.user.id,
+  });
+
+  res.status(200).json({ data: result, serverTime: now() });
+});
+
+export const locationStatus = asyncHandler(async (req: Request, res: Response) => {
+  const result = await getAttendanceLocationStatus({
+    organizationId: req.organization!.organization.id,
+    employeeId: req.auth!.user.id,
+    agent: req.desktopAgent!,
+  });
+
+  res.status(200).json({ data: result, serverTime: now() });
+});
+
+export const reportLocationStatus = asyncHandler(async (req: Request, res: Response) => {
+  const result = await reportAttendanceLocationStatus({
+    organizationId: req.organization!.organization.id,
+    employeeId: req.auth!.user.id,
+    agent: req.desktopAgent!,
+    input: req.body as AttendanceLocationStatusInput,
+  });
+
+  res.status(200).json({ data: result, serverTime: now() });
+});
+
+export const ingestLocationSamples = asyncHandler(async (req: Request, res: Response) => {
+  const result = await ingestAttendanceLocationSamples({
+    organizationId: req.organization!.organization.id,
+    employeeId: req.auth!.user.id,
+    agent: req.desktopAgent!,
+    input: req.body as AttendanceLocationSamplesInput,
+  });
+
+  res.status(201).json({ data: result, serverTime: now() });
+});
+
+export const locationHistory = asyncHandler(async (req: Request, res: Response) => {
+  const result = await getAttendanceLocationHistory({
+    organization: req.organization!.organization,
+    checkInId: req.params.checkInId!,
+    actorUserId: req.auth!.user.id,
+    actorRole: req.organization!.membership.role,
+    query: req.query as unknown as AttendanceLocationHistoryQuery,
+    context: auditContext(req),
   });
 
   res.status(200).json({ data: result, serverTime: now() });

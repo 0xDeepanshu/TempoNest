@@ -1,4 +1,5 @@
 import express, { Router } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { config } from '../../config/env';
 import { requireAuth } from '../../middleware/authenticate';
 import { validate } from '../../middleware/validate';
@@ -8,14 +9,20 @@ import { resolveCurrentOrganization } from '../organizations/currentOrganization
 import { organizationIdParamsSchema } from '../organizations/organization.schemas';
 import { requireDesktopAgent } from '../desktopAgents/desktopAgent.service';
 import { requireMobileAgent } from './attendanceEvidence.service';
+import { requireAttendanceLocationHistoryAccess } from './attendanceLocation.service';
 import {
   approveAttendanceCorrectionSchema,
+  attendanceCheckInIdParamsSchema,
+  attendanceCheckInListQuerySchema,
   attendanceCheckInSchema,
   attendanceCorrectionIdParamsSchema,
   attendanceCorrectionListQuerySchema,
   attendanceEvidenceFileTokenParamsSchema,
   attendanceEvidenceIdParamsSchema,
   attendanceEvidenceUploadTokenParamsSchema,
+  attendanceLocationHistoryQuerySchema,
+  attendanceLocationSamplesSchema,
+  attendanceLocationStatusSchema,
   attendanceSummaryQuerySchema,
   createAttendanceCorrectionSchema,
   createAttendanceEvidenceSchema,
@@ -30,12 +37,42 @@ import {
   currentCheckIn,
   downloadEvidenceFile,
   getCorrection,
+  ingestLocationSamples,
+  listCheckIns,
   listCorrections,
+  locationHistory,
+  locationStatus,
   reauthorizeEvidence,
   rejectCorrection,
+  reportLocationStatus,
   summary,
   uploadEvidence,
 } from './attendance.controller';
+
+/**
+ * Background location uploads arrive roughly once per sampling interval. The
+ * per-employee limit leaves room for brief bursts after reconnecting without
+ * allowing an unbounded queue to hammer the API.
+ */
+function createLocationSampleRateLimiter() {
+  return rateLimit({
+    windowMs: 60_000,
+    limit: 60,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    keyGenerator: (req) =>
+      `${req.auth?.user.id ?? 'anonymous'}:${req.organization?.organization.id ?? 'none'}`,
+    handler: (req, res) => {
+      res.status(429).json({
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'Too many location updates. Please try again shortly.',
+        },
+        requestId: req.requestId,
+      });
+    },
+  });
+}
 
 /**
  * Employee self-service attendance. Summaries and correction history are
@@ -44,6 +81,7 @@ import {
  */
 export function createOrganizationAttendanceRouter(): Router {
   const router = Router({ mergeParams: true });
+  const sampleLimiter = config.rateLimit.enabled ? createLocationSampleRateLimiter() : null;
 
   router.get(
     '/:organizationId/attendance/summaries',
@@ -104,6 +142,16 @@ export function createOrganizationAttendanceRouter(): Router {
     rejectCorrection,
   );
 
+  router.get(
+    '/:organizationId/attendance/check-ins',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('report:read'),
+    validate({ query: attendanceCheckInListQuerySchema }),
+    listCheckIns,
+  );
+
   router.post(
     '/:organizationId/attendance/check-ins',
     requireAuth,
@@ -123,6 +171,53 @@ export function createOrganizationAttendanceRouter(): Router {
     loadOrganizationContext,
     requirePermission('time:read'),
     currentCheckIn,
+  );
+
+  router.get(
+    '/:organizationId/attendance/location/status',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('time:read'),
+    requireDesktopAgent,
+    requireMobileAgent,
+    locationStatus,
+  );
+
+  router.post(
+    '/:organizationId/attendance/location/status',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('time:write'),
+    requireDesktopAgent,
+    requireMobileAgent,
+    validate({ body: attendanceLocationStatusSchema }),
+    reportLocationStatus,
+  );
+
+  router.post(
+    '/:organizationId/attendance/location/samples',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('time:write'),
+    requireDesktopAgent,
+    requireMobileAgent,
+    ...(sampleLimiter ? [sampleLimiter] : []),
+    validate({ body: attendanceLocationSamplesSchema }),
+    ingestLocationSamples,
+  );
+
+  router.get(
+    '/:organizationId/attendance/check-ins/:checkInId/location-history',
+    requireAuth,
+    validate({ params: attendanceCheckInIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('time:read'),
+    requireAttendanceLocationHistoryAccess,
+    validate({ query: attendanceLocationHistoryQuerySchema }),
+    locationHistory,
   );
 
   router.post(

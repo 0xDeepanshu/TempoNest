@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import { sequelize, AttendanceEvidence } from '../../database';
+import { sequelize, AttendanceEvidence, Organization } from '../../database';
 import { config } from '../../config/env';
 import { AppError } from '../../utils/errors';
 import { generateOpaqueToken, generateUuid, hashOpaqueToken } from '../../utils/crypto';
@@ -477,6 +477,16 @@ export async function openAttendanceEvidenceFile(
       'Attendance evidence link is invalid or expired',
       'ATTENDANCE_EVIDENCE_LINK_INVALID',
     );
+  }
+
+  // Signed links are short-lived, but suspension must still take effect
+  // immediately for already-issued URLs.
+  const organization = await Organization.findOne({
+    where: { id: verified.organizationId, status: 'ACTIVE', deletedAt: null },
+    attributes: ['id'],
+  });
+  if (!organization) {
+    throw AppError.notFound('Attendance evidence not found', 'ATTENDANCE_EVIDENCE_NOT_FOUND');
   }
 
   const evidence = await AttendanceEvidence.findOne({

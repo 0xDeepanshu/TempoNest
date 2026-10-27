@@ -4,6 +4,7 @@ import {
   AuditEvent,
   DesktopAgent,
   Membership,
+  Organization,
   Screenshot,
   ScreenshotPolicy,
   ScreenshotRequest,
@@ -1724,6 +1725,17 @@ export async function openScreenshotFile(token: string, context?: AuditContext) 
   if (!verified) {
     throw AppError.notFound('Screenshot link is invalid or expired', 'SCREENSHOT_LINK_INVALID');
   }
+
+  // A valid signature is not enough if the tenant was suspended after the link
+  // was minted. Short-lived links must not outlive organization access.
+  const organization = await Organization.findOne({
+    where: { id: verified.organizationId, status: 'ACTIVE', deletedAt: null },
+    attributes: ['id'],
+  });
+  if (!organization) {
+    throw AppError.notFound('Screenshot not found', 'SCREENSHOT_NOT_FOUND');
+  }
+
   const screenshot = await Screenshot.findOne({
     where: { id: verified.screenshotId, organizationId: verified.organizationId },
   });

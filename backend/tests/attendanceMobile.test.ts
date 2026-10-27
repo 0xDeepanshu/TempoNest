@@ -337,15 +337,6 @@ describe('mobile attendance check-in', () => {
     const selfie = await prepareEvidence(team, 'SELFIE');
     const site = await prepareEvidence(team, 'SITE_PHOTO');
 
-    const missingSite = await checkIn(team, {
-      checkInRequestId: randomUUID(),
-      workMode: 'ON_SITE',
-      selfieEvidenceId: selfie.evidenceId,
-      location: location(),
-    });
-    expect(missingSite.status).toBe(422);
-    expect(JSON.stringify(missingSite.body)).toContain('requires a site photo');
-
     const missingSelfie = await checkIn(team, {
       checkInRequestId: randomUUID(),
       workMode: 'ON_SITE',
@@ -368,7 +359,6 @@ describe('mobile attendance check-in', () => {
       checkInRequestId: randomUUID(),
       workMode: 'ON_SITE',
       selfieEvidenceId: selfie.evidenceId,
-      sitePhotoEvidenceId: site.evidenceId,
       location: location({ accuracyMeters: 600 }),
     });
     expect(inaccurate.status).toBe(422);
@@ -378,7 +368,6 @@ describe('mobile attendance check-in', () => {
       checkInRequestId: randomUUID(),
       workMode: 'ON_SITE',
       selfieEvidenceId: selfie.evidenceId,
-      sitePhotoEvidenceId: site.evidenceId,
       location: location({ recordedAt: new Date(Date.now() - 10 * 60_000).toISOString() }),
     });
     expect(stale.status).toBe(422);
@@ -388,7 +377,6 @@ describe('mobile attendance check-in', () => {
       checkInRequestId: randomUUID(),
       workMode: 'ON_SITE',
       selfieEvidenceId: selfie.evidenceId,
-      sitePhotoEvidenceId: site.evidenceId,
       location: location({ recordedAt: new Date(Date.now() + 5 * 60_000).toISOString() }),
     });
     expect(future.status).toBe(422);
@@ -402,12 +390,27 @@ describe('mobile attendance check-in', () => {
       checkInRequestId: randomUUID(),
       workMode: 'ON_SITE',
       selfieEvidenceId: selfie.evidenceId,
-      sitePhotoEvidenceId: site.evidenceId,
       location: location(),
     });
     expect(response.status).toBe(201);
     expect(response.body.data.checkIn.location.accuracyMeters).toBe(20);
     expect(response.body.data.checkIn.selfie.id).toBe(selfie.evidenceId);
+    expect(response.body.data.checkIn.sitePhoto).toBeNull();
+  });
+
+  it('still accepts a site photo from older clients on ON_SITE check-ins', async () => {
+    const team = await createMobileTeam();
+    const selfie = await prepareEvidence(team, 'SELFIE');
+    const site = await prepareEvidence(team, 'SITE_PHOTO');
+
+    const response = await checkIn(team, {
+      checkInRequestId: randomUUID(),
+      workMode: 'ON_SITE',
+      selfieEvidenceId: selfie.evidenceId,
+      sitePhotoEvidenceId: site.evidenceId,
+      location: location(),
+    });
+    expect(response.status).toBe(201);
     expect(response.body.data.checkIn.sitePhoto.id).toBe(site.evidenceId);
   });
 

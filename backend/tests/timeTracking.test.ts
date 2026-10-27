@@ -46,6 +46,37 @@ describe('time tracking', () => {
     await resetDatabase();
   });
 
+  it('recovers a stale active session at its last heartbeat when current is read', async () => {
+    const { orgId, agent } = await createTeam();
+    const started = await startSession(orgId, agent);
+    expect(started.status).toBe(201);
+    const sessionId = started.body.data.session.id as string;
+
+    const lastHeartbeat = new Date(Date.now() - 5 * 60 * 60_000);
+    await TimeSession.update(
+      {
+        startedAt: new Date(Date.now() - 6 * 60 * 60_000),
+        lastHeartbeatAt: lastHeartbeat,
+      },
+      { where: { id: sessionId } },
+    );
+
+    const current = await request(app)
+      .get(`${API}/organizations/${orgId}/time-sessions/current`)
+      .set(agent.headers);
+    expect(current.status).toBe(200);
+    expect(current.body.data.session).toBeNull();
+
+    const record = await TimeSession.findByPk(sessionId);
+    expect(record?.status).toBe('STOPPED');
+    expect(record?.endedAt?.getTime()).toBe(lastHeartbeat.getTime());
+    expect(record?.lastHeartbeatAt.getTime()).toBe(lastHeartbeat.getTime());
+
+    const stop = await stopSession(orgId, sessionId, agent);
+    expect(stop.status).toBe(409);
+    expect(stop.body.error.code).toBe('SESSION_NOT_ACTIVE');
+  });
+
   it('runs the session, break, and stop lifecycle with server timestamps', async () => {
     const { orgId, agent } = await createTeam();
 

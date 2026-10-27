@@ -3,6 +3,8 @@ export type Role = "OWNER" | "ADMIN" | "MANAGER" | "EMPLOYEE";
 export type MembershipStatus = "ACTIVE" | "SUSPENDED" | "REMOVED";
 export type OrganizationStatus = "ACTIVE" | "SUSPENDED";
 export type UserStatus = "ACTIVE" | "DISABLED";
+export type PlatformRole = "SUPERADMIN";
+export type PlatformOrganizationStatus = OrganizationStatus | "DELETED";
 
 export type SessionStatus = "ACTIVE" | "ON_BREAK" | "STOPPED";
 export type SessionSource = "ONLINE" | "OFFLINE";
@@ -59,6 +61,7 @@ export interface SessionInfo {
 export interface SessionData {
   user: PublicUser;
   memberships: MembershipSummary[];
+  platformRole: PlatformRole | null;
   session: SessionInfo;
 }
 
@@ -212,6 +215,136 @@ export interface AttendanceCorrection {
 }
 
 export interface CorrectionsListResponse extends Paginated<AttendanceCorrection> {
+  serverTime: string;
+}
+
+export type AttendanceWorkMode = "WFO" | "WFH" | "ON_SITE";
+export type AttendanceEvidenceKind = "SELFIE" | "SITE_PHOTO";
+export type AttendanceEvidenceStatus = "PENDING" | "UPLOADED" | "ATTACHED";
+
+export interface AttendanceEvidence {
+  id: string;
+  organizationId: string;
+  employeeId: string;
+  desktopAgentId: string;
+  kind: AttendanceEvidenceKind;
+  status: AttendanceEvidenceStatus;
+  contentType: string;
+  fileSizeBytes: number | null;
+  capturedAt: string | null;
+  uploadedAt: string | null;
+  expiresAt: string;
+  attachedSessionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AttendanceLocation {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  recordedAt: string;
+}
+
+export interface AttendanceCheckIn {
+  id: string;
+  organizationId: string;
+  employeeId: string;
+  desktopAgentId: string;
+  sessionId: string;
+  workMode: AttendanceWorkMode;
+  checkInRequestId: string;
+  location: AttendanceLocation | null;
+  selfie: AttendanceEvidence | null;
+  sitePhoto: AttendanceEvidence | null;
+  employee: { id: string; name: string; email: string } | null;
+  session: TimeSession | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AttendanceCheckInsResponse extends Paginated<AttendanceCheckIn> {
+  timezone: string;
+  serverTime: string;
+}
+
+export interface AttendanceEvidenceAccessResponse {
+  data: {
+    evidence: AttendanceEvidence;
+    url: string;
+    expiresAt: string;
+  };
+  serverTime: string;
+}
+
+export type AttendanceLocationTrackingStatus = "ACTIVE" | "PAUSED" | "STOPPED";
+
+export type AttendanceLocationPermissionState =
+  | "ALWAYS"
+  | "FOREGROUND_ONLY"
+  | "DENIED"
+  | "UNKNOWN";
+
+export type AttendanceLocationState =
+  | "ACTIVE"
+  | "PAUSED"
+  | "STOPPED"
+  | "PERMISSION_UNAVAILABLE"
+  | "STALE";
+
+export type AttendanceLocationSampleSource = "DEVICE" | "UNKNOWN";
+
+export interface AttendanceLocationSample {
+  id: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  capturedAt: string;
+  receivedAt: string;
+  source: AttendanceLocationSampleSource;
+}
+
+export interface AttendanceLocationTracking {
+  status: AttendanceLocationTrackingStatus;
+  reason: string | null;
+  permission: AttendanceLocationPermissionState;
+  backgroundAllowed: boolean;
+  lastSampleAt: string | null;
+  lastReportedAt: string;
+  updatedAt: string;
+}
+
+export interface AttendanceLocationStateSummary {
+  state: AttendanceLocationState;
+  reason: string | null;
+  permission: AttendanceLocationPermissionState;
+  backgroundAllowed: boolean;
+  lastSampleAt: string | null;
+  lastReportedAt: string | null;
+  staleAfterSeconds: number;
+}
+
+export interface AttendanceLocationHistory {
+  checkIn: {
+    id: string;
+    employeeId: string;
+    sessionId: string;
+    workMode: AttendanceWorkMode;
+    createdAt: string;
+    location: AttendanceLocation | null;
+  };
+  employee: { id: string; name: string; email: string } | null;
+  session: TimeSession | null;
+  tracking: AttendanceLocationTracking | null;
+  locationState: AttendanceLocationStateSummary;
+  samples: AttendanceLocationSample[];
+  totalSamples: number;
+  truncated: boolean;
+  retention: { days: number; cutoff: string };
+}
+
+export interface AttendanceLocationHistoryResponse {
+  data: AttendanceLocationHistory;
   serverTime: string;
 }
 
@@ -435,6 +568,79 @@ export interface ScreenshotPolicyDisclosureResponse {
   serverTime: string;
 }
 
+export type ScreenLiveSessionStatus = "ACTIVE" | "ENDED";
+
+export type ScreenLiveTerminationReason =
+  | "VIEWER_STOPPED"
+  | "ALL_VIEWERS_LEFT"
+  | "AGENT_DISCONNECTED"
+  | "AGENT_FAILED"
+  | "EXPIRED"
+  | "POLICY_DISABLED"
+  | "SESSION_ENDED"
+  | "ORGANIZATION_SUSPENDED"
+  | "AGENT_REVOKED"
+  | "SERVER_SHUTDOWN";
+
+export interface ScreenLiveSessionSummary {
+  id: string;
+  organizationId: string;
+  employeeId: string;
+  desktopAgentId: string;
+  timeSessionId: string;
+  startedByUserId: string;
+  status: ScreenLiveSessionStatus;
+  startedAt: string;
+  expiresAt: string;
+  endedAt: string | null;
+  terminationReason: ScreenLiveTerminationReason | null;
+  employee?: ScreenshotUserSummary;
+  startedBy?: ScreenshotUserSummary;
+  desktopAgent?: {
+    id: string;
+    name: string;
+    platform: string | null;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScreenLiveViewerSummary {
+  id: string;
+  screenLiveSessionId: string;
+  userId: string;
+  joinedAt: string | null;
+  leftAt: string | null;
+  lastSeenAt: string | null;
+  disconnectedReason: string | null;
+  user?: ScreenshotUserSummary;
+}
+
+export interface ScreenLiveStartResponse {
+  data: {
+    session: ScreenLiveSessionSummary;
+    delivery: { agentOnline: boolean; delivered: boolean; note: string };
+    reused: boolean;
+  };
+  serverTime: string;
+}
+
+export interface ScreenLiveTicketResponse {
+  data: {
+    ticket: string;
+    expiresAt: string;
+    websocketPath: string;
+    session: ScreenLiveSessionSummary;
+    viewer: ScreenLiveViewerSummary;
+  };
+  serverTime: string;
+}
+
+export interface ScreenLiveStopResponse {
+  data: { session: ScreenLiveSessionSummary; stopped: boolean };
+  serverTime: string;
+}
+
 export interface ScreenshotAuditEvent {
   id: string;
   action: string;
@@ -474,4 +680,44 @@ export interface ApiErrorDetail {
   path: string;
   message: string;
   code?: string;
+}
+
+export interface PlatformOverview {
+  total: number;
+  active: number;
+  suspended: number;
+  deleted: number;
+}
+
+export interface PlatformOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  status: PlatformOrganizationStatus;
+  timezone: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  memberCount: number;
+  activeMemberCount: number;
+}
+
+export const PLATFORM_AUDIT_ACTIONS = [
+  "ORGANIZATION_RENAMED",
+  "ORGANIZATION_SUSPENDED",
+  "ORGANIZATION_REACTIVATED",
+  "ORGANIZATION_SOFT_DELETED",
+] as const;
+
+export type PlatformAuditAction = (typeof PLATFORM_AUDIT_ACTIONS)[number];
+
+export interface PlatformAuditEvent {
+  id: string;
+  action: PlatformAuditAction;
+  actor: { id: string; name: string | null; email: string | null } | null;
+  organization: { id: string | null; name: string };
+  metadata: Record<string, unknown>;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
 }

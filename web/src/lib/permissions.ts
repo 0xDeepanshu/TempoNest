@@ -17,8 +17,10 @@ export const PERMISSIONS = [
   "agent:revoke",
   "screenshot:request",
   "screenshot:read",
+  "screenshot:live",
   "screenshot:manage",
   "screenshot:policy",
+  "attendance:location:read",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -46,8 +48,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "agent:revoke",
     "screenshot:request",
     "screenshot:read",
+    "screenshot:live",
     "screenshot:manage",
     "screenshot:policy",
+    "attendance:location:read",
   ],
   MANAGER: [
     "organization:read",

@@ -62,6 +62,8 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+.qoder/
+skills-lock.json
 
 # Deployment metadata
 .vercel/

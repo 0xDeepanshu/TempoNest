@@ -36,6 +36,29 @@ export const REQUEST_TIMEOUT_MS = 12_000
 export const HEARTBEAT_FALLBACK_MS = 60_000
 export const MAX_SYNC_BATCH = 200
 
+/**
+ * The backend supplies the stream path in the start command so the agent does
+ * not hard-code a second endpoint. The API base still decides the host and
+ * whether the connection is `ws` or `wss`.
+ */
+export function getScreenStreamUrl(streamPath: string, liveSessionId: string): string {
+  const url = new URL(getApiBaseUrl())
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+
+  const basePath = url.pathname.replace(/\/+$/, '')
+  const prefix = basePath.endsWith(API_PREFIX)
+    ? basePath.slice(0, -API_PREFIX.length)
+    : basePath
+  const target = streamPath.startsWith('/') ? streamPath : `/${streamPath}`
+  const suffix = target.startsWith(API_PREFIX) ? target : `${API_PREFIX}${target}`
+
+  url.pathname = `${prefix}${suffix}`.replace(/\/{2,}/g, '/')
+  url.search = ''
+  url.hash = ''
+  url.searchParams.set('liveSessionId', liveSessionId)
+  return url.toString()
+}
+
 export function getUserDataPath(...parts: string[]): string {
   return join(app.getPath('userData'), ...parts)
 }

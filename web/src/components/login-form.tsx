@@ -88,7 +88,7 @@ export function LoginForm() {
           <button
             type="button"
             onClick={() => setShowPassword((value) => !value)}
-            className="absolute inset-y-0 right-2 my-auto h-6 rounded px-2 text-[11px] font-semibold text-slate-500 hover:bg-slate-100"
+            className="absolute inset-y-0 right-2 my-auto h-6 rounded px-2 text-[11px] font-semibold text-muted hover:bg-surface-hover hover:text-ink"
           >
             {showPassword ? "Hide" : "Show"}
           </button>
@@ -99,7 +99,7 @@ export function LoginForm() {
         Sign in
       </Button>
 
-      <p className="text-center text-xs leading-5 text-slate-500">
+      <p className="text-center text-xs leading-5 text-muted">
         New to TempoNest?{" "}
         <Link
           href={`/register${
@@ -107,7 +107,7 @@ export function LoginForm() {
               ? `?next=${encodeURIComponent(safeNext(searchParams.get("next")))}`
               : ""
           }`}
-          className="font-semibold text-indigo-600 hover:text-indigo-700"
+          className="font-semibold text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
         >
           Create an account
         </Link>{" "}
@@ -119,33 +119,29 @@ export function LoginForm() {
 
 export function LoginPanel() {
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
-      <div className="relative hidden overflow-hidden bg-slate-950 p-12 text-white lg:flex lg:flex-col lg:justify-between">
-        <div className="absolute -left-24 -top-24 h-80 w-80 rounded-full bg-indigo-600/30 blur-3xl" />
-        <div className="absolute -bottom-24 right-0 h-96 w-96 rounded-full bg-emerald-500/20 blur-3xl" />
-        <div className="relative">
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500 text-lg font-black">
-              T
-            </span>
-            <div>
-              <p className="text-lg font-bold tracking-tight">TempoNest</p>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
-                Work portal
-              </p>
-            </div>
+    <div className="grid min-h-screen lg:grid-cols-[1.05fr_0.95fr]">
+      <div className="relative hidden flex-col justify-between bg-brand p-12 text-brand-foreground lg:flex">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-foreground text-lg font-semibold text-brand-ink">
+            T
+          </span>
+          <div>
+            <p className="text-lg font-semibold tracking-tight">TempoNest</p>
+            <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-brand-muted">
+              Work portal
+            </p>
           </div>
         </div>
 
-        <div className="relative max-w-md">
-          <h1 className="text-4xl font-bold leading-tight tracking-tight">
+        <div className="max-w-md">
+          <h1 className="text-4xl font-semibold leading-[1.15] tracking-[-0.03em]">
             Attendance and team time, in one calm place.
           </h1>
-          <p className="mt-4 text-sm leading-6 text-slate-300">
+          <p className="mt-4 text-sm leading-6 text-brand-muted">
             Review your working time, request attendance corrections, and give managers a clear
             view of the team — without moving tracking data into the browser.
           </p>
-          <ul className="mt-8 space-y-4">
+          <ul className="mt-10 divide-y divide-brand-border border-y border-brand-border">
             {[
               {
                 icon: <CalendarIcon className="h-4 w-4" />,
@@ -163,44 +159,44 @@ export function LoginPanel() {
                 body: "Session history, live tracking state, and application usage.",
               },
             ].map((item) => (
-              <li key={item.title} className="flex gap-3">
-                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 text-indigo-200">
+              <li key={item.title} className="flex gap-3 py-4">
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-brand-border text-brand-foreground/80">
                   {item.icon}
                 </span>
                 <div>
-                  <p className="text-sm font-semibold">{item.title}</p>
-                  <p className="text-xs leading-5 text-slate-400">{item.body}</p>
+                  <p className="text-sm font-medium">{item.title}</p>
+                  <p className="mt-0.5 text-xs leading-5 text-brand-muted">{item.body}</p>
                 </div>
               </li>
             ))}
           </ul>
         </div>
 
-        <p className="relative text-xs text-slate-500">
+        <p className="text-xs text-brand-muted">
           Time tracking is server-authoritative and controlled by the TempoNest desktop agent.
         </p>
       </div>
 
-      <div className="flex items-center justify-center bg-slate-50 px-4 py-12 sm:px-8">
+      <div className="flex items-center justify-center bg-canvas px-4 py-12 sm:px-8">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-sm font-black text-white">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink text-sm font-semibold text-on-strong">
               T
             </span>
             <div>
-              <p className="text-base font-bold text-slate-900">TempoNest</p>
-              <p className="text-[9px] font-semibold uppercase tracking-widest text-slate-400">
+              <p className="text-base font-semibold tracking-tight text-ink">TempoNest</p>
+              <p className="text-[9px] font-medium uppercase tracking-widest text-muted">
                 Work portal
               </p>
             </div>
           </div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Welcome back</h2>
-          <p className="mb-6 mt-1 text-sm text-slate-500">
+          <h2 className="text-2xl font-semibold tracking-[-0.02em] text-ink">Welcome back</h2>
+          <p className="mb-6 mt-1 text-sm text-muted">
             Sign in to view your attendance and team workspace.
           </p>
           <LoginForm />
-          <p className="mt-8 text-center text-[11px] text-slate-400">
-            <Link href="/" className="font-medium text-slate-500 hover:text-slate-700">
+          <p className="mt-8 text-center text-[11px] text-muted">
+            <Link href="/" className="font-medium text-ink-secondary hover:text-ink">
               TempoNest
             </Link>{" "}
             · Secure cookie session · CSRF protected

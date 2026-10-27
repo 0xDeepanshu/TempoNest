@@ -78,69 +78,69 @@ export function CorrectionReviewCard({
   const activeAction = action?.correctionId === correction.id ? action.type : null;
 
   return (
-    <article className="rounded-xl border border-slate-200 p-4">
+    <article className="rounded-xl border border-line p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold text-slate-900">{correction.workDate}</p>
+            <p className="text-[13px] font-semibold text-ink">{correction.workDate}</p>
             <CorrectionStatusBadge status={correction.status} />
-            <span className="text-[11px] font-medium text-slate-400">
+            <span className="text-[11px] font-medium text-muted">
               {correction.requestType === "CREATE_SESSION" ? "Missing session" : "Existing session"}
             </span>
           </div>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-muted">
             {correction.employee?.name ?? correction.employeeId}
             {correction.employee?.email ? ` · ${correction.employee.email}` : ""}
           </p>
         </div>
-        <p className="text-[11px] text-slate-400">
+        <p className="text-[11px] text-muted">
           Submitted {formatDateTime(correction.createdAt, timezone)}
         </p>
       </div>
 
       <div className="mt-3 grid gap-3 text-xs sm:grid-cols-3">
         <div>
-          <p className="text-slate-400">Requested interval</p>
-          <p className="mt-0.5 font-medium text-slate-700">
+          <p className="text-muted">Requested interval</p>
+          <p className="mt-0.5 font-medium tnum text-ink-secondary">
             {formatTimeRange(
               correction.requestedStartedAt,
               correction.requestedEndedAt,
               timezone,
             )}
           </p>
-          <p className="text-slate-400">
+          <p className="mt-0.5 text-[11px] text-muted">
             {formatDateTime(correction.requestedStartedAt, timezone)} –{" "}
             {formatDateTime(correction.requestedEndedAt, timezone)}
           </p>
         </div>
         <div>
-          <p className="text-slate-400">Breaks</p>
-          <p className="mt-0.5 font-medium text-slate-700">
+          <p className="text-muted">Breaks</p>
+          <p className="mt-0.5 font-medium tnum text-ink-secondary">
             {correction.requestedBreaks.length} ·{" "}
             {formatDuration(correction.requestedBreakSeconds)}
           </p>
         </div>
         <div>
-          <p className="text-slate-400">Correction ID</p>
-          <p className="mt-0.5 truncate font-mono text-[10px] text-slate-500">
+          <p className="text-muted">Correction ID</p>
+          <p className="mt-0.5 truncate font-mono text-[10px] text-muted">
             {correction.id}
           </p>
         </div>
       </div>
 
-      <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-        <span className="font-semibold text-slate-700">Reason: </span>
+      <p className="mt-3 rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs leading-5 text-ink-secondary">
+        <span className="font-medium text-ink">Reason: </span>
         {correction.reason}
       </p>
 
       <details className="mt-3 text-xs">
-        <summary className="cursor-pointer font-semibold text-indigo-600">
+        <summary className="cursor-pointer font-medium text-ink underline decoration-line-strong underline-offset-4">
           Original snapshot and requested breaks
         </summary>
-        <div className="mt-2 space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-3 text-slate-600">
+        <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface-muted p-3 text-ink-secondary">
           {correction.original ? (
             <p>
-              <span className="font-medium text-slate-700">Original: </span>
+              <span className="font-medium text-ink">Original: </span>
               {formatTimeRange(
                 correction.original.startedAt,
                 correction.original.endedAt,
@@ -167,33 +167,33 @@ export function CorrectionReviewCard({
       </details>
 
       {correction.reviewedAt || correction.rejectionReason || correction.reviewerNote ? (
-        <div className="mt-3 rounded-lg border border-slate-200 px-3 py-2 text-xs leading-5">
-          <p className="font-semibold text-slate-700">
+        <div className="mt-3 rounded-lg border border-line px-3 py-2 text-xs leading-5">
+          <p className="font-medium text-ink">
             Review · {formatDateTime(correction.reviewedAt, timezone)}
             {correction.reviewer ? ` by ${correction.reviewer.name}` : ""}
           </p>
           {correction.rejectionReason ? (
-            <p className="mt-1 text-rose-700">
+            <p className="mt-1 text-danger">
               Rejection reason: {correction.rejectionReason}
             </p>
           ) : null}
           {correction.reviewerNote ? (
-            <p className="mt-1 text-slate-600">Note: {correction.reviewerNote}</p>
+            <p className="mt-1 text-ink-secondary">Note: {correction.reviewerNote}</p>
           ) : null}
         </div>
       ) : null}
 
       {isPending ? (
-        <div className="mt-4 border-t border-slate-100 pt-3">
+        <div className="mt-4 border-t border-line pt-3">
           {isOwnRequest ? (
-            <p className="text-xs leading-5 text-amber-700">
+            <p className="text-xs leading-5 text-warning">
               You cannot review your own correction request. Another reviewer must
               approve or reject it.
             </p>
           ) : activeAction ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-slate-700">
+                <p className="text-xs font-semibold text-ink">
                   {activeAction === "approve" ? "Approve correction" : "Reject correction"}
                 </p>
                 <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>
@@ -253,7 +253,7 @@ export function CorrectionReviewCard({
   );
 }
 
-export function CorrectionReviewView() {
+export function CorrectionReviewView({ embedded = false }: { embedded?: boolean }) {
   const { organization, user } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const timezone = organization?.timezone ?? "UTC";
@@ -376,22 +376,31 @@ export function CorrectionReviewView() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        eyebrow={`${organization.name} · review queue`}
-        title="Correction review"
-        description="Review the stored original snapshot and requested replacement before approving or rejecting. You cannot review your own request."
-        actions={
-          <Button variant="secondary" onClick={() => corrections.reload()}>
-            Refresh
-          </Button>
-        }
-      />
+    <div className={embedded ? "space-y-4" : "space-y-5"}>
+      {embedded ? null : (
+        <PageHeader
+          eyebrow={`${organization.name} · review queue`}
+          title="Correction review"
+          description="Review the stored original snapshot and requested replacement before approving or rejecting. You cannot review your own request."
+          actions={
+            <Button variant="secondary" onClick={() => corrections.reload()}>
+              Refresh
+            </Button>
+          }
+        />
+      )}
 
       <Card>
         <CardHeader
           title="Filters"
           description="Filter by status, employee, and the correction's organization-local work date."
+          actions={
+            embedded ? (
+              <Button size="sm" variant="secondary" onClick={() => corrections.reload()}>
+                Refresh
+              </Button>
+            ) : undefined
+          }
         />
         <CardBody className="space-y-4">
           <Tabs
@@ -475,7 +484,7 @@ export function CorrectionReviewView() {
               : "Loading…"
           }
           actions={
-            <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span className="flex items-center gap-1.5 text-[11px] text-muted">
               <ClockIcon className="h-3.5 w-3.5" />
               {timezone}
             </span>
@@ -488,7 +497,7 @@ export function CorrectionReviewView() {
             icon={<CheckSquareIcon className="h-5 w-5" />}
           />
         ) : (
-          <div className="space-y-3 p-5">
+          <div className="space-y-3 p-4">
             {rows.map((correction) => (
               <CorrectionReviewCard
                 key={correction.id}

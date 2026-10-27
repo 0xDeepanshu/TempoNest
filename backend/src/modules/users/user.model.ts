@@ -7,12 +7,16 @@ import type { Session } from '../auth/session.model';
 export const USER_STATUSES = ['ACTIVE', 'DISABLED'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
 
+export const PLATFORM_ROLES = ['SUPERADMIN'] as const;
+export type PlatformRole = (typeof PLATFORM_ROLES)[number];
+
 export interface UserAttributes {
   id: string;
   name: string;
   email: string;
   passwordHash: string;
   status: UserStatus;
+  platformRole: PlatformRole | null;
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -20,7 +24,7 @@ export interface UserAttributes {
 
 export type UserCreationAttributes = Optional<
   UserAttributes,
-  'id' | 'status' | 'lastLoginAt' | 'createdAt' | 'updatedAt'
+  'id' | 'status' | 'platformRole' | 'lastLoginAt' | 'createdAt' | 'updatedAt'
 >;
 
 export class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
@@ -29,6 +33,7 @@ export class User extends Model<UserAttributes, UserCreationAttributes> implemen
   declare email: string;
   declare passwordHash: string;
   declare status: UserStatus;
+  declare platformRole: PlatformRole | null;
   declare lastLoginAt: Date | null;
   declare createdAt: Date;
   declare updatedAt: Date;
@@ -64,6 +69,13 @@ export function initUser(sequelize: Sequelize): typeof User {
         type: DataTypes.ENUM(...USER_STATUSES),
         allowNull: false,
         defaultValue: 'ACTIVE',
+      },
+      platformRole: {
+        // Platform authority is intentionally separate from organization roles.
+        // It is only assigned through the server-side provisioning script.
+        type: DataTypes.ENUM(...PLATFORM_ROLES),
+        allowNull: true,
+        field: 'platform_role',
       },
       lastLoginAt: {
         type: DataTypes.DATE,

@@ -93,7 +93,7 @@ export function ScreenshotRequestButton({
         {employeeName ? <span className="sr-only"> for {employeeName}</span> : null}
       </Button>
       {disabled && disabledReason ? (
-        <p className="max-w-xs text-[11px] leading-5 text-slate-500">{disabledReason}</p>
+        <p className="max-w-xs text-[11px] leading-5 text-muted">{disabledReason}</p>
       ) : null}
       {message ? (
         <div className="max-w-md">

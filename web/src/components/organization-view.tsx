@@ -109,20 +109,20 @@ function MemberRow({
   }
 
   return (
-    <tr className="hover:bg-slate-50/60">
+    <tr className="hover:bg-surface-muted">
       <Td>
         <div className="flex items-center gap-2.5">
           <Avatar name={member.user.name} size="sm" />
           <div className="min-w-0">
-            <p className="truncate font-medium text-slate-900">
+            <p className="truncate font-medium text-ink">
               {member.user.name}
               {member.userId === actorUserId ? (
-                <span className="ml-1.5 text-[10px] font-semibold uppercase text-indigo-500">
+                <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
                   You
                 </span>
               ) : null}
             </p>
-            <p className="truncate text-xs text-slate-500">{member.user.email}</p>
+            <p className="truncate text-xs text-muted">{member.user.email}</p>
           </div>
         </div>
       </Td>
@@ -168,7 +168,7 @@ function MemberRow({
       <Td>
         <MembershipStatusBadge status={member.status} />
       </Td>
-      <Td className="text-xs text-slate-500">
+      <Td className="text-xs text-muted">
         {formatDate(member.createdAt, timezone)}
       </Td>
       <Td>
@@ -228,12 +228,12 @@ function MemberRow({
             ) : null}
           </div>
         ) : (
-          <span className="block text-right text-[11px] text-slate-400">
+          <span className="block text-right text-[11px] text-muted">
             {member.status === "REMOVED" ? "Removed" : "Managed by an admin"}
           </span>
         )}
-        {notice ? <p className="mt-1 text-right text-[11px] text-emerald-600">{notice}</p> : null}
-        {error ? <p className="mt-1 text-right text-[11px] text-rose-600">{error}</p> : null}
+        {notice ? <p className="mt-1 text-right text-[11px] text-success">{notice}</p> : null}
+        {error ? <p className="mt-1 text-right text-[11px] text-danger">{error}</p> : null}
       </Td>
     </tr>
   );
@@ -301,7 +301,7 @@ function OrganizationSettings({
         title="Organization settings"
         description={`${memberCount ?? "—"} active and inactive memberships · created ${formatDate(organization.createdAt)}`}
       />
-      <form onSubmit={save} className="space-y-4 p-5">
+      <form onSubmit={save} className="space-y-4 p-4">
         {error ? <Alert tone="danger">{error}</Alert> : null}
         {success ? <Alert tone="success">{success}</Alert> : null}
         {!canUpdate ? (
@@ -348,8 +348,8 @@ function OrganizationSettings({
           <Button type="submit" loading={loading} disabled={!canUpdate}>
             Save settings
           </Button>
-          <span className="text-xs text-slate-500">
-            Slug <code className="rounded bg-slate-100 px-1.5 py-0.5">{organization.slug}</code>{" "}
+          <span className="text-xs text-muted">
+            Slug <code className="rounded bg-surface-hover px-1.5 py-0.5 text-ink-secondary">{organization.slug}</code>{" "}
             cannot be changed. Organization status is{" "}
             <Badge tone={organization.status === "ACTIVE" ? "success" : "warning"}>
               {organization.status}
@@ -498,23 +498,23 @@ function InvitationsPanel({
       />
 
       {canInvite ? (
-        <form onSubmit={sendInvitation} className="border-b border-slate-100 p-5">
+        <form onSubmit={sendInvitation} className="border-b border-line p-4">
           {inviteError ? (
             <div className="mb-3">
               <Alert tone="danger">{inviteError}</Alert>
             </div>
           ) : null}
           {created ? (
-            <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-              <p className="text-sm font-semibold text-emerald-900">
+            <div className="mb-4 rounded-lg border border-line bg-surface-muted p-4">
+              <p className="text-sm font-semibold text-ink">
                 Invitation created for {created.email}
               </p>
-              <p className="mt-1 text-xs leading-5 text-emerald-800">
+              <p className="mt-1 text-xs leading-5 text-muted">
                 Expires {formatDateTime(created.expiresAt, timezone)}. This token is shown only
                 now.
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <code className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-2 font-mono text-[11px] text-slate-700">
+                <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-surface px-3 py-2 font-mono text-[11px] text-ink-secondary">
                   {created.token}
                 </code>
                 <Button type="button" size="sm" variant="secondary" onClick={copyToken}>
@@ -522,7 +522,7 @@ function InvitationsPanel({
                   {copied ? "Copied" : "Copy token"}
                 </Button>
               </div>
-              <p className="mt-2 text-[11px] leading-5 text-emerald-800">
+              <p className="mt-2 text-[11px] leading-5 text-muted">
                 The invitee signs in, opens <code>/invitations/accept?token=…</code>, and submits
                 this token. Invitation acceptance is handled by the API and is not e-mailed by this
                 portal.
@@ -568,12 +568,12 @@ function InvitationsPanel({
       ) : null}
 
       {actionError ? (
-        <div className="px-5 pt-4">
+        <div className="px-4 pt-4">
           <Alert tone="danger">{actionError}</Alert>
         </div>
       ) : null}
       {invitations.error ? (
-        <div className="p-5">
+        <div className="p-4">
           <ErrorState message={invitations.error} onRetry={invitations.reload} />
         </div>
       ) : rows.length === 0 && !invitations.loading ? (
@@ -598,18 +598,18 @@ function InvitationsPanel({
             {rows.map((invitation) => {
               const statusInfo = invitationStatus(invitation);
               return (
-                <tr key={invitation.id} className="hover:bg-slate-50/60">
-                  <Td className="font-medium text-slate-900">{invitation.email}</Td>
+                <tr key={invitation.id} className="hover:bg-surface-muted">
+                  <Td className="font-medium text-ink">{invitation.email}</Td>
                   <Td>
                     <RoleBadge role={invitation.role} />
                   </Td>
                   <Td>
                     <Badge tone={statusInfo.tone}>{statusInfo.label}</Badge>
                   </Td>
-                  <Td className="text-xs text-slate-500">
+                  <Td className="text-xs text-muted">
                     {invitation.invitedBy?.name ?? "—"}
                   </Td>
-                  <Td className="text-xs text-slate-500">
+                  <Td className="text-xs text-muted">
                     {formatDateTime(invitation.expiresAt, timezone)}
                   </Td>
                   <Td className="text-right">
@@ -618,7 +618,7 @@ function InvitationsPanel({
                         Revoke
                       </Button>
                     ) : (
-                      <span className="text-[11px] text-slate-400">—</span>
+                      <span className="text-[11px] text-muted">—</span>
                     )}
                   </Td>
                 </tr>
@@ -690,7 +690,7 @@ function MembersPanel({
       />
       <form
         onSubmit={applyFilters}
-        className="grid gap-3 border-b border-slate-100 p-5 lg:grid-cols-[1fr_170px_170px_auto] lg:items-end"
+        className="grid gap-3 border-b border-line p-4 lg:grid-cols-[1fr_170px_170px_auto] lg:items-end"
       >
         <Field label="Search" htmlFor="manage-member-search">
           <Input
@@ -737,7 +737,7 @@ function MembersPanel({
       </form>
 
       {members.error ? (
-        <div className="p-5">
+        <div className="p-4">
           <ErrorState message={members.error} onRetry={members.reload} />
         </div>
       ) : rows.length === 0 && !members.loading ? (
@@ -802,11 +802,11 @@ function OrganizationView({ organization }: { organization: Organization }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         eyebrow={current.slug}
         title="Organization"
-        description="Manage the organization profile, memberships, and invitations. Every mutation is authorized again by the backend."
+        description="Manage the organization profile, memberships, and invitations. Every change is authorized by the backend."
       />
 
       {details.error ? (
