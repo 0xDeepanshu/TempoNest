@@ -181,12 +181,31 @@ const envSchema = z
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   })
   .superRefine((env, ctx) => {
-    if (env.NODE_ENV === 'production' && !env.DATABASE_URL && !env.DB_NAME) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['DATABASE_URL'],
-        message: 'DATABASE_URL (or DB_NAME) is required in production',
-      });
+    // DB_NAME/DB_USER/DB_PASSWORD carry development defaults, so the parsed
+    // values cannot reveal whether production actually supplied a database.
+    // Check the raw environment and require either a URL or explicit values,
+    // otherwise a misconfigured boot would silently target the dev defaults.
+    if (env.NODE_ENV === 'production' && !env.DATABASE_URL) {
+      if (!process.env.DB_NAME?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['DB_NAME'],
+          message: 'Set DATABASE_URL or DB_NAME explicitly in production',
+        });
+      } else if (process.env.DB_NAME.trim() === 'temponest_dev') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['DB_NAME'],
+          message: 'DB_NAME must not be the development default in production',
+        });
+      }
+      if (!process.env.DB_PASSWORD) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['DB_PASSWORD'],
+          message: 'Set DATABASE_URL or DB_PASSWORD explicitly in production',
+        });
+      }
     }
 
     if (env.NODE_ENV === 'production' && (!env.TOKEN_PEPPER || env.TOKEN_PEPPER.length < 32)) {

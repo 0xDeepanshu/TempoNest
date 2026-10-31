@@ -4,12 +4,20 @@ import { join } from 'node:path'
 const DEFAULT_API_BASE_URL = 'http://localhost:4000/api/v1'
 const API_PREFIX = '/api/v1'
 
+// Packaged apps launched from a shortcut have no shell environment, so the
+// production API origin must also be baked in at build time. Values come from
+// MAIN_VITE_TEMPO_* (electron-vite .env.production or the build shell).
+const BUILD_API_BASE_URL = import.meta.env.MAIN_VITE_TEMPO_API_BASE_URL?.trim() ?? ''
+const BUILD_WEB_SOCKET_URL = import.meta.env.MAIN_VITE_TEMPO_WS_URL?.trim() ?? ''
+
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '')
 }
 
 export function getApiBaseUrl(): string {
-  return trimTrailingSlash(process.env.TEMPO_API_BASE_URL?.trim() || DEFAULT_API_BASE_URL)
+  return trimTrailingSlash(
+    process.env.TEMPO_API_BASE_URL?.trim() || BUILD_API_BASE_URL || DEFAULT_API_BASE_URL,
+  )
 }
 
 /**
@@ -18,7 +26,7 @@ export function getApiBaseUrl(): string {
  * renderer never needs to know either URL.
  */
 export function getWebSocketUrl(): string {
-  const explicit = process.env.TEMPO_WS_URL?.trim()
+  const explicit = process.env.TEMPO_WS_URL?.trim() || BUILD_WEB_SOCKET_URL
   if (explicit) return explicit
 
   const url = new URL(getApiBaseUrl())
