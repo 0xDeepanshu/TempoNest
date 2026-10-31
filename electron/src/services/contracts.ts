@@ -1,5 +1,6 @@
 import type { AuthSession, SignInCredentials } from '@/types/auth'
 import type {
+  ActivityTrackingStatus,
   TrackingOperationResult,
   TrackingRuntimeStatus,
   TrackingSnapshot
@@ -49,6 +50,15 @@ export interface DesktopTrackingService {
   getStatus(): Promise<TrackingRuntimeStatus>
   onStateChanged(listener: (snapshot: TrackingSnapshot) => void): () => void
   onStatusChanged(listener: (status: TrackingRuntimeStatus) => void): () => void
+}
+
+/**
+ * Read-only, display-safe view of the organization's activity policy and the
+ * local collector state. Collection itself never starts from the renderer.
+ */
+export interface DesktopActivityService {
+  getStatus(): Promise<ActivityTrackingStatus>
+  onStatusChanged(listener: (status: ActivityTrackingStatus) => void): () => void
 }
 
 /**

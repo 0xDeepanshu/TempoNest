@@ -6,6 +6,7 @@ import { secondsBetween } from '../../utils/time';
 import { serializeByKey } from '../../utils/serialize';
 import { touchAgent } from '../desktopAgents/desktopAgent.service';
 import type { DesktopAgent as DesktopAgentModel } from '../desktopAgents/desktopAgent.model';
+import { loadTrackingSettings } from './trackingSettings.service';
 import type { ActivityBatchInput, ActivityEventInput } from './activity.schemas';
 
 export type ActivityIngestionResult = {
@@ -44,7 +45,11 @@ async function ingestOne(options: {
   const endedAt = new Date(event.endedAt);
 
   const existing = await ApplicationActivity.findOne({
-    where: { desktopAgentId: agent.id, idempotencyKey: event.idempotencyKey },
+    where: {
+      organizationId,
+      desktopAgentId: agent.id,
+      idempotencyKey: event.idempotencyKey,
+    },
   });
   if (existing) {
     return {
@@ -67,7 +72,11 @@ async function ingestOne(options: {
         await lockEmployee(transaction, employeeId);
 
       const duplicate = await ApplicationActivity.findOne({
-        where: { desktopAgentId: agent.id, idempotencyKey: event.idempotencyKey },
+        where: {
+          organizationId,
+          desktopAgentId: agent.id,
+          idempotencyKey: event.idempotencyKey,
+        },
         transaction,
         lock: Transaction.LOCK.UPDATE,
       });
@@ -75,11 +84,12 @@ async function ingestOne(options: {
 
       const session = await TimeSession.findOne({
         where: {
-          id: event.sessionId,
+          ...(event.sessionId ? { id: event.sessionId } : { endedAt: null }),
           organizationId,
           employeeId,
           desktopAgentId: agent.id,
         },
+        order: event.sessionId ? undefined : [['startedAt', 'DESC']],
         transaction,
         lock: Transaction.LOCK.UPDATE,
       });
@@ -98,6 +108,7 @@ async function ingestOne(options: {
 
       const overlap = await ApplicationActivity.findOne({
         where: {
+          organizationId,
           employeeId,
           startedAt: { [Op.lt]: endedAt },
           endedAt: { [Op.gt]: startedAt },
@@ -120,6 +131,7 @@ async function ingestOne(options: {
           desktopAgentId: agent.id,
           applicationIdentifier: event.applicationIdentifier,
           applicationName: event.applicationName,
+          platform: event.platform ?? agent.platform ?? null,
           startedAt,
           endedAt,
           durationSeconds: secondsBetween(startedAt, endedAt),
@@ -150,7 +162,11 @@ async function ingestOne(options: {
     }
     if (error instanceof UniqueConstraintError) {
       const duplicate = await ApplicationActivity.findOne({
-        where: { desktopAgentId: agent.id, idempotencyKey: event.idempotencyKey },
+        where: {
+          organizationId,
+          desktopAgentId: agent.id,
+          idempotencyKey: event.idempotencyKey,
+        },
       });
       if (duplicate) {
         return {
@@ -183,6 +199,14 @@ export async function ingestActivityBatch(options: {
   disclaimer: string;
 }> {
   const { organizationId, employeeId, agent, input } = options;
+  const settings = await loadTrackingSettings(organizationId);
+  if (!settings.appTrackingEnabled) {
+    throw AppError.forbidden(
+      'Application tracking is disabled by this organization',
+      'APP_TRACKING_DISABLED',
+    );
+  }
+
   const now = new Date();
   const results: ActivityIngestionResult[] = [];
 

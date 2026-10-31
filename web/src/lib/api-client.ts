@@ -89,7 +89,15 @@ export async function apiRequest<T>(
     if (response.status === 401 && typeof window !== "undefined") {
       window.dispatchEvent(new Event("tn:auth-expired"));
     }
-    throw parseApiError(response.status, payload);
+    const error = parseApiError(response.status, payload);
+    if (
+      response.status === 403 &&
+      error.code === "PERMISSION_DENIED" &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(new Event("tn:permission-denied"));
+    }
+    throw error;
   }
 
   return payload as T;

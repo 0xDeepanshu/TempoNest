@@ -1,9 +1,18 @@
 import { Op, UniqueConstraintError } from 'sequelize';
 import { randomBytes } from 'node:crypto';
-import { sequelize, Membership, Organization } from '../../database';
+import { sequelize, CustomRole, Membership, Organization } from '../../database';
 import { AppError } from '../../utils/errors';
 import { slugify, slugWithSuffix } from '../../utils/slug';
 import { toOrganizationSummary } from '../memberships/membership.mapper';
+import {
+  resolvePermissionSubject,
+  type ManagerRoleOverrideAccess,
+} from '../memberships/permissions';
+import {
+  getManagerRoleOverride,
+  getManagerRoleOverrides,
+  toManagerRoleOverrideAccess,
+} from '../roles/managerRole.service';
 import type { Membership as MembershipModel } from '../memberships/membership.model';
 import type { Organization as OrganizationModel } from './organization.model';
 import type { CreateOrganizationInput } from './organization.schemas';
@@ -63,6 +72,7 @@ export async function listOrganizationsForUser(userId: string) {
         required: true,
         where: { deletedAt: null },
       },
+      { model: CustomRole, as: 'customRole', required: false },
     ],
     order: [
       ['createdAt', 'ASC'],
@@ -70,28 +80,68 @@ export async function listOrganizationsForUser(userId: string) {
     ],
   });
 
+  const managerOrganizationIds = memberships
+    .filter((membership) => membership.role === 'MANAGER' && !membership.customRoleId)
+    .map((membership) => membership.organizationId);
+  const overrides = await getManagerRoleOverrides(managerOrganizationIds);
+
   return memberships.map((membership) => ({
     ...toOrganizationSummary(membership.organization!),
-    membership: {
-      id: membership.id,
-      role: membership.role,
-      status: membership.status,
-    },
+    membership: toMembershipContext(
+      membership,
+      toManagerRoleOverrideAccess(overrides.get(membership.organizationId)),
+    ),
   }));
 }
 
+function toMembershipContext(
+  membership: MembershipModel,
+  managerOverride?: ManagerRoleOverrideAccess | null,
+) {
+  const effective = resolvePermissionSubject(
+    membership.role,
+    membership.customRoleId ?? null,
+    membership.customRole,
+    managerOverride,
+  );
+
+  return {
+    id: membership.id,
+    role: membership.role,
+    status: membership.status,
+    customRoleId: membership.customRoleId ?? null,
+    permissions: effective.permissions,
+    dataScope: effective.dataScope,
+    ...(membership.customRole
+      ? {
+          customRole: {
+            id: membership.customRole.id,
+            name: membership.customRole.name,
+            description: membership.customRole.description,
+            permissions: membership.customRole.permissions,
+            dataScope: membership.customRole.dataScope,
+          },
+        }
+      : {}),
+  };
+}
+
 export async function getOrganizationDetails(organization: OrganizationModel, membership: MembershipModel) {
-  const memberCount = await Membership.count({
-    where: { organizationId: organization.id, status: 'ACTIVE' },
-  });
+  const [memberCount, managerOverride] = await Promise.all([
+    Membership.count({
+      where: { organizationId: organization.id, status: 'ACTIVE' },
+    }),
+    membership.role === 'MANAGER' && !membership.customRoleId
+      ? getManagerRoleOverride(organization.id)
+      : Promise.resolve(null),
+  ]);
 
   return {
     organization: toOrganizationSummary(organization),
-    membership: {
-      id: membership.id,
-      role: membership.role,
-      status: membership.status,
-    },
+    membership: toMembershipContext(
+      membership,
+      toManagerRoleOverrideAccess(managerOverride),
+    ),
     memberCount,
   };
 }

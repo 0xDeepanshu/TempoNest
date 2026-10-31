@@ -5,20 +5,27 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { apiRequest } from "@/lib/api-client";
 import { errorMessage } from "@/lib/api-error";
-import { hasPermission, type Permission } from "@/lib/permissions";
-import type { SessionData } from "@/lib/types";
+import {
+  hasAnyPermission,
+  hasPermission,
+  type Permission,
+} from "@/lib/permissions";
+import type { MembershipSummary, SessionData } from "@/lib/types";
 import {
   ArrowRightIcon,
   BuildingIcon,
+  CalendarIcon,
   CameraIcon,
   ChartIcon,
   ClockIcon,
   CloseIcon,
   DashboardIcon,
   EditIcon,
+  KeyIcon,
   LogOutIcon,
   MapPinIcon,
   MenuIcon,
+  MonitorIcon,
   PulseIcon,
   ShieldIcon,
   UsersIcon,
@@ -31,7 +38,12 @@ interface NavItem {
   href: string;
   label: string;
   icon: ReactNode;
+  /** Single permission required to show the item. */
   permission?: Permission;
+  /** Any one of these permissions unlocks the item. */
+  anyOf?: Permission[];
+  /** Every listed permission is required. */
+  allOf?: Permission[];
 }
 
 const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
@@ -43,8 +55,30 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
   {
     label: "Your time",
     items: [
-      { href: "/attendance", label: "My attendance", icon: <ClockIcon className="h-4 w-4" /> },
-      { href: "/corrections", label: "Corrections", icon: <EditIcon className="h-4 w-4" /> },
+      {
+        href: "/attendance",
+        label: "My attendance",
+        icon: <ClockIcon className="h-4 w-4" />,
+        permission: "time:read",
+      },
+      {
+        href: "/leave",
+        label: "My leaves",
+        icon: <CalendarIcon className="h-4 w-4" />,
+        permission: "leave:read",
+      },
+      {
+        href: "/holidays",
+        label: "Holiday calendar",
+        icon: <CalendarIcon className="h-4 w-4" />,
+        permission: "holiday:view",
+      },
+      {
+        href: "/corrections",
+        label: "Corrections",
+        icon: <EditIcon className="h-4 w-4" />,
+        anyOf: ["time:read", "time:write", "correction:review"],
+      },
     ],
   },
   {
@@ -55,6 +89,26 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
         label: "People",
         icon: <UsersIcon className="h-4 w-4" />,
         permission: "member:read",
+      },
+      {
+        href: "/admin/leave",
+        label: "Leave",
+        icon: <CalendarIcon className="h-4 w-4" />,
+        anyOf: ["leave:approve", "leave:manage"],
+      },
+      {
+        href: "/admin/leave/holidays",
+        label: "Holiday management",
+        icon: <CalendarIcon className="h-4 w-4" />,
+        // The calendar itself requires read access; management permissions only
+        // unlock the edit actions inside it.
+        permission: "holiday:view",
+        anyOf: [
+          "holiday:create",
+          "holiday:update",
+          "holiday:delete",
+          "holiday:settings:manage",
+        ],
       },
       {
         href: "/admin/reports",
@@ -80,6 +134,15 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
     label: "Monitoring",
     items: [
       {
+        href: "/admin/activity",
+        label: "App tracking",
+        icon: <MonitorIcon className="h-4 w-4" />,
+        // The landing page reads tracking settings (time:read) and the team
+        // views read reports (report:read). General report access alone must
+        // not surface the monitoring area.
+        allOf: ["time:read", "report:read"],
+      },
+      {
         href: "/admin/screenshots",
         label: "Screenshot review",
         icon: <CameraIcon className="h-4 w-4" />,
@@ -97,10 +160,18 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
     label: "Workspace",
     items: [
       {
+        href: "/admin/roles",
+        label: "Roles & permissions",
+        icon: <KeyIcon className="h-4 w-4" />,
+        permission: "role:read",
+      },
+      {
         href: "/admin/organization",
         label: "Organization",
         icon: <BuildingIcon className="h-4 w-4" />,
-        permission: "organization:read",
+        // The page lives under the admin layout and lists members, so both the
+        // organization profile and the directory must be readable.
+        allOf: ["organization:read", "member:read"],
       },
     ],
   },
@@ -108,6 +179,30 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
 
 function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function navItemAllowed(
+  item: NavItem,
+  membership: MembershipSummary | undefined,
+): boolean {
+  if (item.permission && !hasPermission(membership, item.permission)) return false;
+  if (item.anyOf && !hasAnyPermission(membership, item.anyOf)) return false;
+  if (item.allOf && !item.allOf.every((permission) => hasPermission(membership, permission))) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Navigation mirrors the backend's effective permission list for the active
+ * membership. Items disappear when their entry surface is not permitted; no
+ * built-in role name or broader permission is used as a substitute.
+ */
+export function visibleNavigationGroups(membership: MembershipSummary | undefined) {
+  return NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => navItemAllowed(item, membership)),
+  })).filter((group) => group.items.length > 0);
 }
 
 function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
@@ -133,11 +228,7 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const { membership } = useWorkspace();
-  const role = membership?.role;
-  const groups = NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => !item.permission || hasPermission(role, item.permission)),
-  })).filter((group) => group.items.length > 0);
+  const groups = visibleNavigationGroups(membership);
 
   return (
     <nav aria-label="Primary" className="flex-1 space-y-5 overflow-y-auto px-2.5 py-4">
@@ -185,7 +276,7 @@ function WorkspaceControls() {
         </div>
       )}
       <div className="flex items-center gap-2 px-0.5">
-        <RoleBadge role={membership.role} />
+        <RoleBadge role={membership.role} customRoleName={membership.customRole?.name} />
         <span className="truncate text-[11px] text-muted">{organization.timezone}</span>
       </div>
     </div>
@@ -351,7 +442,7 @@ function Shell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-2">
             {membership ? (
               <span className="hidden sm:inline-flex">
-                <RoleBadge role={membership.role} />
+                <RoleBadge role={membership.role} customRoleName={membership.customRole?.name} />
               </span>
             ) : null}
             <ThemeToggle />

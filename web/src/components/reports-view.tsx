@@ -11,6 +11,7 @@ import {
   formatDuration,
   formatPercent,
 } from "@/lib/format";
+import { hasPermission } from "@/lib/permissions";
 import { reportRangeFromUrl } from "@/lib/report-range";
 import type {
   ApplicationUsageResponse,
@@ -18,6 +19,7 @@ import type {
   SessionReportResponse,
 } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
+import { ActivityReportPanel } from "./activity-report-panel";
 import { EmployeePicker } from "./employee-picker";
 import { ArrowRightIcon, CalendarIcon, ChartIcon, ClockIcon } from "./icons";
 import {
@@ -43,9 +45,16 @@ import {
 } from "./ui";
 import { NoOrganization, useWorkspace } from "./workspace";
 
-type ReportTab = "sessions" | "daily" | "applications";
+type ReportTab = "sessions" | "daily" | "applications" | "activity";
 
-const REPORT_TABS: ReportTab[] = ["sessions", "daily", "applications"];
+const REPORT_TABS: ReportTab[] = ["sessions", "daily", "applications", "activity"];
+
+const REPORT_TAB_LABELS: Record<ReportTab, string> = {
+  sessions: "Sessions",
+  daily: "Daily totals",
+  applications: "Applications",
+  activity: "Activity",
+};
 
 function reportUrl(
   employeeId: string,
@@ -71,13 +80,20 @@ export function ReportsView({
   initialTo?: string;
   initialTab?: string;
 }) {
-  const { organization } = useWorkspace();
+  const { organization, membership } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const timezone = organization?.timezone ?? "UTC";
+  const canReadActivity = hasPermission(membership, "time:read");
+  const canBrowseMembers = hasPermission(membership, "member:read");
+  const availableTabs = REPORT_TABS.filter(
+    (candidate) => candidate !== "activity" || canReadActivity,
+  );
   const initialRange = reportRangeFromUrl(initialFrom, initialTo, timezone);
-  const startingTab: ReportTab = REPORT_TABS.includes(initialTab as ReportTab)
+  const requestedTab: ReportTab = REPORT_TABS.includes(initialTab as ReportTab)
     ? (initialTab as ReportTab)
     : "sessions";
+  const startingTab: ReportTab =
+    requestedTab === "activity" && !canReadActivity ? "sessions" : requestedTab;
 
   const [employeeId, setEmployeeId] = useState(initialEmployeeId);
   const [draftFrom, setDraftFrom] = useState(initialRange.from);
@@ -95,9 +111,24 @@ export function ReportsView({
     );
   }
 
+  // Revoking time:read while the page is open must stop activity report calls.
+  const activeTab: ReportTab = tab === "activity" && !canReadActivity ? "sessions" : tab;
   const days = daysBetween(range.from, range.to);
-  const tabTooLong =
-    (tab === "daily" && days > 92) || (tab === "applications" && days > 31);
+  const tabLimit =
+    activeTab === "daily"
+      ? 92
+      : activeTab === "applications"
+        ? 31
+        : activeTab === "activity"
+          ? 92
+          : null;
+  const tabTooLong = tabLimit !== null && days > tabLimit;
+  const tabLimitLabel =
+    activeTab === "daily"
+      ? "Daily reports"
+      : activeTab === "applications"
+        ? "Application usage reports"
+        : "Activity summaries";
   const enabled = Boolean(organizationId && employeeId) && !tabTooLong;
 
   const sessions = useApi<SessionReportResponse>(
@@ -107,7 +138,7 @@ export function ReportsView({
         query: { employeeId, from: range.from, to: range.to, page, limit: 20 },
       }),
     [organizationId, employeeId, range.from, range.to, page],
-    { enabled: enabled && tab === "sessions" },
+    { enabled: enabled && activeTab === "sessions" },
   );
 
   const daily = useApi<{ data: DailyReport }>(
@@ -117,7 +148,7 @@ export function ReportsView({
         query: { employeeId, from: range.from, to: range.to },
       }),
     [organizationId, employeeId, range.from, range.to],
-    { enabled: enabled && tab === "daily" },
+    { enabled: enabled && activeTab === "daily" },
   );
 
   const applications = useApi<ApplicationUsageResponse>(
@@ -127,7 +158,7 @@ export function ReportsView({
         query: { employeeId, from: range.from, to: range.to, page, limit: 20 },
       }),
     [organizationId, employeeId, range.from, range.to, page],
-    { enabled: enabled && tab === "applications" },
+    { enabled: enabled && activeTab === "applications" },
   );
 
   if (!organization) return <NoOrganization />;
@@ -150,13 +181,13 @@ export function ReportsView({
     const nextRange = { from: draftFrom, to: draftTo };
     setRange(nextRange);
     setPage(1);
-    rememberUrl(employeeId, nextRange, tab);
+    rememberUrl(employeeId, nextRange, activeTab);
   }
 
   function selectEmployee(nextEmployeeId: string) {
     setEmployeeId(nextEmployeeId);
     setPage(1);
-    rememberUrl(nextEmployeeId, range, tab);
+    rememberUrl(nextEmployeeId, range, activeTab);
   }
 
   function selectTab(nextTab: ReportTab) {
@@ -187,7 +218,7 @@ export function ReportsView({
         title="Reports"
         description="Date-filtered, per-employee analysis of sessions, working time, breaks, and foreground application metadata. Use People for the directory and profile context."
         actions={
-          employeeId ? (
+          employeeId && canBrowseMembers ? (
             <Link href={`/admin/employees/${employeeId}?from=${range.from}&to=${range.to}`}>
               <Button variant="secondary">
                 Open employee profile
@@ -214,6 +245,7 @@ export function ReportsView({
               value={employeeId}
               onChange={selectEmployee}
               disabled={!organizationId}
+              canBrowse={canBrowseMembers}
             />
           </Field>
           <Field label="From" htmlFor="report-from">
@@ -241,17 +273,24 @@ export function ReportsView({
             <Alert tone="danger">{rangeError}</Alert>
           </div>
         ) : null}
+        {!canBrowseMembers ? (
+          <div className="px-4 pb-4">
+            <Alert tone="warning" title="Directory access required">
+              Selecting an employee searches the organization directory, which requires
+              People read access. Open a report from an employee profile or a shared link.
+            </Alert>
+          </div>
+        ) : null}
       </Card>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
-          value={tab}
+          value={activeTab}
           onChange={selectTab}
-          tabs={[
-            { value: "sessions", label: "Sessions" },
-            { value: "daily", label: "Daily totals" },
-            { value: "applications", label: "Applications" },
-          ]}
+          tabs={availableTabs.map((value) => ({
+            value,
+            label: REPORT_TAB_LABELS[value],
+          }))}
         />
         <p className="flex items-center gap-1.5 text-xs text-muted">
           <CalendarIcon className="h-3.5 w-3.5" />
@@ -261,9 +300,7 @@ export function ReportsView({
 
       {tabTooLong ? (
         <Alert tone="warning" title="Range too large for this report">
-          {tab === "daily"
-            ? "Daily reports are limited to 92 days. Narrow the date range to continue."
-            : "Application usage reports are limited to 31 days. Narrow the date range to continue."}
+          {tabLimitLabel} are limited to {tabLimit} days. Narrow the date range to continue.
         </Alert>
       ) : null}
 
@@ -277,7 +314,7 @@ export function ReportsView({
         </Card>
       ) : null}
 
-      {tab === "sessions" && employeeId ? (
+      {activeTab === "sessions" && employeeId ? (
         <>
           <div className="grid gap-4 sm:grid-cols-3">
             <StatCard
@@ -360,7 +397,7 @@ export function ReportsView({
         </>
       ) : null}
 
-      {tab === "daily" && employeeId && !tabTooLong ? (
+      {activeTab === "daily" && employeeId && !tabTooLong ? (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Worked" value={daily.loading ? "…" : formatDuration(dailyTotals.worked)} accent="indigo" />
@@ -408,7 +445,7 @@ export function ReportsView({
         </>
       ) : null}
 
-      {tab === "applications" && employeeId && !tabTooLong ? (
+      {activeTab === "applications" && employeeId && !tabTooLong ? (
         <Card>
           <CardHeader
             title="Application usage"
@@ -492,6 +529,15 @@ export function ReportsView({
             </>
           )}
         </Card>
+      ) : null}
+      {activeTab === "activity" && employeeId && !tabTooLong ? (
+        <ActivityReportPanel
+          organizationId={organizationId}
+          employeeId={employeeId}
+          from={range.from}
+          to={range.to}
+          timezone={timezone}
+        />
       ) : null}
     </div>
   );

@@ -11,6 +11,7 @@ import {
 } from '../reporting/reporting.service';
 import type { Organization as OrganizationModel } from '../organizations/organization.model';
 import type { Role } from '../memberships/roles';
+import { isSelfScoped, type PermissionSubject } from '../memberships/permissions';
 import type { AttendanceSummaryPeriod, AttendanceSummaryQuery } from './attendance.schemas';
 
 type PeriodAccumulator = {
@@ -61,13 +62,13 @@ function maxDate(current: Date | null, candidate: Date): Date {
 export async function getAttendanceSummary(options: {
   organization: OrganizationModel;
   actorUserId: string;
-  actorRole: Role;
+  actorRole: Role | PermissionSubject;
   query: AttendanceSummaryQuery;
 }) {
   const { organization, actorUserId, actorRole, query } = options;
 
   let employeeId = query.employeeId;
-  if (actorRole === 'EMPLOYEE') {
+  if (isSelfScoped(actorRole)) {
     employeeId = actorUserId;
   } else if (!employeeId) {
     throw AppError.unprocessable(

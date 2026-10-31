@@ -47,10 +47,9 @@ export const membershipIdParamsSchema = z.object({
   membershipId: z.string().uuid('Membership ID must be a valid UUID'),
 });
 
-export const changeRoleSchema = z
-  .object({
-    role: z.enum(ROLES),
-  })
-  .strict();
+export const changeRoleSchema = z.union([
+  z.object({ role: z.enum(ROLES) }).strict(),
+  z.object({ customRoleId: z.string().uuid('Custom role ID must be a valid UUID') }).strict(),
+]);
 
 export type ChangeRoleInput = z.infer<typeof changeRoleSchema>;

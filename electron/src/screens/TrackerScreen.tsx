@@ -16,6 +16,7 @@ import { Logo } from '@/components/Logo'
 import { cn } from '@/lib/cn'
 import { formatClock, formatDuration, formatTime } from '@/lib/time'
 import { useTimer } from '@/tracking/TimerProvider'
+import type { ActivityTrackingStatus } from '@/types/electron'
 import type { TrackingStatus } from '@/types/tracking'
 
 const STATUS_META: Record<
@@ -42,6 +43,102 @@ const STATUS_META: Record<
   }
 }
 
+function activityDetail(
+  enabled: boolean,
+  active: boolean,
+  whenDisabled: string,
+  whenEnabled: string
+): string {
+  if (!enabled) return whenDisabled
+  return active ? 'Recording while you work' : whenEnabled
+}
+
+function ActivityStatusPanel({ activity }: { activity: ActivityTrackingStatus }) {
+  const idleThreshold = activity.idleThresholdMinutes
+    ? `Idle after ${activity.idleThresholdMinutes} min without input`
+    : 'Idle threshold from organization policy'
+
+  return (
+    <section
+      className="mt-4 rounded-xl border border-line/80 bg-white px-4 py-3.5"
+      aria-label="Activity tracking status"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-muted">
+          Activity tracking
+        </h2>
+        {activity.policyVersion !== null ? (
+          <span className="text-[10px] text-ink-muted">Policy v{activity.policyVersion}</span>
+        ) : null}
+      </div>
+
+      <dl className="mt-2.5 grid gap-2 sm:grid-cols-2">
+        <div className="flex items-start gap-2">
+          <span
+            className={cn(
+              'mt-1.5 inline-flex h-1.5 w-1.5 shrink-0 rounded-full',
+              activity.appCollectionActive ? 'bg-emerald-500' : 'bg-slate-300'
+            )}
+            aria-hidden="true"
+          />
+          <div className="min-w-0">
+            <dt className="text-[11px] font-semibold text-ink">App activity</dt>
+            <dd className="text-[11px] leading-4 text-ink-muted">
+              {activityDetail(
+                activity.appTrackingEnabled,
+                activity.appCollectionActive,
+                'Turned off by your organization',
+                'Enabled · starts when you start working'
+              )}
+            </dd>
+          </div>
+        </div>
+
+        <div className="flex items-start gap-2">
+          <span
+            className={cn(
+              'mt-1.5 inline-flex h-1.5 w-1.5 shrink-0 rounded-full',
+              activity.idleCollectionActive ? 'bg-emerald-500' : 'bg-slate-300'
+            )}
+            aria-hidden="true"
+          />
+          <div className="min-w-0">
+            <dt className="text-[11px] font-semibold text-ink">Idle detection</dt>
+            <dd className="text-[11px] leading-4 text-ink-muted">
+              {activity.idleDetectionEnabled ? idleThreshold : 'Turned off by your organization'}
+            </dd>
+          </div>
+        </div>
+      </dl>
+
+      {activity.appTrackingEnabled && activity.foregroundDetectionMessage ? (
+        <p className="mt-2.5 text-[11px] leading-4 text-amber-700">
+          {activity.foregroundDetectionMessage}
+        </p>
+      ) : null}
+
+      {activity.pendingAppEvents + activity.pendingIdleIntervals > 0 ? (
+        <p className="mt-2 text-[11px] leading-4 text-ink-muted">
+          {activity.pendingAppEvents + activity.pendingIdleIntervals} activity record
+          {activity.pendingAppEvents + activity.pendingIdleIntervals === 1 ? '' : 's'} waiting to
+          upload.
+        </p>
+      ) : null}
+
+      {activity.message ? (
+        <p className="mt-2 text-[11px] leading-4 text-ink-muted" aria-live="polite">
+          {activity.message}
+        </p>
+      ) : null}
+
+      <p className="mt-2.5 text-[10px] leading-4 text-ink-muted">
+        Only application names and idle periods are recorded. Window titles, browsing, keystrokes and
+        clipboard contents are never collected.
+      </p>
+    </section>
+  )
+}
+
 export function TrackerScreen() {
   const { session, signOut } = useAuth()
   const {
@@ -57,6 +154,7 @@ export function TrackerScreen() {
     connection,
     syncMessage,
     pendingEvents,
+    activity,
     startWork,
     stopWork,
     startBreak,
@@ -265,6 +363,8 @@ export function TrackerScreen() {
               </div>
             </div>
           </section>
+
+          {activity?.policyKnown ? <ActivityStatusPanel activity={activity} /> : null}
 
           {syncMessage || pendingEvents > 0 || connection === 'blocked' ? (
             <div

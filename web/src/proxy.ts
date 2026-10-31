@@ -9,8 +9,16 @@ import {
 } from "@/lib/cookies";
 import { refreshOnce } from "@/lib/refresh";
 
+const PUBLIC_PATHS = new Set([
+  "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
+  "/invitations/accept",
+]);
+
 function isPublicPath(pathname: string): boolean {
-  return pathname === "/login" || pathname === "/register";
+  return PUBLIC_PATHS.has(pathname);
 }
 
 function loginRedirect(request: NextRequest, clearCookies: boolean): NextResponse {

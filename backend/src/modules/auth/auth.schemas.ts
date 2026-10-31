@@ -46,6 +46,23 @@ export const logoutSchema = z.object({
   refreshToken: z.string().min(20).max(512).optional(),
 });
 
+export const forgotPasswordSchema = z
+  .object({
+    email: emailSchema,
+  })
+  .strict();
+
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().min(20, 'Reset token is invalid').max(512),
+    password: passwordSchema,
+  })
+  .strict();
+
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
 export const sessionIdParamsSchema = z.object({
   sessionId: z.string().uuid('Session ID must be a valid UUID'),
 });

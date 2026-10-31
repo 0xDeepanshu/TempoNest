@@ -3,7 +3,7 @@ import { rateLimit } from 'express-rate-limit';
 import { config } from '../../config/env';
 import { requireAuth } from '../../middleware/authenticate';
 import { validate } from '../../middleware/validate';
-import { requirePermission } from '../memberships/permissions';
+import { requireAnyPermission, requirePermission } from '../memberships/permissions';
 import { loadOrganizationContext } from '../memberships/organizationContext';
 import { resolveCurrentOrganization } from '../organizations/currentOrganization';
 import { organizationIdParamsSchema } from '../organizations/organization.schemas';
@@ -23,6 +23,7 @@ import {
   attendanceLocationHistoryQuerySchema,
   attendanceLocationSamplesSchema,
   attendanceLocationStatusSchema,
+  attendanceDayStatusQuerySchema,
   attendanceSummaryQuerySchema,
   createAttendanceCorrectionSchema,
   createAttendanceEvidenceSchema,
@@ -35,6 +36,7 @@ import {
   createCorrection,
   createEvidence,
   currentCheckIn,
+  dayStatus,
   downloadEvidenceFile,
   getCorrection,
   ingestLocationSamples,
@@ -94,11 +96,23 @@ export function createOrganizationAttendanceRouter(): Router {
   );
 
   router.get(
-    '/:organizationId/attendance/corrections',
+    '/:organizationId/attendance/day-status',
     requireAuth,
     validate({ params: organizationIdParamsSchema }),
     loadOrganizationContext,
     requirePermission('time:read'),
+    validate({ query: attendanceDayStatusQuerySchema }),
+    dayStatus,
+  );
+
+  router.get(
+    '/:organizationId/attendance/corrections',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    // Reviewers may read correction details without also holding time:read.
+    // The service narrows non-reviewers to their own requests.
+    requireAnyPermission(['time:read', 'correction:review']),
     validate({ query: attendanceCorrectionListQuerySchema }),
     listCorrections,
   );
@@ -118,7 +132,7 @@ export function createOrganizationAttendanceRouter(): Router {
     requireAuth,
     validate({ params: attendanceCorrectionIdParamsSchema }),
     loadOrganizationContext,
-    requirePermission('time:read'),
+    requireAnyPermission(['time:read', 'correction:review']),
     getCorrection,
   );
 

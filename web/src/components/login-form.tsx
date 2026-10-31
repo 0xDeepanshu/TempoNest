@@ -47,6 +47,12 @@ export function LoginForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      {searchParams.get("reset") === "1" ? (
+        <Alert tone="success">
+          Your password was updated. Sign in with your new password.
+        </Alert>
+      ) : null}
+
       {error ? <Alert tone="danger">{error}</Alert> : null}
 
       <Field
@@ -95,23 +101,22 @@ export function LoginForm() {
         </div>
       </Field>
 
+      <div className="-mt-1 flex justify-end">
+        <Link
+          href="/forgot-password"
+          className="text-[11px] font-semibold text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink hover:decoration-ink"
+        >
+          Forgot password?
+        </Link>
+      </div>
+
       <Button type="submit" loading={loading} className="w-full" size="lg">
         Sign in
       </Button>
 
       <p className="text-center text-xs leading-5 text-muted">
-        New to TempoNest?{" "}
-        <Link
-          href={`/register${
-            searchParams.get("next")
-              ? `?next=${encodeURIComponent(safeNext(searchParams.get("next")))}`
-              : ""
-          }`}
-          className="font-semibold text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
-        >
-          Create an account
-        </Link>{" "}
-        to accept an invitation.
+        Accounts are created from an organization invitation. Open the link in your invitation
+        email, or ask your administrator to resend it.
       </p>
     </form>
   );

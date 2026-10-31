@@ -10,6 +10,7 @@ import { agentHub } from '../../realtime/agentHub';
 import { touchAgent } from '../desktopAgents/desktopAgent.service';
 import { toTimeSessionSummary } from './timeSession.mapper';
 import type { Role } from '../memberships/roles';
+import { isSelfScoped, type PermissionSubject } from '../memberships/permissions';
 import type { DesktopAgent as DesktopAgentModel } from '../desktopAgents/desktopAgent.model';
 import type { OfflineEventInput, OfflineSyncInput, SessionListQuery } from './timeSession.schemas';
 import type { TimeSession as TimeSessionModel } from './timeSession.model';
@@ -425,11 +426,11 @@ export async function getSessionForActor(options: {
   organizationId: string;
   sessionId: string;
   actorUserId: string;
-  actorRole: Role;
+  actorRole: Role | PermissionSubject;
 }): Promise<TimeSessionModel> {
   const { organizationId, sessionId, actorUserId, actorRole } = options;
   const where: Record<string, unknown> = { id: sessionId, organizationId };
-  if (actorRole === 'EMPLOYEE') where.employeeId = actorUserId;
+  if (isSelfScoped(actorRole)) where.employeeId = actorUserId;
 
   const session = await TimeSession.findOne({ where, include: sessionIncludes });
   if (!session) throw AppError.notFound('Time session not found', 'SESSION_NOT_FOUND');
@@ -439,13 +440,13 @@ export async function getSessionForActor(options: {
 export async function listSessions(options: {
   organizationId: string;
   actorUserId: string;
-  actorRole: Role;
+  actorRole: Role | PermissionSubject;
   query: SessionListQuery;
 }) {
   const { organizationId, actorUserId, actorRole, query } = options;
   const where: Record<string, unknown> = { organizationId };
 
-  if (actorRole === 'EMPLOYEE') {
+  if (isSelfScoped(actorRole)) {
     where.employeeId = actorUserId;
   } else if (query.employeeId) {
     where.employeeId = query.employeeId;

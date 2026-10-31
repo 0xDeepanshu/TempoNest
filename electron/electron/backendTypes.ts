@@ -195,6 +195,74 @@ export interface ScreenLiveSocketError {
   liveSessionId?: string
 }
 
+/** Effective organization policy returned by `GET /activity/settings`. */
+export interface BackendTrackingSettings {
+  organizationId: string
+  appTrackingEnabled: boolean
+  idleDetectionEnabled: boolean
+  idleThresholdMinutes: number
+  productivityClassificationEnabled: boolean
+  activityRetentionDays: number
+  policyVersion: number
+  policyUpdatedAt: string
+  updatedAt: string
+}
+
+export interface BackendActivitySettingsEnvelope {
+  settings: BackendTrackingSettings
+}
+
+export interface ApplicationActivityPayload {
+  idempotencyKey: string
+  sessionId?: string
+  applicationIdentifier: string
+  applicationName: string
+  platform?: string
+  startedAt: string
+  endedAt: string
+}
+
+export interface IdleIntervalPayload {
+  idempotencyKey: string
+  sessionId?: string
+  platform?: string
+  startedAt: string
+  endedAt: string
+}
+
+export type ActivityIngestionStatus = 'accepted' | 'duplicate' | 'rejected'
+
+export interface ApplicationActivityBatchResult {
+  received: number
+  accepted: number
+  duplicated: number
+  rejected: number
+  results: Array<{
+    idempotencyKey: string
+    status: ActivityIngestionStatus
+    activityId?: string
+    code?: string
+    message?: string
+  }>
+  disclaimer: string
+}
+
+export interface IdleIntervalBatchResult {
+  received: number
+  accepted: number
+  duplicated: number
+  rejected: number
+  results: Array<{
+    idempotencyKey: string
+    status: ActivityIngestionStatus
+    idleIntervalId?: string
+    code?: string
+    message?: string
+  }>
+  thresholdSeconds: number
+  disclaimer: string
+}
+
 export type OfflineEventType = 'SESSION_START' | 'BREAK_START' | 'BREAK_END' | 'SESSION_STOP'
 
 export interface OfflineEvent {

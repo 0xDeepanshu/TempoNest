@@ -2,7 +2,7 @@
 
 A focused employee desktop time tracker built with Electron, React, TypeScript, Vite, and Tailwind CSS. The app is now wired to the real TempoNest backend for desktop authentication, desktop-agent registration, server-authoritative time tracking, authenticated WebSockets, heartbeat handling, and offline event synchronization.
 
-Screenshots, OS activity detection, the admin portal, and backend changes remain out of scope.
+Continuous screen recording, the admin portal, and backend changes remain out of scope. Foreground application and idle tracking follow the existing backend activity contract.
 
 ## What the desktop app does
 
@@ -22,6 +22,11 @@ Screenshots, OS activity detection, the admin portal, and backend changes remain
 - Refreshes rotated access/refresh tokens once per failed request and reconnects the WebSocket on close code `4001`.
 - Treats close code `4003` and `agent.revoked` as a blocked device, resets the local timer, and does not silently retry.
 - Keeps refresh tokens, agent keys, and raw API errors out of the renderer.
+- Loads the organization's activity policy from `GET /organizations/:organizationId/activity/settings` after sign-in, on reconnect, and every three minutes. Collection starts only after this policy is known.
+- Collects foreground-application intervals (process identifier, display name, platform, timestamps only) while the local timer is working and the policy enables app tracking.
+- Collects idle intervals from `powerMonitor.getSystemIdleTime()` using the server's `idleThresholdMinutes`. Breaks, stopped sessions, and sleep are excluded.
+- Uploads raw intervals through `POST /organizations/:organizationId/application-activities/batch` and `POST /organizations/:organizationId/activity/idle-intervals/batch`; the Electron app never computes productivity scores.
+- Shows a compact activity status panel so employees can see whether app activity and idle detection are enabled, the idle threshold, pending uploads, and the metadata-only disclosure.
 
 ## Requirements
 
@@ -176,6 +181,42 @@ POST /organizations/:organizationId/time-sessions/sync
 
 It then fetches the authoritative current session. The WebSocket reconnect path and a periodic HTTP/WebSocket recovery sweep both trigger this flow, so a session started while offline can be recovered after registration/network restore.
 
+## Activity tracking and idle detection
+
+App activity and idle detection are employee-visible and controlled entirely by the organization policy. The admin policy is the source of truth; the renderer only displays status and can never start collection.
+
+- After authentication, the main process reads `GET /organizations/:organizationId/activity/settings`, retries periodically, and refreshes on reconnect. Collection does not start while this policy is unknown.
+- `appTrackingEnabled` and `idleDetectionEnabled` are honored independently. Disabling either stops that collector immediately, closes any open interval at its last observation, and retains queued data.
+- App tracking records only the foreground process identifier, its display name when the OS provides one, `platform`, and start/end timestamps. Consecutive samples of the same process become one interval. Window titles, URLs, keystrokes, clipboard data and document contents are never read, queued or sent.
+- Idle detection uses only `powerMonitor.getSystemIdleTime()` and the server's `idleThresholdMinutes`. Intervals shorter than the current threshold are discarded, and breaks, stopped sessions and sleep do not become idle time.
+- Raw intervals are uploaded to `POST /organizations/:organizationId/application-activities/batch` and `POST /organizations/:organizationId/activity/idle-intervals/batch`. The desktop app does not calculate productivity scores, and unknown applications are never assumed unproductive.
+- Intervals are queued in `activity-queue.json` under Electron's user-data directory with stable idempotency keys (`app-<deviceId>-<startMs>`, `idle-<deviceId>-<startMs>`). Transient network errors retry with bounded exponential backoff; accepted, duplicate, and permanently rejected results leave the queue; a policy `403` disables that collector locally while keeping unsent data for when the policy is re-enabled.
+- Open intervals are persisted in `activity-state.json` approximately every five seconds. On relaunch they are closed at their last observed timestamp, never at launch time, so a crash or restart cannot fabricate activity.
+- The tracker shows an **Activity tracking** panel with the policy version, whether each collector is enabled and currently recording, the idle threshold, pending upload counts, detector limitations, and the metadata-only disclosure.
+
+### Platform support
+
+| Platform | Foreground detection | Requirements and limitations |
+| --- | --- | --- |
+| Windows | Persistent PowerShell helper calling User32 `GetForegroundWindow` and `GetWindowThreadProcessId`, then the process name and file description | Uses the built-in PowerShell; the helper is restarted up to three times if it exits. No extra package is required. |
+| macOS | `osascript` against System Events | Requires Automation/Accessibility permission for the TempoNest process. Without it the collector reports the limitation instead of guessing. |
+| Linux | `xdotool` on X11 plus `/proc/<pid>/comm` | Requires `xdotool`; Wayland sessions are not supported and are reported as unavailable. |
+| Other | None | Reports that foreground detection is not implemented for the OS. Idle detection still uses `powerMonitor`. |
+
+### Manual Windows verification
+
+Mocks and unit tests cannot prove that real foreground detection works on a Windows desktop. Verify manually before claiming Windows tracking works:
+
+1. Start the backend and desktop app, sign in as an employee whose organization has app tracking and idle detection enabled.
+2. Confirm the tracker's **Activity tracking** panel shows app activity and idle detection as enabled, with the server's idle threshold.
+3. Start working. Switch between at least three applications (for example a browser, an editor, and a chat app) and stay in each for several seconds.
+4. Quit the app normally, then inspect `%APPDATA%\TempoNest\activity-queue.json`. Each interval should contain only `applicationIdentifier`, `applicationName`, `platform`, `startedAt` and `endedAt` (plus `sessionId` when known); identifiers should match the process names actually used, and intervals must meet edge-to-edge without overlapping.
+5. Let the machine sit idle past the displayed threshold without touching the keyboard or pointer. The panel should show idle collection, and after resuming and waiting for an upload, `idle-intervals/batch` should contain an interval at least as long as the threshold. Confirm the interval does not include break time: take a break, wait, resume, and verify the idle interval ends at the break start.
+6. Lock the screen or put the machine to sleep for longer than the threshold, then resume. No interval may span the sleep gap.
+7. While working, change the organization policy with `PATCH /organizations/:organizationId/activity/settings` (requires `activity:policy`). Set `appTrackingEnabled` or `idleDetectionEnabled` to `false`; collection should stop within a few seconds and the panel should update. Re-enable it and confirm collection resumes.
+8. Quit while an app is in the foreground, relaunch, and check that the persisted interval ends at the last observation before the quit, not at relaunch time.
+9. Optionally use a local proxy or backend logs to confirm request bodies contain no window titles, URLs, keystrokes, clipboard contents, tokens or agent keys.
+
 ## Authentication and revocation behavior
 
 - Access and refresh tokens are held in the main process.
@@ -204,6 +245,11 @@ electron/
   offlineQueue.ts          Durable user-scoped offline event queue
   agentSocket.ts           Authenticated `ws` client, heartbeat and reconnect
   trackingController.ts    Server-authoritative tracking, sync, quit-time stop
+  activityTrackingService.ts Policy-gated app/idle collection, aggregation and uploads
+  activityQueue.ts         Bounded durable queue for activity and idle intervals
+  activityState.ts         Persisted open intervals for restart reconciliation
+  foregroundApp.ts         Windows/macOS/Linux foreground process readers
+  systemActivity.ts        powerMonitor idle, suspend and resume adapter
   shutdownCoordinator.ts   One-shot, time-bounded quit cleanup
   backendTypes.ts          Exact backend response shapes
   errors.ts                Safe error mapping
@@ -220,6 +266,10 @@ tests/
   offlineQueue.test.ts     Persistence, dedupe, user scoping
   authManager.test.ts      Single-flight launch restore and token retention
   trackingController.test.ts  Quit-time stop, durable pending stop, launch order, day list
+  activityTrackingService.test.ts Policy gating, aggregation, idle thresholds, retries, restart recovery
+  activityQueue.test.ts    Persistence, dedupe, user scoping, bounded growth
+  activityState.test.ts    Open-interval persistence and validation
+  foregroundApp.test.ts    Metadata parsing, Windows helper shape, platform limitations
   shutdownCoordinator.test.ts Idempotent, time-bounded quit cleanup
   backend.e2e.test.ts      Real auth/tracking/sync/WebSocket/revocation flow
 shared/
@@ -234,8 +284,13 @@ shared/
 - If a relaunch is offline while a stop is pending, the tracker shows idle rather than a stale running timer and closes the cached session at the recorded stop time, so local totals keep those minutes. Because today's authoritative list cannot be loaded, the totals area shows a retryable error instead of presenting the cached numbers as verified. The server record is reconciled once the queued stop syncs.
 - WebSocket transport requires network access; HTTP heartbeat fallback covers a missing socket while requests still succeed.
 - The offline start-after-lost-response edge case can lose later queued break events if the server created a different session ID. The current state is still adopted after sync.
-- There is no continuous screen monitoring, foreground application detection, idle detection, or keystroke capture. Screenshot handling remains the existing administrator-requested flow.
-- The employee tracker renders no monitoring disclosure or workspace footer. Screenshot capture, policy enforcement, and required acknowledgements are unchanged and remain controlled by the existing backend and main-process services.
+- There is no continuous screen monitoring or keystroke capture. Screenshot handling remains the existing administrator-requested flow.
+- The employee tracker renders an activity status panel and metadata-only disclosure, but no screenshot monitoring disclosure or workspace footer. Screenshot capture, policy enforcement, and required acknowledgements are unchanged and remain controlled by the existing backend and main-process services.
+- Foreground detection is platform-specific: Windows uses the built-in PowerShell helper, macOS requires Accessibility/Automation permission for System Events, and Linux requires `xdotool` on X11 (Wayland is unsupported). Unsupported platforms report the limitation and collect no app activity rather than guessing.
+- Foreground intervals are identified by process name (lowercased) and display name from the OS. Two unrelated programs that share a process name share an identifier.
+- The activity policy is fetched at runtime but not cached to disk, so a launch without network collects nothing until `GET /activity/settings` succeeds.
+- Quit finalizes and persists open intervals but does not wait for their upload. Queued intervals sync on the next launch or connection.
+- The activity queue is bounded (`2,000` app events, `1,000` idle intervals); when full, the oldest entries are discarded and the tracker reports the loss.
 - Local-day totals use the device timezone, not the organization's configured timezone, so a user traveling across timezones can see a day boundary that differs from the web portal.
 - Today's list is bounded to 20 pages of 100 sessions. A day with more than 2,000 overlapping sessions would be truncated.
 - No admin portal, employee reports, charts, or settings UI are part of this app.

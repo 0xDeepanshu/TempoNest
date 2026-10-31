@@ -60,7 +60,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
   const result = await listDesktopAgents(
     req.organization!.organization.id,
     req.auth!.user.id,
-    req.organization!.membership.role,
+    req.organization!.effective,
     query,
   );
 
@@ -70,7 +70,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
 export const revoke = asyncHandler(async (req: Request, res: Response) => {
   const result = await revokeDesktopAgent(req.params.agentId!, req.organization!.organization.id, {
     userId: req.auth!.user.id,
-    role: req.organization!.membership.role,
+    role: req.organization!.effective,
   });
 
   res.status(200).json({

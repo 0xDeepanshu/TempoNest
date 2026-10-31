@@ -10,6 +10,7 @@ import {
   normalizeContentType,
 } from '../screenshots/screenshot.validation';
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
+import { isSelfScoped, type PermissionSubject } from '../memberships/permissions';
 import {
   toAttendanceEvidenceSummary,
   type AttendanceEvidenceSummary,
@@ -405,7 +406,7 @@ export async function createAttendanceEvidenceAccess(options: {
   organizationId: string;
   evidenceId: string;
   actorUserId: string;
-  actorRole: Role;
+  actorRole: Role | PermissionSubject;
   context?: AuditContext;
 }) {
   const evidence = await AttendanceEvidence.findOne({
@@ -414,7 +415,7 @@ export async function createAttendanceEvidenceAccess(options: {
   if (!evidence) {
     throw AppError.notFound('Attendance evidence not found', 'ATTENDANCE_EVIDENCE_NOT_FOUND');
   }
-  if (options.actorRole === 'EMPLOYEE' && evidence.employeeId !== options.actorUserId) {
+  if (isSelfScoped(options.actorRole) && evidence.employeeId !== options.actorUserId) {
     throw AppError.notFound('Attendance evidence not found', 'ATTENDANCE_EVIDENCE_NOT_FOUND');
   }
   if (evidence.status === 'PENDING') {

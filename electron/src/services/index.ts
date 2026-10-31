@@ -1,3 +1,4 @@
+import { electronActivityService } from '@/services/electronActivityService'
 import { electronAuthService } from '@/services/electronAuthService'
 import { electronTrackingService } from '@/services/electronTrackingService'
 
@@ -7,4 +8,5 @@ import { electronTrackingService } from '@/services/electronTrackingService'
  */
 export const authService = electronAuthService
 export const trackingService = electronTrackingService
+export const activityService = electronActivityService
 export const authMode = 'backend' as const

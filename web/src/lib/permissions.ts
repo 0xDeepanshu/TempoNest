@@ -1,9 +1,12 @@
-import type { Role } from "./types";
+import type { DataScope, Role } from "./types";
 
 export const PERMISSIONS = [
   "organization:read",
   "organization:update",
+  "role:read",
+  "role:manage",
   "member:read",
+  "member:onboard",
   "member:invite",
   "member:update",
   "member:remove",
@@ -20,7 +23,18 @@ export const PERMISSIONS = [
   "screenshot:live",
   "screenshot:manage",
   "screenshot:policy",
+  "activity:policy",
+  "classification:manage",
   "attendance:location:read",
+  "leave:read",
+  "leave:write",
+  "leave:approve",
+  "leave:manage",
+  "holiday:view",
+  "holiday:create",
+  "holiday:update",
+  "holiday:delete",
+  "holiday:settings:manage",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -34,7 +48,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ADMIN: [
     "organization:read",
     "organization:update",
+    "role:read",
+    "role:manage",
     "member:read",
+    "member:onboard",
     "member:invite",
     "member:update",
     "member:remove",
@@ -51,7 +68,18 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "screenshot:live",
     "screenshot:manage",
     "screenshot:policy",
+    "activity:policy",
+    "classification:manage",
     "attendance:location:read",
+    "leave:read",
+    "leave:write",
+    "leave:approve",
+    "leave:manage",
+    "holiday:view",
+    "holiday:create",
+    "holiday:update",
+    "holiday:delete",
+    "holiday:settings:manage",
   ],
   MANAGER: [
     "organization:read",
@@ -62,17 +90,50 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "correction:review",
     "agent:read",
     "screenshot:read",
+    "leave:read",
+    "leave:write",
+    "holiday:view",
   ],
-  EMPLOYEE: ["organization:read", "time:read", "time:write", "agent:read"],
+  EMPLOYEE: [
+    "organization:read",
+    "time:read",
+    "time:write",
+    "agent:read",
+    "leave:read",
+    "leave:write",
+    "holiday:view",
+  ],
 };
 
-export function hasPermission(role: Role | undefined, permission: Permission): boolean {
-  if (!role) return false;
-  return ROLE_PERMISSIONS[role].includes(permission);
+/**
+ * Anything that can carry effective permissions. Built-in roles use the local
+ * matrix; memberships use the permission list resolved by the backend, so a
+ * custom role is mirrored exactly (including an intentionally empty list).
+ */
+export type PermissionActor =
+  | Role
+  | { role: Role; permissions?: readonly Permission[] }
+  | undefined;
+
+function builtInRole(actor: PermissionActor): Role | undefined {
+  if (!actor) return undefined;
+  return typeof actor === "string" ? actor : actor.role;
 }
 
-export function hasAnyPermission(role: Role | undefined, permissions: Permission[]): boolean {
-  return permissions.some((permission) => hasPermission(role, permission));
+export function hasPermission(actor: PermissionActor, permission: Permission): boolean {
+  if (!actor) return false;
+  if (typeof actor !== "string" && Array.isArray(actor.permissions)) {
+    return actor.permissions.includes(permission);
+  }
+  const role = builtInRole(actor);
+  return role ? ROLE_PERMISSIONS[role].includes(permission) : false;
+}
+
+export function hasAnyPermission(
+  actor: PermissionActor,
+  permissions: Permission[],
+): boolean {
+  return permissions.some((permission) => hasPermission(actor, permission));
 }
 
 export const ADMIN_AREA_PERMISSIONS: Permission[] = [
@@ -80,10 +141,23 @@ export const ADMIN_AREA_PERMISSIONS: Permission[] = [
   "report:read",
   "organization:update",
   "correction:review",
+  "role:read",
+  // Holiday administration lives under /admin; a delegated holiday role must be
+  // able to reach its own pages even without the team-management permissions.
+  "holiday:create",
+  "holiday:update",
+  "holiday:delete",
+  "holiday:settings:manage",
 ];
 
-export function isAdminAreaRole(role: Role | undefined): boolean {
-  return hasAnyPermission(role, ADMIN_AREA_PERMISSIONS);
+export function isAdminAreaRole(actor: PermissionActor): boolean {
+  return hasAnyPermission(actor, ADMIN_AREA_PERMISSIONS);
+}
+
+/** Mirrors the backend's scope resolution for memberships and built-in roles. */
+export function isSelfScoped(actor: PermissionActor, dataScope?: DataScope): boolean {
+  if (dataScope) return dataScope === "SELF";
+  return builtInRole(actor) === "EMPLOYEE";
 }
 
 export function roleRank(role: Role): number {
@@ -92,11 +166,12 @@ export function roleRank(role: Role): number {
 
 /** Mirrors the backend's role-hierarchy rules for member mutation controls. */
 export function canManageMember(
-  actorRole: Role | undefined,
+  actor: PermissionActor,
   actorUserId: string | undefined,
   target: { userId: string; role: Role },
 ): boolean {
-  if (!actorRole || !hasPermission(actorRole, "member:update")) return false;
+  const actorRole = builtInRole(actor);
+  if (!actorRole || !hasPermission(actor, "member:update")) return false;
   if (actorUserId === target.userId) return false;
   if (actorRole === "OWNER") return true;
   if (actorRole === "ADMIN") return target.role === "MANAGER" || target.role === "EMPLOYEE";

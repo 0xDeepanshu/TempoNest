@@ -97,8 +97,13 @@ redirects to `/login`; a transient backend failure does not destroy a session.
 
 - `src/lib/server-session.ts` reads `GET /auth/me` on the server with
   request cookies and React `cache()`.
-- `/login` and `/register` are public. The `(app)` route group requires a
-  session server-side and redirects to `/login` otherwise.
+- `/login`, `/register`, `/forgot-password`, `/reset-password`, and
+  `/invitations/accept` are public. The `(app)` route group requires a session
+  server-side and redirects to `/login` otherwise.
+- Invitation acceptance is a public onboarding page: a first-time invitee
+  chooses a password and the backend creates the account and browser session.
+  Existing accounts are sent to sign in first and keep their password. Password
+  reset is reachable from the sign-in form.
 - `src/proxy.ts` performs the optimistic cookie/expiry check and refresh
   before page rendering.
 - Client-side permission gates are UX only. The backend remains authoritative

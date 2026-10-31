@@ -1,7 +1,13 @@
 import type { NextFunction, Request, Response } from 'express';
 import { Organization } from '../../database';
 import { Membership } from './membership.model';
+import { CustomRole } from '../roles/customRole.model';
 import { AppError } from '../../utils/errors';
+import { resolvePermissionSubject } from './permissions';
+import {
+  getManagerRoleOverride,
+  toManagerRoleOverrideAccess,
+} from '../roles/managerRole.service';
 
 /**
  * Resolves organization context from the route param, then loads the caller's
@@ -26,7 +32,10 @@ export async function loadOrganizationContext(
 
     const membership = await Membership.findOne({
       where: { organizationId, userId: user.id },
-      include: [{ model: Organization, as: 'organization', required: true }],
+      include: [
+        { model: Organization, as: 'organization', required: true },
+        { model: CustomRole, as: 'customRole', required: false },
+      ],
     });
 
     // Return 404 rather than 403 for non-members so that organization IDs
@@ -50,9 +59,20 @@ export async function loadOrganizationContext(
       return next(AppError.forbidden('This organization is suspended', 'ORGANIZATION_SUSPENDED'));
     }
 
+    const managerOverride =
+      membership.role === 'MANAGER' && !membership.customRoleId
+        ? await getManagerRoleOverride(organizationId)
+        : null;
+
     req.organization = {
       organization: membership.organization,
       membership,
+      effective: resolvePermissionSubject(
+        membership.role,
+        membership.customRoleId,
+        membership.customRole,
+        toManagerRoleOverrideAccess(managerOverride),
+      ),
     };
 
     next();

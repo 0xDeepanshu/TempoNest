@@ -16,6 +16,7 @@ import { screenshotStorage } from '../screenshots/storage';
 import { normalizeContentType } from '../screenshots/screenshot.validation';
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
 import { ensureEmployee } from '../reporting/reporting.service';
+import { isSelfScoped, type PermissionSubject } from '../memberships/permissions';
 import {
   getCurrentSession,
   getSessionForActor,
@@ -497,12 +498,16 @@ export async function getCurrentAttendance(options: {
 
 export async function listAttendanceCheckIns(options: {
   organization: OrganizationModel;
+  actorUserId: string;
+  actorRole: PermissionSubject;
   query: AttendanceCheckInListQuery;
 }) {
-  const { organization, query } = options;
+  const { organization, actorUserId, actorRole, query } = options;
   const where: Record<string | symbol, unknown> = { organizationId: organization.id };
 
-  if (query.employeeId) {
+  if (isSelfScoped(actorRole)) {
+    where.employeeId = actorUserId;
+  } else if (query.employeeId) {
     await ensureEmployee(organization.id, query.employeeId);
     where.employeeId = query.employeeId;
   }

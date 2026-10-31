@@ -121,6 +121,63 @@ describe('TrackerScreen content', () => {
     expect(html).toContain('Take a break')
     expect(html).toContain('Stop')
   })
+
+  it('shows the organization activity policy and what is collected', () => {
+    mocks.timer.current = timer({
+      activity: {
+        policyKnown: true,
+        appTrackingEnabled: true,
+        idleDetectionEnabled: true,
+        productivityClassificationEnabled: true,
+        idleThresholdMinutes: 5,
+        policyVersion: 12,
+        foregroundDetection: 'supported',
+        foregroundDetectionMessage: null,
+        appCollectionActive: true,
+        idleCollectionActive: false,
+        pendingAppEvents: 2,
+        pendingIdleIntervals: 1,
+        lastUploadAt: null,
+        message: null
+      }
+    })
+    const html = render()
+
+    expect(html).toContain('Activity tracking')
+    expect(html).toContain('App activity')
+    expect(html).toContain('Recording while you work')
+    expect(html).toContain('Idle detection')
+    expect(html).toContain('Idle after 5 min without input')
+    expect(html).toContain('Policy v12')
+    expect(html).toContain('3 activity records waiting to upload')
+    expect(html).toContain('Window titles')
+    expect(html.toLowerCase()).not.toContain('screenshot')
+  })
+
+  it('shows when the organization has disabled activity collection', () => {
+    mocks.timer.current = timer({
+      activity: {
+        policyKnown: true,
+        appTrackingEnabled: false,
+        idleDetectionEnabled: false,
+        productivityClassificationEnabled: false,
+        idleThresholdMinutes: 5,
+        policyVersion: 3,
+        foregroundDetection: 'unavailable',
+        foregroundDetectionMessage: null,
+        appCollectionActive: false,
+        idleCollectionActive: false,
+        pendingAppEvents: 0,
+        pendingIdleIntervals: 0,
+        lastUploadAt: null,
+        message: null
+      }
+    })
+    const html = render()
+
+    expect(html).toContain('Turned off by your organization')
+    expect(html).not.toContain('Recording while you work')
+  })
 })
 
 describe('LoginScreen content', () => {

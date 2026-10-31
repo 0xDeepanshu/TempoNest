@@ -478,19 +478,66 @@ the metadata the server accepts:
 
 Rules:
 
-- Do not send `idle_period` events in Step 2; the server does not accept an idle kind.
+- Do not send `idle_period` events to the activity endpoint. Idle periods have their own
+  endpoint (section 8.1).
 - Do not send window titles, URLs, keystrokes, clipboard contents, file contents, or screenshots.
   The activity schema is strict; unknown fields fail validation.
 - Client `durationSeconds` is accepted for contract compatibility but ignored. The server computes
   the duration from the interval and clips it to actual working time.
 - Batch up to 200 events. Keep the same `idempotencyKey` across retries; duplicates return
   `duplicate` and do not create a second row.
+- `sessionId` is optional; omit it and the server binds the event to the agent's current open
+  session. If supplied, it must belong to the same employee and agent.
+- Send `platform` (for example `win32`, `darwin`, `linux`) when you know it. The server falls back
+  to the registered agent platform.
 - Events must belong to the active/known session for that agent. Queue them while offline and
   flush after reconnect; overlapping intervals are rejected (`EVENT_OVERLAP`).
 - `ActivityCollectionService.listEvents` stays local. Admin/manager reports are separate
   server-side endpoints and already include a non-productivity-proof disclaimer.
 - Application activity must never trigger or influence screenshot capture. Screenshot requests
   come only from the explicit backend lifecycle in section 7.
+
+### 8.1 Organization tracking policy and idle intervals
+
+Fetch `GET /api/v1/organizations/:organizationId/activity/settings` after login, after the agent
+registers, and periodically (for example every few minutes) while the agent is running. The
+response includes `policyVersion`, `policyUpdatedAt`, and `serverTime`.
+
+- When `appTrackingEnabled` is `false`, stop collecting and flushing foreground application
+  activity. Do not discard locally queued events silently; keep them bounded and flush them only
+  if tracking is re-enabled, or drop them according to your own disclosed local-retention policy.
+  The server will reject batches with `403 APP_TRACKING_DISABLED` while disabled.
+- When `idleDetectionEnabled` is `false`, stop measuring and uploading idle intervals. App
+  tracking may remain enabled.
+- Run idle detection from OS inactivity signals only (for example Electron
+  `powerMonitor.getSystemIdleTime()`), never from keystrokes or pointer content. A period becomes
+  an idle interval when it reaches `idleThresholdMinutes * 60` seconds. Send it to
+  `POST /api/v1/organizations/:organizationId/activity/idle-intervals/batch`:
+
+```json
+{
+  "intervals": [
+    {
+      "idempotencyKey": "idle-<device>-<start-epoch-ms>",
+      "sessionId": "…",
+      "platform": "win32",
+      "startedAt": "2026-10-22T12:00:00.000Z",
+      "endedAt": "2026-10-22T12:07:30.000Z"
+    }
+  ]
+}
+```
+
+- The server computes duration and rejects intervals shorter than the current organization
+  threshold with `IDLE_BELOW_THRESHOLD` (per interval). Equal-to-threshold intervals are accepted.
+- After sleep/resume, a restart, or reconnect, upload the observed range once with the same
+  idempotency key. Repeats return `duplicate`; overlapping idle ranges are merged at report time.
+- Do not split an idle period into fragments below the threshold. Do not count break time as
+  idle; breaks already have their own endpoints.
+- `403 IDLE_DETECTION_DISABLED` means stop uploading idle data until the next policy fetch.
+- Both ingestion endpoints return per-event results. A rejected interval does not fail the
+  others; retry only transient failures, and never with a new idempotency key for the same
+  observed interval.
 
 ---
 
@@ -592,6 +639,7 @@ Run against a migrated PostgreSQL database and a real Electron build:
 - No real screenshot capture/upload exists in this repository. The backend lifecycle/storage
   contract is implemented and tested; the Electron implementation and Next.js review UI remain
   future work.
-- No window content, keystroke, clipboard, or URL collection.
-- No productivity scoring or proof-of-work claims. Application usage is foreground metadata only.
+- No window content, keystroke, clipboard, URL, or full window-title collection.
+- No productivity scoring or proof-of-work claims. Application usage and category ratios are
+  descriptive foreground metadata only, never an employee performance score.
 - Employee attendance summaries and correction requests are additive HTTP contracts; they do not change Electron session/agent/offline-sync behavior.

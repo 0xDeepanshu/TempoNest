@@ -15,6 +15,7 @@ import type {
   MemberListItem,
   Paginated,
 } from "@/lib/types";
+import { hasPermission } from "@/lib/permissions";
 import { useApi } from "@/lib/use-api";
 import { CheckSquareIcon, ClockIcon } from "./icons";
 import {
@@ -254,9 +255,10 @@ export function CorrectionReviewCard({
 }
 
 export function CorrectionReviewView({ embedded = false }: { embedded?: boolean }) {
-  const { organization, user } = useWorkspace();
+  const { organization, user, membership } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const timezone = organization?.timezone ?? "UTC";
+  const canBrowseMembers = hasPermission(membership, "member:read");
 
   const [status, setStatus] = useState<StatusFilter>("PENDING");
   const [employeeId, setEmployeeId] = useState("");
@@ -280,7 +282,7 @@ export function CorrectionReviewView({ embedded = false }: { embedded?: boolean 
         query: { limit: 100, status: "ACTIVE" },
       }),
     [organizationId],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canBrowseMembers },
   );
 
   const corrections = useApi<CorrectionsListResponse>(
@@ -417,25 +419,33 @@ export function CorrectionReviewView({ embedded = false }: { embedded?: boolean 
               { value: "ALL", label: "All" },
             ]}
           />
-          <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_auto] lg:items-end">
-            <Field label="Employee" htmlFor="review-employee">
-              <Select
-                id="review-employee"
-                value={employeeId}
-                onChange={(event) => {
-                  setEmployeeId(event.target.value);
-                  setPage(1);
-                }}
-                disabled={members.loading}
-              >
-                <option value="">All employees</option>
-                {(members.data?.data ?? []).map((member) => (
-                  <option key={member.userId} value={member.userId}>
-                    {member.user.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+          <div
+            className={`grid gap-3 lg:items-end ${
+              canBrowseMembers
+                ? "lg:grid-cols-[1.2fr_1fr_1fr_auto]"
+                : "lg:grid-cols-[1fr_1fr_auto]"
+            }`}
+          >
+            {canBrowseMembers ? (
+              <Field label="Employee" htmlFor="review-employee">
+                <Select
+                  id="review-employee"
+                  value={employeeId}
+                  onChange={(event) => {
+                    setEmployeeId(event.target.value);
+                    setPage(1);
+                  }}
+                  disabled={members.loading}
+                >
+                  <option value="">All employees</option>
+                  {(members.data?.data ?? []).map((member) => (
+                    <option key={member.userId} value={member.userId}>
+                      {member.user.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            ) : null}
             <Field label="Work date from" htmlFor="review-from">
               <Input
                 id="review-from"
@@ -464,7 +474,7 @@ export function CorrectionReviewView({ embedded = false }: { embedded?: boolean 
             </div>
           </div>
           {rangeError ? <Alert tone="danger">{rangeError}</Alert> : null}
-          {members.error ? (
+          {canBrowseMembers && members.error ? (
             <ErrorState message={members.error} onRetry={members.reload} />
           ) : null}
         </CardBody>

@@ -2,6 +2,7 @@ import request from 'supertest';
 import { createApp } from '../src/app';
 import { sequelize } from '../src/database';
 import { clearLocalScreenshotStorage } from '../src/modules/screenshots/storage/localStorage';
+import { clearMemoryOutbox } from '../src/utils/mailer';
 
 export const app = createApp();
 
@@ -9,12 +10,14 @@ export const PASSWORD = 'CorrectHorseBatteryStaple9!';
 export const API = '/api/v1';
 
 export async function resetDatabase(): Promise<void> {
+  clearMemoryOutbox();
+
   if (sequelize.getDialect() === 'postgres') {
     // Keep the schema (so tests can also run against a migrated database) and
     // clear data between tests.
     await sequelize.sync();
     await sequelize.query(
-      'TRUNCATE TABLE platform_audit_events, attendance_location_samples, attendance_location_tracking, attendance_check_ins, attendance_evidence, attendance_correction_requests, screen_live_viewers, screen_live_sessions, audit_events, screenshots, screenshot_requests, screenshot_policy_acknowledgements, screenshot_policies, agent_sync_events, application_activities, breaks, time_sessions, desktop_agents, sessions, invitations, memberships, users, organizations RESTART IDENTITY CASCADE',
+      'TRUNCATE TABLE password_reset_tokens, leave_ledger_entries, leave_requests, leave_balances, organization_holiday_settings, leave_holidays, leave_policies, leave_types, platform_audit_events, attendance_location_samples, attendance_location_tracking, attendance_check_ins, attendance_evidence, attendance_correction_requests, screen_live_viewers, screen_live_sessions, audit_events, screenshots, screenshot_requests, screenshot_policy_acknowledgements, screenshot_policies, agent_sync_events, activity_idle_intervals, application_classifications, organization_tracking_settings, application_activities, breaks, time_sessions, desktop_agents, sessions, invitations, memberships, custom_roles, manager_role_overrides, users, organizations RESTART IDENTITY CASCADE',
     );
     await clearLocalScreenshotStorage();
     return;
@@ -172,31 +175,32 @@ export async function createOwner(email = uniqueEmail('owner'), organizationName
   };
 }
 
-/** Owner invites an e-mail, the invitee registers, and accepts the invitation. */
+/** Owner invites a person, who accepts publicly by creating a password. */
 export async function inviteAndAccept(
   owner: OwnerContext,
   options: { email?: string; role?: 'ADMIN' | 'MANAGER' | 'EMPLOYEE'; name?: string } = {},
 ) {
   const email = options.email ?? uniqueEmail('invitee');
   const role = options.role ?? 'EMPLOYEE';
+  const name = options.name ?? 'Invited User';
 
   const invitationResponse = await owner.agent
     .post(`${API}/organizations/${owner.organization.id}/invitations`)
     .set('x-csrf-token', owner.csrf)
-    .send({ email, role });
+    .send({ name, email, role });
 
   if (invitationResponse.status !== 201) {
     throw new Error(`Failed to invite: ${JSON.stringify(invitationResponse.body)}`);
   }
 
   const token = invitationResponse.body.data.token as string;
-  await registerUser(email, options.name ?? 'Invited User');
-  const session = await loginBrowser(email);
 
-  const acceptResponse = await session.agent
+  // First-time onboarding is public: the e-mailed token proves control of the
+  // address, and the invitee chooses their password here.
+  const agent = request.agent(app);
+  const acceptResponse = await agent
     .post(`${API}/invitations/accept`)
-    .set('x-csrf-token', session.csrf)
-    .send({ token });
+    .send({ token, password: PASSWORD });
 
   if (acceptResponse.status !== 200) {
     throw new Error(`Failed to accept invitation: ${JSON.stringify(acceptResponse.body)}`);
@@ -205,10 +209,14 @@ export async function inviteAndAccept(
   return {
     email,
     role,
+    name,
     token,
     invitation: invitationResponse.body.data.invitation,
     acceptResponse,
+    response: acceptResponse,
     membership: acceptResponse.body.data.membership,
-    ...session,
+    user: acceptResponse.body.data.user,
+    agent,
+    csrf: acceptResponse.body.data.session?.csrfToken as string,
   };
 }

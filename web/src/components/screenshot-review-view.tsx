@@ -103,12 +103,11 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
   const { organization, membership } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const timezone = organization?.timezone ?? "UTC";
-  const role = membership?.role;
-  const canView = hasPermission(role, "screenshot:read");
-  const canRequest = hasPermission(role, "screenshot:request");
-  const canLive = hasPermission(role, "screenshot:live");
-  const canManage = hasPermission(role, "screenshot:manage");
-  const canConfigurePolicy = hasPermission(role, "screenshot:policy");
+  const canView = hasPermission(membership, "screenshot:read");
+  const canRequest = hasPermission(membership, "screenshot:request");
+  const canLive = hasPermission(membership, "screenshot:live");
+  const canManage = hasPermission(membership, "screenshot:manage");
+  const canConfigurePolicy = hasPermission(membership, "screenshot:policy");
 
   const [employeeId, setEmployeeId] = useState(initialEmployeeId);
   const [tab, setTab] = useState<ReviewTab>("library");
@@ -249,10 +248,10 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
     requestDisabledReason = "The employee's desktop agent was revoked.";
 
   const liveRoleAllowed =
-    role !== undefined &&
+    membership !== undefined &&
     policyValue !== undefined &&
-    policyValue.requestRoles.includes(role) &&
-    policyValue.viewRoles.includes(role);
+    policyValue.requestRoles.includes(membership.role) &&
+    policyValue.viewRoles.includes(membership.role);
 
   let liveDisabledReason: string | undefined;
   if (!employeeId) liveDisabledReason = "Select an employee first.";

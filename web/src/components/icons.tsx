@@ -243,3 +243,12 @@ export function MonitorIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function KeyIcon(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="7.5" cy="15.5" r="3.5" />
+      <path d="m10 13 8.5-8.5M15 5.5l3 3M12.5 8l2.5 2.5" />
+    </svg>
+  );
+}

@@ -93,6 +93,34 @@ export interface MonitoringBridge {
   onStatusChanged: (listener: (status: MonitoringStatus) => void) => () => void
 }
 
+export type ForegroundDetectionState = 'supported' | 'unavailable'
+
+/**
+ * Display-safe activity tracking state. Contains no tokens, credentials,
+ * window titles, URLs, keystrokes or clipboard data.
+ */
+export interface ActivityTrackingStatus {
+  policyKnown: boolean
+  appTrackingEnabled: boolean
+  idleDetectionEnabled: boolean
+  productivityClassificationEnabled: boolean
+  idleThresholdMinutes: number | null
+  policyVersion: number | null
+  foregroundDetection: ForegroundDetectionState
+  foregroundDetectionMessage: string | null
+  appCollectionActive: boolean
+  idleCollectionActive: boolean
+  pendingAppEvents: number
+  pendingIdleIntervals: number
+  lastUploadAt: string | null
+  message: string | null
+}
+
+export interface ActivityBridge {
+  getStatus: () => Promise<ActivityTrackingStatus>
+  onStatusChanged: (listener: (status: ActivityTrackingStatus) => void) => () => void
+}
+
 export interface UserFacingError {
   code: string
   message: string
@@ -147,4 +175,5 @@ export interface AppBridge {
   auth: AuthBridge
   tracking: TrackingBridge
   monitoring: MonitoringBridge
+  activity: ActivityBridge
 }

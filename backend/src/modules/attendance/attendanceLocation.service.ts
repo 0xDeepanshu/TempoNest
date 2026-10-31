@@ -13,7 +13,11 @@ import { config } from '../../config/env';
 import { AppError } from '../../utils/errors';
 import { serializeByKey } from '../../utils/serialize';
 import { touchAgent } from '../desktopAgents/desktopAgent.service';
-import { hasPermission } from '../memberships/permissions';
+import {
+  hasPermission,
+  isSelfScoped,
+  type PermissionSubject,
+} from '../memberships/permissions';
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
 import {
   getCurrentSession,
@@ -624,13 +628,13 @@ export async function requireAttendanceLocationHistoryAccess(
   _res: Response,
   next: NextFunction,
 ): Promise<void> {
-  const membership = req.organization?.membership;
-  if (!membership) {
+  const context = req.organization;
+  if (!context) {
     return next(
       AppError.forbidden('Organization context is required', 'ORGANIZATION_CONTEXT_REQUIRED'),
     );
   }
-  if (hasPermission(membership.role, 'attendance:location:read')) return next();
+  if (hasPermission(context.effective, 'attendance:location:read')) return next();
 
   try {
     const checkIn = await AttendanceCheckIn.findOne({
@@ -643,7 +647,7 @@ export async function requireAttendanceLocationHistoryAccess(
     // Missing check-ins and employee self-scope are resolved by the service so
     // it can keep returning 404 for records the caller cannot see.
     if (!checkIn || checkIn.employeeId === req.auth?.user.id) return next();
-    if (membership.role === 'EMPLOYEE') return next();
+    if (isSelfScoped(context.effective)) return next();
     return next(AppError.forbidden('Your role does not permit this action', 'PERMISSION_DENIED'));
   } catch (error) {
     return next(error);
@@ -654,7 +658,7 @@ export async function getAttendanceLocationHistory(options: {
   organization: OrganizationModel;
   checkInId: string;
   actorUserId: string;
-  actorRole: Role;
+  actorRole: Role | PermissionSubject;
   query: AttendanceLocationHistoryQuery;
   context?: AuditContext;
 }) {
@@ -670,7 +674,7 @@ export async function getAttendanceLocationHistory(options: {
   }
 
   const isSelf = checkIn.employeeId === actorUserId;
-  if (actorRole === 'EMPLOYEE' && !isSelf) {
+  if (isSelfScoped(actorRole) && !isSelf) {
     throw AppError.notFound('Attendance check-in not found', 'ATTENDANCE_CHECK_IN_NOT_FOUND');
   }
   if (!isSelf && !hasPermission(actorRole, 'attendance:location:read')) {

@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { listMembers, changeMembershipRole, removeMembership, reactivateMembership, suspendMembership } from './membership.service';
+import { getClientIp, getUserAgent } from '../../utils/pagination';
 import type { ChangeRoleInput, MembershipListQuery } from '../organizations/organization.schemas';
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
@@ -18,7 +19,8 @@ export const updateRole = asyncHandler(async (req: Request, res: Response) => {
     context.membership,
     context.organization.id,
     req.params.membershipId!,
-    input.role,
+    input,
+    { ipAddress: getClientIp(req), userAgent: getUserAgent(req) },
   );
 
   res.status(200).json({ data: { membership } });

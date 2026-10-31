@@ -18,13 +18,22 @@ export interface UserAttributes {
   status: UserStatus;
   platformRole: PlatformRole | null;
   lastLoginAt: Date | null;
+  failedLoginAttempts: number;
+  lockedUntil: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export type UserCreationAttributes = Optional<
   UserAttributes,
-  'id' | 'status' | 'platformRole' | 'lastLoginAt' | 'createdAt' | 'updatedAt'
+  | 'id'
+  | 'status'
+  | 'platformRole'
+  | 'lastLoginAt'
+  | 'failedLoginAttempts'
+  | 'lockedUntil'
+  | 'createdAt'
+  | 'updatedAt'
 >;
 
 export class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
@@ -35,6 +44,8 @@ export class User extends Model<UserAttributes, UserCreationAttributes> implemen
   declare status: UserStatus;
   declare platformRole: PlatformRole | null;
   declare lastLoginAt: Date | null;
+  declare failedLoginAttempts: number;
+  declare lockedUntil: Date | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 
@@ -81,6 +92,17 @@ export function initUser(sequelize: Sequelize): typeof User {
         type: DataTypes.DATE,
         allowNull: true,
         field: 'last_login_at',
+      },
+      failedLoginAttempts: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: 'failed_login_attempts',
+      },
+      lockedUntil: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'locked_until',
       },
       createdAt: {
         type: DataTypes.DATE,

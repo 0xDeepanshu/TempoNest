@@ -12,16 +12,21 @@ export function EmployeePicker({
   organizationId,
   value,
   onChange,
+  onSelect,
   id,
   placeholder = "Search by name or email",
   disabled = false,
+  canBrowse = true,
 }: {
   organizationId: string;
   value: string;
   onChange: (userId: string) => void;
+  onSelect?: (member: MemberListItem) => void;
   id?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** The directory endpoint requires member:read; skip all lookups without it. */
+  canBrowse?: boolean;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -54,7 +59,7 @@ export function EmployeePicker({
         query: { limit: 20, status: "ACTIVE", q: debouncedSearch },
       }),
     [organizationId, debouncedSearch],
-    { enabled: Boolean(organizationId) && open },
+    { enabled: Boolean(organizationId) && open && canBrowse },
   );
 
   const rows = options.data?.data ?? [];
@@ -68,7 +73,10 @@ export function EmployeePicker({
     [organizationId, value],
     {
       enabled:
-        Boolean(organizationId && value) && selected?.userId !== value && !listed,
+        canBrowse &&
+        Boolean(organizationId && value) &&
+        selected?.userId !== value &&
+        !listed,
     },
   );
 
@@ -85,6 +93,7 @@ export function EmployeePicker({
     setSelected(member);
     setSearch("");
     setOpen(false);
+    onSelect?.(member);
     onChange(member.userId);
   }
 
@@ -128,15 +137,16 @@ export function EmployeePicker({
         aria-autocomplete="list"
         aria-activedescendant={open && active >= 0 ? optionId(active) : undefined}
         autoComplete="off"
-        disabled={disabled}
+        disabled={disabled || !canBrowse}
         value={open ? search : (selectedMember?.user.name ?? "")}
-        placeholder={placeholder}
+        placeholder={canBrowse ? placeholder : "Directory access required"}
         onChange={(event) => {
           setSearch(event.target.value);
           setOpen(true);
           setActiveIndex(0);
         }}
         onFocus={() => {
+          if (!canBrowse) return;
           setOpen(true);
           setSearch("");
           setActiveIndex(0);
@@ -163,7 +173,7 @@ export function EmployeePicker({
         </button>
       ) : null}
 
-      {open ? (
+      {open && canBrowse ? (
         <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-line bg-surface shadow-lg">
           {options.error ? (
             <div className="px-3 py-2 text-xs text-danger" role="alert">

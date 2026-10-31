@@ -1,6 +1,7 @@
 import type { Membership } from './membership.model';
 import type { Organization } from '../organizations/organization.model';
 import type { User } from '../users/user.model';
+import { resolvePermissionSubject, type ManagerRoleOverrideAccess } from './permissions';
 
 /** The only user shape ever returned by the API. Never includes secrets. */
 export function toPublicUser(user: User) {
@@ -29,13 +30,38 @@ export function toOrganizationSummary(organization: Organization) {
   };
 }
 
-export function toMembershipSummary(membership: Membership) {
+export function toMembershipSummary(
+  membership: Membership,
+  managerOverride?: ManagerRoleOverrideAccess | null,
+) {
+  const effective = resolvePermissionSubject(
+    membership.role,
+    membership.customRoleId ?? null,
+    membership.customRole,
+    managerOverride,
+  );
+
   return {
     id: membership.id,
     organizationId: membership.organizationId,
     userId: membership.userId,
     role: membership.role,
+    customRoleId: membership.customRoleId ?? null,
     status: membership.status,
+    permissions: effective.permissions,
+    dataScope: effective.dataScope,
+    ...(membership.customRole
+      ? {
+          customRole: {
+            id: membership.customRole.id,
+            name: membership.customRole.name,
+            description: membership.customRole.description,
+            permissions: membership.customRole.permissions,
+            dataScope: membership.customRole.dataScope,
+            onboardingEligible: membership.customRole.onboardingEligible,
+          },
+        }
+      : {}),
     createdAt: membership.createdAt,
     updatedAt: membership.updatedAt,
     ...(membership.organization

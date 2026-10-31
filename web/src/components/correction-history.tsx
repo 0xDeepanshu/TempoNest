@@ -128,6 +128,7 @@ export function CorrectionHistory({
   showEmployee = false,
   initialStatus = "ALL",
   employeeId,
+  enabled = true,
 }: {
   organizationId: string;
   timezone: string;
@@ -135,6 +136,7 @@ export function CorrectionHistory({
   showEmployee?: boolean;
   initialStatus?: StatusFilter;
   employeeId?: string;
+  enabled?: boolean;
 }) {
   const [status, setStatus] = useState<StatusFilter>(initialStatus);
   const [page, setPage] = useState(1);
@@ -151,7 +153,7 @@ export function CorrectionHistory({
         },
       }),
     [organizationId, status, page, refreshToken, employeeId],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && enabled },
   );
 
   const corrections = history.data?.data ?? [];

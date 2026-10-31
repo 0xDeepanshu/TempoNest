@@ -15,6 +15,18 @@ const optionalString = z
 
 const SUPPORTED_SCREENSHOT_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 
+export type MailTransport = 'smtp' | 'file' | 'memory' | 'log';
+
+function resolveMailTransport(env: {
+  NODE_ENV: 'development' | 'test' | 'production';
+  MAIL_TRANSPORT?: MailTransport;
+}): MailTransport {
+  if (env.MAIL_TRANSPORT) return env.MAIL_TRANSPORT;
+  if (env.NODE_ENV === 'test') return 'memory';
+  if (env.NODE_ENV === 'production') return 'smtp';
+  return 'file';
+}
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -33,7 +45,23 @@ const envSchema = z
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
     REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(300).max(31_536_000).default(2_592_000),
     INVITATION_TTL_SECONDS: z.coerce.number().int().min(300).max(31_536_000).default(604_800),
+    PASSWORD_RESET_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(1_800),
     MAX_ACTIVE_SESSIONS_PER_USER: z.coerce.number().int().min(1).max(100).default(10),
+    // Per-account brute-force protection, independent of the per-IP limiter.
+    LOGIN_MAX_FAILED_ATTEMPTS: z.coerce.number().int().min(3).max(100).default(10),
+    LOGIN_LOCKOUT_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
+
+    // Outbound e-mail. `smtp` is required in production; development defaults
+    // to a file outbox so invitation/reset links stay inspectable locally.
+    MAIL_TRANSPORT: z.enum(['smtp', 'file', 'memory', 'log']).optional(),
+    MAIL_FROM: z.string().min(3).default('TempoNest <no-reply@temponest.local>'),
+    MAIL_OUTBOX_DIR: z.string().min(1).default('storage/mail-outbox'),
+    WEB_APP_URL: z.string().url().default('http://localhost:3000'),
+    SMTP_HOST: optionalString,
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+    SMTP_SECURE: booleanFromEnv.default('false'),
+    SMTP_USER: optionalString,
+    SMTP_PASSWORD: optionalString,
 
     HEARTBEAT_STALE_SECONDS: z.coerce.number().int().min(30).max(3600).default(120),
     SESSION_STALE_SECONDS: z.coerce.number().int().min(60).max(86_400).default(600),
@@ -41,6 +69,12 @@ const envSchema = z
     OFFLINE_FUTURE_SKEW_SECONDS: z.coerce.number().int().min(0).max(3600).default(300),
     ACTIVITY_MAX_BACKFILL_SECONDS: z.coerce.number().int().min(300).max(31_536_000).default(2_592_000),
     ACTIVITY_FUTURE_SKEW_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
+    ACTIVITY_RETENTION_PURGE_INTERVAL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(300)
+      .max(604_800)
+      .default(21_600),
     WS_MAX_PAYLOAD_BYTES: z.coerce.number().int().min(1024).max(1_048_576).default(32_768),
     WS_SWEEP_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(300).default(30),
 
@@ -115,6 +149,16 @@ const envSchema = z
       .max(604_800)
       .default(21_600),
 
+    // Leave accrual is swept in the background. The sweep is idempotent, so an
+    // hourly interval is enough to apply a configured accrual day shortly
+    // after midnight in the organization timezone.
+    LEAVE_ACCRUAL_SWEEP_INTERVAL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(86_400)
+      .default(3_600),
+
     ARGON2_MEMORY_KIB: z.coerce.number().int().min(8 * 2).max(1_048_576).default(19_456),
     ARGON2_TIME_COST: z.coerce.number().int().min(1).max(20).default(2),
     ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16).default(1),
@@ -166,6 +210,22 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['COOKIE_SECURE'],
         message: 'COOKIE_SECURE must be true when COOKIE_SAME_SITE=none',
+      });
+    }
+
+    const mailTransport = resolveMailTransport(env);
+    if (mailTransport === 'smtp' && !env.SMTP_HOST) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SMTP_HOST'],
+        message: 'SMTP_HOST is required when MAIL_TRANSPORT=smtp',
+      });
+    }
+    if (Boolean(env.SMTP_USER) !== Boolean(env.SMTP_PASSWORD)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SMTP_USER'],
+        message: 'Set both SMTP_USER and SMTP_PASSWORD, or neither for an unauthenticated relay',
       });
     }
 
@@ -263,6 +323,10 @@ const screenshotLocalDir = path.isAbsolute(env.SCREENSHOT_LOCAL_DIR)
   ? env.SCREENSHOT_LOCAL_DIR
   : path.resolve(projectRoot, env.SCREENSHOT_LOCAL_DIR);
 const publicBaseUrl = (env.PUBLIC_BASE_URL ?? `http://localhost:${env.PORT}`).replace(/\/+$/, '');
+const mailOutboxDir = path.isAbsolute(env.MAIL_OUTBOX_DIR)
+  ? env.MAIL_OUTBOX_DIR
+  : path.resolve(projectRoot, env.MAIL_OUTBOX_DIR);
+const webAppUrl = env.WEB_APP_URL.replace(/\/+$/, '');
 
 export const config = {
   env: env.NODE_ENV,
@@ -282,7 +346,10 @@ export const config = {
     accessTokenTtlSeconds: env.ACCESS_TOKEN_TTL_SECONDS,
     refreshTokenTtlSeconds: env.REFRESH_TOKEN_TTL_SECONDS,
     invitationTtlSeconds: env.INVITATION_TTL_SECONDS,
+    passwordResetTtlSeconds: env.PASSWORD_RESET_TTL_SECONDS,
     maxActiveSessionsPerUser: env.MAX_ACTIVE_SESSIONS_PER_USER,
+    loginMaxFailedAttempts: env.LOGIN_MAX_FAILED_ATTEMPTS,
+    loginLockoutSeconds: env.LOGIN_LOCKOUT_SECONDS,
     argon2: {
       memoryCost: env.ARGON2_MEMORY_KIB,
       timeCost: env.ARGON2_TIME_COST,
@@ -300,6 +367,19 @@ export const config = {
     max: env.RATE_LIMIT_MAX,
     loginMax: env.LOGIN_RATE_LIMIT_MAX,
   },
+  mail: {
+    transport: resolveMailTransport(env),
+    from: env.MAIL_FROM,
+    outboxDir: mailOutboxDir,
+    webAppUrl,
+    smtp: {
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
+      secure: env.SMTP_SECURE,
+      user: env.SMTP_USER,
+      password: env.SMTP_PASSWORD,
+    },
+  },
   timeTracking: {
     heartbeatStaleSeconds: env.HEARTBEAT_STALE_SECONDS,
     sessionStaleSeconds: env.SESSION_STALE_SECONDS,
@@ -309,6 +389,9 @@ export const config = {
     activityFutureSkewSeconds: env.ACTIVITY_FUTURE_SKEW_SECONDS,
     wsMaxPayloadBytes: env.WS_MAX_PAYLOAD_BYTES,
     wsSweepIntervalMs: env.WS_SWEEP_INTERVAL_SECONDS * 1000,
+  },
+  activity: {
+    retentionPurgeIntervalMs: env.ACTIVITY_RETENTION_PURGE_INTERVAL_SECONDS * 1000,
   },
   screenshots: {
     driver: env.SCREENSHOT_STORAGE_DRIVER,
@@ -353,6 +436,9 @@ export const config = {
     trackingStaleSeconds: env.ATTENDANCE_LOCATION_STALE_SECONDS,
     locationRetentionDays: env.ATTENDANCE_LOCATION_RETENTION_DAYS,
     locationPurgeIntervalMs: env.ATTENDANCE_LOCATION_PURGE_INTERVAL_SECONDS * 1000,
+  },
+  leave: {
+    accrualSweepIntervalMs: env.LEAVE_ACCRUAL_SWEEP_INTERVAL_SECONDS * 1000,
   },
   logLevel: env.LOG_LEVEL,
   paths: {

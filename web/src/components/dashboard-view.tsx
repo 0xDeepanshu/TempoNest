@@ -12,6 +12,7 @@ import {
   isoForZonedDate,
   todayInTimeZone,
 } from "@/lib/format";
+import { hasPermission, isSelfScoped } from "@/lib/permissions";
 import type {
   AttendanceSummary,
   CorrectionsListResponse,
@@ -32,6 +33,7 @@ import {
 } from "./icons";
 import { MonitoringDisclosure } from "./monitoring-disclosure";
 import {
+  Alert,
   Avatar,
   Badge,
   Button,
@@ -147,6 +149,10 @@ export function PersonalDashboard() {
   const { organization, membership, user } = useWorkspace();
   const timezone = organization?.timezone ?? "UTC";
   const organizationId = organization?.id ?? "";
+  const canViewTime = hasPermission(membership, "time:read");
+  const canReadCorrections =
+    canViewTime || hasPermission(membership, "correction:review");
+  const canSubmitCorrections = hasPermission(membership, "time:write");
   const today = useMemo(() => todayInTimeZone(timezone), [timezone]);
   const weekStart = useMemo(() => addDays(today, -6), [today]);
 
@@ -154,7 +160,7 @@ export function PersonalDashboard() {
     (signal) =>
       apiRequest(`/organizations/${organizationId}/time-sessions/current`, { signal }),
     [organizationId],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canViewTime },
   );
 
   const todaySummary = useApi<{ data: AttendanceSummary; serverTime: string }>(
@@ -164,7 +170,7 @@ export function PersonalDashboard() {
         query: { from: today, to: today, period: "daily" },
       }),
     [organizationId, today],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canViewTime },
   );
 
   const weekSummary = useApi<{ data: AttendanceSummary; serverTime: string }>(
@@ -174,7 +180,7 @@ export function PersonalDashboard() {
         query: { from: weekStart, to: today, period: "weekly" },
       }),
     [organizationId, weekStart, today],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canViewTime },
   );
 
   const sessions = useApi<SessionsResponse>(
@@ -188,7 +194,7 @@ export function PersonalDashboard() {
         },
       }),
     [organizationId, weekStart, today, timezone],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canViewTime },
   );
 
   const pending = useApi<CorrectionsListResponse>(
@@ -198,7 +204,7 @@ export function PersonalDashboard() {
         query: { status: "PENDING", limit: 5 },
       }),
     [organizationId],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canReadCorrections },
   );
 
   const session = current.data?.data.session ?? null;
@@ -216,21 +222,33 @@ export function PersonalDashboard() {
         description="Your server-recorded attendance, live tracking state, and correction requests."
         actions={
           <>
-            <Link href="/attendance">
-              <Button variant="secondary">View attendance</Button>
-            </Link>
-            <Link href="/corrections">
-              <Button>
-                Request correction
-                <ArrowRightIcon className="h-4 w-4" />
-              </Button>
-            </Link>
+            {canViewTime ? (
+              <Link href="/attendance">
+                <Button variant="secondary">View attendance</Button>
+              </Link>
+            ) : null}
+            {canSubmitCorrections || canReadCorrections ? (
+              <Link href="/corrections">
+                <Button>
+                  Request correction
+                  <ArrowRightIcon className="h-4 w-4" />
+                </Button>
+              </Link>
+            ) : null}
           </>
         }
       />
 
       <MonitoringDisclosure />
 
+      {!canViewTime ? (
+        <Alert tone="info" title="Attendance summaries restricted">
+          Your role does not include attendance read access, so daily totals and session
+          history are hidden.
+        </Alert>
+      ) : null}
+
+      {canViewTime ? (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Today"
@@ -265,10 +283,20 @@ export function PersonalDashboard() {
           icon={<CheckSquareIcon className="h-4 w-4" />}
         />
       </div>
+      ) : null}
 
-      {current.error ? <ErrorState message={current.error} onRetry={current.reload} /> : null}
+      {canViewTime && current.error ? (
+        <ErrorState message={current.error} onRetry={current.reload} />
+      ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
+      <div
+        className={
+          canViewTime
+            ? "grid gap-4 xl:grid-cols-[1.35fr_0.65fr]"
+            : "grid gap-4"
+        }
+      >
+        {canViewTime ? (
         <Card>
           <CardHeader
             title="Current session"
@@ -333,7 +361,9 @@ export function PersonalDashboard() {
             </div>
           </CardBody>
         </Card>
+        ) : null}
 
+        {canReadCorrections ? (
         <Card>
           <CardHeader
             title="Corrections"
@@ -383,8 +413,10 @@ export function PersonalDashboard() {
             )}
           </CardBody>
         </Card>
+        ) : null}
       </div>
 
+      {canViewTime ? (
       <Card>
         <CardHeader
           title="Recent sessions"
@@ -412,20 +444,23 @@ export function PersonalDashboard() {
           />
         )}
       </Card>
+      ) : null}
     </div>
   );
 }
 
 export function TeamDashboard() {
-  const { organization } = useWorkspace();
+  const { organization, membership } = useWorkspace();
   const timezone = organization?.timezone ?? "UTC";
   const organizationId = organization?.id ?? "";
+  const canReadOrganization = hasPermission(membership, "organization:read");
+  const canReviewCorrections = hasPermission(membership, "correction:review");
   const today = useMemo(() => todayInTimeZone(timezone), [timezone]);
 
   const details = useApi<{ data: { memberCount: number } }>(
     (signal) => apiRequest(`/organizations/${organizationId}`, { signal }),
     [organizationId],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canReadOrganization },
   );
 
   const tracking = useApi<TrackingStatusResponse>(
@@ -455,7 +490,7 @@ export function TeamDashboard() {
         query: { status: "PENDING", limit: 5 },
       }),
     [organizationId],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canReviewCorrections },
   );
 
   const rows = tracking.data?.data ?? [];
@@ -481,12 +516,14 @@ export function TeamDashboard() {
             <Link href="/admin/reports">
               <Button variant="secondary">Open reports</Button>
             </Link>
-            <Link href="/admin/corrections">
-              <Button>
-                Review corrections
-                <ArrowRightIcon className="h-4 w-4" />
-              </Button>
-            </Link>
+            {canReviewCorrections ? (
+              <Link href="/admin/corrections">
+                <Button>
+                  Review corrections
+                  <ArrowRightIcon className="h-4 w-4" />
+                </Button>
+              </Link>
+            ) : null}
           </>
         }
       />
@@ -501,8 +538,14 @@ export function TeamDashboard() {
         />
         <StatCard
           label="Team members"
-          value={details.loading ? "…" : (details.data?.data.memberCount ?? "—")}
-          hint="Active memberships"
+          value={
+            canReadOrganization
+              ? details.loading
+                ? "…"
+                : (details.data?.data.memberCount ?? "—")
+              : "—"
+          }
+          hint={canReadOrganization ? "Active memberships" : "Not visible for your role"}
           accent="indigo"
           icon={<UsersIcon className="h-4 w-4" />}
         />
@@ -515,8 +558,18 @@ export function TeamDashboard() {
         />
         <StatCard
           label="Pending reviews"
-          value={pending.loading ? "…" : pendingCorrections.length}
-          hint="Attendance corrections"
+          value={
+            canReviewCorrections
+              ? pending.loading
+                ? "…"
+                : pendingCorrections.length
+              : "—"
+          }
+          hint={
+            canReviewCorrections
+              ? "Attendance corrections"
+              : "Not visible for your role"
+          }
           accent="amber"
           icon={<CheckSquareIcon className="h-4 w-4" />}
         />
@@ -588,13 +641,19 @@ export function TeamDashboard() {
             title="Awaiting review"
             description="Oldest requests first"
             actions={
-              <Link href="/corrections" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
-                Review
-              </Link>
+              canReviewCorrections ? (
+                <Link href="/corrections" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
+                  Review
+                </Link>
+              ) : undefined
             }
           />
           <CardBody className="space-y-3">
-            {pendingCorrections.length === 0 ? (
+            {!canReviewCorrections ? (
+              <Alert tone="info" title="Correction review restricted">
+                Your role can read team reports but not review correction requests.
+              </Alert>
+            ) : pendingCorrections.length === 0 ? (
               <div className="py-8 text-center">
                 <p className="text-[13px] font-medium text-ink">Nothing pending</p>
                 <p className="mt-1 text-xs text-muted">Correction requests will appear here.</p>
@@ -680,11 +739,49 @@ export function TeamDashboard() {
 export function DashboardView() {
   const { membership } = useWorkspace();
   const isTeamView =
-    membership &&
-    (membership.role === "OWNER" ||
-      membership.role === "ADMIN" ||
-      membership.role === "MANAGER");
-  return isTeamView ? <TeamDashboard /> : <PersonalDashboard />;
+    hasPermission(membership, "report:read") &&
+    !isSelfScoped(membership, membership?.dataScope);
+  if (isTeamView) return <TeamDashboard />;
+
+  const hasSelfService =
+    hasPermission(membership, "time:read") ||
+    hasPermission(membership, "time:write") ||
+    hasPermission(membership, "correction:review");
+  return hasSelfService ? <PersonalDashboard /> : <RestrictedDashboard />;
+}
+
+function RestrictedDashboard() {
+  const { organization, membership, user } = useWorkspace();
+  const canSubmitCorrections = hasPermission(membership, "time:write");
+  const canReadLeave = hasPermission(membership, "leave:read");
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow={`${organization?.name ?? "Workspace"} · ${membership?.role.toLowerCase() ?? "member"}`}
+        title={`Good to see you, ${user.name.split(" ")[0]}`}
+        description="Your role does not include attendance dashboard access."
+      />
+      <Alert tone="info" title="No dashboard data available">
+        An owner or administrator can grant reporting or attendance permissions if you need
+        this view.
+      </Alert>
+      {canSubmitCorrections || canReadLeave ? (
+        <div className="flex flex-wrap gap-2">
+          {canSubmitCorrections ? (
+            <Link href="/corrections">
+              <Button>Request correction</Button>
+            </Link>
+          ) : null}
+          {canReadLeave ? (
+            <Link href="/leave">
+              <Button variant="secondary">My leaves</Button>
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function DashboardLoading() {

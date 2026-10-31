@@ -2,21 +2,27 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 import type { AuthSession } from '../src/types/auth'
 import type {
+  ActivityTrackingStatus,
   MonitoringStatus,
   TrackingOperationResult,
   TrackingRuntimeStatus,
   TrackingSnapshot,
   UserFacingError
 } from '../src/types/electron'
+import { ActivityQueue } from './activityQueue'
+import { ActivityStateStore } from './activityState'
+import { ActivityTrackingService } from './activityTrackingService'
 import { AgentManager } from './agentManager'
 import { AuthManager } from './authManager'
 import { getApiBaseUrl, getWebSocketUrl } from './config'
 import { toUserFacingError } from './errors'
+import { createForegroundAppSource } from './foregroundApp'
 import { LiveScreenService } from './liveScreenService'
 import { OfflineQueue } from './offlineQueue'
 import { captureLiveFrame, capturePrimaryScreen } from './screenCapture'
 import { ScreenshotService } from './screenshotService'
 import { SecureStore } from './secureStore'
+import { createSystemActivitySignals } from './systemActivity'
 import { TrackingController } from './trackingController'
 
 type IpcEnvelope<T> = { ok: true; value: T } | { ok: false; error: UserFacingError }
@@ -32,6 +38,7 @@ const TRACKING_CHANNELS = [
   'tracking:status'
 ] as const
 const MONITORING_CHANNELS = ['monitoring:status'] as const
+const ACTIVITY_CHANNELS = ['activity:status'] as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -60,10 +67,12 @@ export class AppRuntime {
   private readonly tracking: TrackingController
   private readonly screenshots: ScreenshotService
   private readonly liveScreen: LiveScreenService
+  private readonly activity: ActivityTrackingService
   private readonly authUnsubscribe: () => void
   private readonly trackingUnsubscribe: () => void
   private readonly statusUnsubscribe: () => void
   private readonly monitoringUnsubscribe: () => void
+  private readonly activityUnsubscribe: () => void
   private shutdownPromise: Promise<void> | null = null
   private disposed = false
 
@@ -107,30 +116,66 @@ export class AppRuntime {
       screenshots: this.screenshots,
       liveScreen: this.liveScreen
     })
+    this.activity = new ActivityTrackingService({
+      client: this.auth.client,
+      getCredentials: () => agents.getCredentials(),
+      rotateCredentials: async () => {
+        const session = this.auth.getSession()
+        if (!session) return null
+        try {
+          return await agents.rotateAgent(session)
+        } catch {
+          return null
+        }
+      },
+      getDeviceId: () => agents.getDeviceId(),
+      queue: new ActivityQueue(join(userData, 'activity-queue.json')),
+      state: new ActivityStateStore(join(userData, 'activity-state.json')),
+      detector: createForegroundAppSource(),
+      signals: createSystemActivitySignals(),
+      platform: process.platform
+    })
 
     this.authUnsubscribe = this.auth.onSessionChanged((session) => {
       if (session) {
         this.tracking.attachSession(session)
         this.screenshots.attachSession(session.membership.organization.id)
+        this.activity.attachSession(session)
+        this.activity.setTrackingSnapshot(this.tracking.getSnapshot())
       } else {
+        const explicitSignOut = this.auth.consumeExplicitSignOut()
+        // Activity finalizes its open intervals while agent credentials are
+        // still present, so detach it before the tracking layer cleans up.
+        this.activity.detachSession(explicitSignOut)
         this.screenshots.detachSession()
-        this.tracking.detachSession(this.auth.consumeExplicitSignOut())
+        this.tracking.detachSession(explicitSignOut)
       }
       this.broadcast('auth:sessionChanged', session)
     })
     this.trackingUnsubscribe = this.tracking.onStateChanged((snapshot) => {
+      this.activity.setTrackingSnapshot(snapshot)
       this.broadcast('tracking:stateChanged', snapshot)
     })
     this.statusUnsubscribe = this.tracking.onStatusChanged((status) => {
+      this.activity.handleConnection(status.connection === 'online')
+      if (status.connection === 'blocked') this.activity.handleBlocked()
       this.broadcast('tracking:statusChanged', status)
     })
     this.monitoringUnsubscribe = this.screenshots.onStatusChanged((status) => {
       this.broadcast('monitoring:statusChanged', status)
     })
+    this.activityUnsubscribe = this.activity.onStatusChanged((status) => {
+      this.broadcast('activity:statusChanged', status)
+    })
   }
 
   registerIpc(): void {
-    for (const channel of [...AUTH_CHANNELS, ...TRACKING_CHANNELS, ...MONITORING_CHANNELS]) {
+    for (const channel of [
+      ...AUTH_CHANNELS,
+      ...TRACKING_CHANNELS,
+      ...MONITORING_CHANNELS,
+      ...ACTIVITY_CHANNELS
+    ]) {
       ipcMain.removeHandler(channel)
     }
 
@@ -198,6 +243,9 @@ export class AppRuntime {
     ipcMain.handle('monitoring:status', () =>
       this.wrap<MonitoringStatus>(() => Promise.resolve(this.screenshots.getStatus()))
     )
+    ipcMain.handle('activity:status', () =>
+      this.wrap<ActivityTrackingStatus>(() => Promise.resolve(this.activity.getStatus()))
+    )
   }
 
   /**
@@ -208,6 +256,7 @@ export class AppRuntime {
     if (!this.shutdownPromise) {
       this.shutdownPromise = (async () => {
         try {
+          await this.activity.shutdown()
           await this.tracking.shutdown()
         } finally {
           this.dispose()
@@ -224,9 +273,16 @@ export class AppRuntime {
     this.trackingUnsubscribe()
     this.statusUnsubscribe()
     this.monitoringUnsubscribe()
+    this.activityUnsubscribe()
     this.screenshots.dispose()
+    this.activity.dispose()
     this.tracking.dispose()
-    for (const channel of [...AUTH_CHANNELS, ...TRACKING_CHANNELS, ...MONITORING_CHANNELS]) {
+    for (const channel of [
+      ...AUTH_CHANNELS,
+      ...TRACKING_CHANNELS,
+      ...MONITORING_CHANNELS,
+      ...ACTIVITY_CHANNELS
+    ]) {
       ipcMain.removeHandler(channel)
     }
   }

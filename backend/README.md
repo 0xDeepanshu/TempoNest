@@ -2,7 +2,7 @@
 
 Production-oriented foundation for TempoNest: a modular monolith REST API used by the Next.js admin portal and Electron employee application.
 
-Step 1 implements organizations, users, memberships, invitations, browser and desktop authentication, authorization, and supporting security/reliability infrastructure. Step 2 adds server-authoritative time tracking, registered desktop agents, authenticated agent WebSockets, offline reconciliation, foreground application metadata, and reporting. Step 3 adds **explicit, administrator-initiated individual screenshot requests**, a per-organization monitoring policy/disclosure, private local or S3-compatible object storage, short-lived upload/download authorization, lifecycle recovery over HTTP/WebSocket, an audit trail, and retention cleanup.
+Step 1 implements organizations, users, memberships, invitations, browser and desktop authentication, authorization, and supporting security/reliability infrastructure. Step 2 adds server-authoritative time tracking, registered desktop agents, authenticated agent WebSockets, offline reconciliation, foreground application metadata, and reporting. Step 3 adds **explicit, administrator-initiated individual screenshot requests**, a per-organization monitoring policy/disclosure, private local or S3-compatible object storage, short-lived upload/download authorization, lifecycle recovery over HTTP/WebSocket, an audit trail, and retention cleanup. Step 4 adds **organization-level desktop tracking policy, OS idle intervals, application classification, and productivity analytics**, with server-authoritative calculations and privacy boundaries.
 
 There is no periodic, automatic, timer-triggered, or usage-triggered screenshot capture. The backend lifecycle and storage contract is implemented, but **the Electron capture/upload client and Next.js admin UI are not part of this repository and are not claimed to work yet**; see [docs/ELECTRON_INTEGRATION.md](docs/ELECTRON_INTEGRATION.md).
 
@@ -166,9 +166,11 @@ src/
     health/                 # Liveness and readiness endpoints
     desktopAgents/          # Registration, key rotation, agent auth, revocation
     timeTracking/           # Sessions, breaks, heartbeats, offline event ledger
-    activity/               # Foreground application metadata ingestion
-    reporting/              # Tracking status, session/daily/app reports
+    activity/               # Foreground activity, idle intervals, tracking policy,
+                            # classifications, retention maintenance
+    reporting/              # Tracking status, session/daily/app/activity analytics
     attendance/             # Summaries, corrections, mobile check-in, private evidence
+    leave/                  # Types, policies, holidays, balances/ledger, requests, audit
     screenshots/            # Policy, admin requests, agent lifecycle, private storage,
                             # audit events, retention/maintenance
   realtime/
@@ -187,6 +189,7 @@ tests/
   timeTracking.test.ts
   attendance.test.ts
   attendanceMobile.test.ts
+  leave.test.ts
   screenshots.test.ts
   websocket.test.ts
   rateLimit.test.ts
@@ -211,6 +214,14 @@ Key variables (see `.env.example`):
 | `ACCESS_TOKEN_TTL_SECONDS` | Default 900 (15 min) |
 | `REFRESH_TOKEN_TTL_SECONDS` | Default 2,592,000 (30 days) |
 | `INVITATION_TTL_SECONDS` | Default 604,800 (7 days) |
+| `PASSWORD_RESET_TTL_SECONDS` | Single-use reset-link lifetime (default 1800) |
+| `LOGIN_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_SECONDS` | Per-account lockout threshold and duration (default 10 / 900) |
+| `MAIL_TRANSPORT` | `smtp` (production default), `file` (development default), `memory`, or `log` |
+| `MAIL_FROM` | From header for invitation and password reset e-mails |
+| `MAIL_OUTBOX_DIR` | Directory used by the `file` transport |
+| `WEB_APP_URL` | Public web origin used in invitation and reset links |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | SMTP endpoint; `SMTP_HOST` is required when `MAIL_TRANSPORT=smtp` |
+| `SMTP_USER` / `SMTP_PASSWORD` | Optional SMTP credentials |
 | `MAX_ACTIVE_SESSIONS_PER_USER` | Oldest sessions are revoked beyond this limit (default 10) |
 | `ARGON2_MEMORY_KIB` / `ARGON2_TIME_COST` / `ARGON2_PARALLELISM` | Argon2id cost parameters |
 | `COOKIE_SECURE` / `COOKIE_SAME_SITE` / `COOKIE_DOMAIN` | Cookie policy; production defaults to `Secure` |
@@ -310,9 +321,18 @@ Mobile employees use the same accounts and session model as web/Electron; there 
 - Login errors are deliberately identical for unknown accounts and wrong passwords.
 - Passwords and hashes are never included in responses or logs.
 
+### Employee onboarding and password reset
+
+- Admins invite by name, e-mail, and role. The server e-mails `WEB_APP_URL/invitations/accept?token=…`; the raw token is also returned once to the authorized inviter as a fallback.
+- A first-time invitee creates their own password. The account, membership, and browser session are created in one transaction guarded by a conditional single-use claim on the invitation, and the invited role is applied server-side.
+- An existing account must be signed in before accepting and keeps its existing password. A different signed-in account receives `403 INVITATION_EMAIL_MISMATCH`.
+- `POST /auth/forgot-password` always returns the same `202` response. Reset links are HMAC-hashed at rest, single-use, and expire after `PASSWORD_RESET_TTL_SECONDS` (default 30 minutes). Issuing a new link invalidates the previous one.
+- `POST /auth/reset-password` conditionally claims the token, stores a new Argon2id hash, clears login lockout state, and revokes every active session for the account.
+- E-mail delivery is configured with `MAIL_TRANSPORT` (`smtp` in production; `file` or `memory` for local development) and `SMTP_*`. A delivery failure never rolls back an invitation.
+
 ### Login rate limiting
 
-`POST /auth/login` is limited per IP (`LOGIN_RATE_LIMIT_MAX`, default 10 failed attempts per 15 minutes). Successful logins do not consume the budget. A broader per-IP limit applies to the whole API. The default store is in-memory, which is correct for a single instance; use a shared store (e.g. Redis) before scaling horizontally.
+`POST /auth/login` is limited per IP (`LOGIN_RATE_LIMIT_MAX`, default 10 failed attempts per 15 minutes). Successful logins do not consume the budget. Independently, repeated failures for one account lock it for `LOGIN_LOCKOUT_SECONDS` after `LOGIN_MAX_FAILED_ATTEMPTS`; the lock is only reported after a correct password, so account existence is not disclosed. A broader per-IP limit applies to the whole API. The default store is in-memory, which is correct for a single instance; use a shared store (e.g. Redis) before scaling horizontally.
 
 ---
 
@@ -351,19 +371,24 @@ Mobile employees use the same accounts and session model as web/Electron; there 
 - The device ID must match the authenticated agent. Client durations are not accepted; backfill and future-skew windows are configurable.
 - Offline session starts create caller-generated session IDs; the client cannot select an employee, organization, or agent.
 
-### Application metadata
+### Application metadata, idle detection & classification
 
-- The activity endpoint stores only foreground application identifier/name and the observed interval. A client `durationSeconds` field is accepted for compatibility but ignored and recomputed by the server.
+- The activity endpoint stores only foreground application identifier/name, platform, and the observed interval. A client `durationSeconds` field is accepted for compatibility but ignored and recomputed by the server.
 - The API has no fields for window titles, URLs, keystrokes, clipboard contents, or screenshots. Unknown body fields are rejected.
-- Ingestion validates the agent/session/organization binding, deduplicates by per-agent idempotency key, and rejects overlapping intervals.
-- Reports clip activity to actual working intervals, excluding breaks and stopped time, and include a non-productivity-proof disclaimer.
+- Ingestion validates the agent/session/organization binding, deduplicates by per-agent idempotency key, and rejects overlapping intervals. `sessionId` is optional and resolved to the agent's current open session when omitted.
+- Organization policy (`GET/PATCH /activity/settings`, `activity:policy` to update) controls app tracking, idle detection, the idle threshold (default 5 minutes), classification, and raw retention. Disabling a feature stops new ingestion without deleting history.
+- Idle intervals are uploaded separately, validated against the organization threshold, and merged at report time so retries after sleep/resume cannot double count. Idle detection is independent of app tracking.
+- Administrators can classify applications as `PRODUCTIVE`, `NEUTRAL`, `UNPRODUCTIVE`, or `UNCLASSIFIED` (default). Unknown applications are never assumed unproductive. Classification changes are audited and applied to reports retroactively by resolving the current catalog at query time; raw events are not rewritten.
+- Reports clip activity to working time minus breaks **and idle intervals**, and include a non-productivity-proof disclaimer. Raw activity and idle rows older than `activityRetentionDays` are purged by a background loop; classifications are retained.
 - No screenshots are captured or uploaded in Step 2.
 
 ### Reporting
 
 - Explicit `from`/`to` local calendar dates are interpreted in the organization's IANA timezone; all timestamps are stored in UTC.
 - Session history, per-day working/break totals, application usage summaries, and timelines are paginated where appropriate and bounded by maximum ranges.
-- Only OWNER/ADMIN/MANAGER have `report:read`. Employees retain access to their own current session and session history.
+- `reports/activity-summary` gives an employee's totals, per-category and per-application breakdown, and daily rows; employees are self-scoped and receive `403` for another employee. `reports/activity-overview` gives administrators/managers paginated per-employee rows plus aggregate totals.
+- Productive percentages use active time (working minus breaks and idle) as the denominator and are `null` when classification is disabled or activity is missing. They are descriptive ratios, never a performance score.
+- Only OWNER/ADMIN/MANAGER have `report:read`. Employees retain access to their own current session, session history, and their own activity summary.
 
 ### Employee attendance & corrections
 
@@ -398,6 +423,22 @@ See [docs/API.md](docs/API.md#mobile-attendance-check-in-and-evidence) for schem
 - Access: employees can always read their own ON_SITE history. Viewing another employee's history requires the dedicated `attendance:location:read` permission, which defaults to **OWNER and ADMIN only**; `MANAGER` and `EMPLOYEE` do not inherit it from `report:read`. Cross-tenant check-in IDs return `404`; non-ON_SITE check-ins return `422 LOCATION_HISTORY_NOT_AVAILABLE`. Every non-self view writes `ATTENDANCE_LOCATION_HISTORY_VIEWED` with counts and session identifiers, never coordinates.
 - Retention: precise samples older than `ATTENDANCE_LOCATION_RETENTION_DAYS` (30 by default) are deleted automatically at startup and every `ATTENDANCE_LOCATION_PURGE_INTERVAL_SECONDS` (6 hours). Tracking rows for sessions that ended before the cutoff are deleted in the same pass. There is no geocoding, reverse lookup, or address storage.
 - Privacy: collection is limited to the active ON_SITE session, stops on breaks and checkout, and never runs for WFH/WFO. Clients must request foreground and background permission through the OS, show the Android foreground-service notification / iOS background indicator, and must not claim tracking is active when permission is denied or the OS restricts background updates. GPS accuracy and device clocks are not independently verified; these records are approximate.
+
+### Leave management
+
+Phase 1 implements the backend only; the employee and admin UIs are later phases.
+
+- **Catalog.** Leave types and one policy per type are organization-scoped. A type configures paid/unpaid, balance requirement, negative-balance allowance, max consecutive days, notice period, documentation requirement, and cancellation behavior. The policy configures annual period start, initial entitlement, accrual frequency/amount, carry-forward allowance, balance cap, proration, and ISO working days. Organization holidays are excluded from chargeable days.
+- **Balance formula.** `available = entitled + accrued + adjustments + carried_forward - approved_consumed - pending_reserved`.
+- **Reservation lifecycle.** Submitting a pending request reserves units in the same transaction; approval atomically moves the reservation to approved consumption exactly once; rejection or pending cancellation releases it; approved cancellation restores consumption exactly once when the policy allows. Repeated terminal transitions are rejected (`LEAVE_REQUEST_NOT_CANCELLABLE`) or idempotent (approve/reject).
+- **Ledger.** Every balance change is appended to `leave_ledger_entries` with per-bucket deltas, the resulting available balance, an optional request link, and an actor. Automatic credits use idempotency keys (`initial:<periodStart>`, `carry:<periodStart>`, `accrual:<trancheDate>`), so lazy accrual on every read cannot double-credit.
+- **Calendar.** Units are server-calculated from working weekdays and holidays; half-days adjust the first/last chargeable date. A request cannot span two balance periods (`LEAVE_SPANS_BALANCE_PERIODS`); each period must be submitted separately. This avoids silent proration across reset boundaries.
+- **Idempotency and concurrency.** `Idempotency-Key` makes submissions safe to retry; the unique `(organization_id, employee_id, idempotency_key)` index is the cross-process guard. Balance rows are locked (`FOR UPDATE`), and an in-process per-employee queue serializes competing requests on SQLite and reduces PostgreSQL contention. Overlapping pending/approved requests are rejected.
+- **Authorization.** OWNER/ADMIN may manage the catalog, policies, holidays, organization-wide balances, adjustments, and audit history (`leave:manage`), and approve/reject (`leave:approve`). Managers only read the catalog and manage their own requests; employees are always self-scoped. Cross-employee and cross-organization access returns `404`.
+- **Audit.** Leave type/policy/holiday changes, request submission/approval/rejection/cancellation, and balance adjustments are recorded in the existing organization-scoped `audit_events` table. No credentials or secrets are stored.
+- **Limitations.** No payroll engine, leave encashment, accrual scheduler, or attendance deduction. Accrual/carry-forward happen lazily; changing a policy affects the current period’s lazy calculation. Organization-wide balance listing materializes active members for the selected period and is intended for normal SME dataset sizes.
+
+See [docs/API.md](docs/API.md#leave-management) for endpoints, payloads, transitions, and error codes.
 
 ### Admin-initiated screenshots
 
@@ -462,6 +503,8 @@ Platform administration sits outside this matrix. `/platform/*` checks `users.pl
 | `invitation:read` / `invitation:revoke` | ✅ | ✅ | — | — |
 | `time:read` / `time:write` | ✅ | ✅ | ✅ | ✅ |
 | `report:read` | ✅ | ✅ | ✅ | — |
+| `activity:policy` | ✅ | ✅ | — | — |
+| `classification:manage` | ✅ | ✅ | — | — |
 | `correction:review` | ✅ | ✅ | ✅ | — |
 | `agent:read` | ✅ | ✅ | ✅ | ✅ |
 | `agent:revoke` | ✅ | ✅ | — | — |
@@ -470,6 +513,8 @@ Platform administration sits outside this matrix. `/platform/*` checks `users.pl
 | `screenshot:request` | ✅ | ✅ | — | — |
 | `screenshot:manage` | ✅ | ✅ | — | — |
 | `screenshot:policy` | ✅ | ✅ | — | — |
+| `leave:read` / `leave:write` | ✅ | ✅ | ✅ | ✅ |
+| `leave:approve` / `leave:manage` | ✅ | ✅ | — | — |
 
 Additional server-side rules:
 
@@ -484,11 +529,13 @@ Additional server-side rules:
 - Users may belong to multiple organizations; `/auth/me` and `GET /organizations` expose their memberships.
 - Employees are always forced to their own employee ID for session lists/history and device lists; they cannot read another employee's time data.
 - Any member may register/revoke their own desktop agent; revoking another member's agent requires `agent:revoke`.
-- `report:read` is limited to OWNER/ADMIN/MANAGER. Employees can still read their own current session and session history.
+- `report:read` is limited to OWNER/ADMIN/MANAGER. Employees can still read their own current session, session history, and their own activity summary.
+- Desktop tracking settings (`activity:policy`) and application classification administration (`classification:manage`) are OWNER/ADMIN only. Reading the effective settings requires `time:read`; employees may only read their own activity summary (`time:read`), while OWNER/ADMIN/MANAGER may select another `employeeId`.
 - Attendance summaries use `time:read`; employees are always self-scoped. Attendance correction review uses `correction:review` (OWNER/ADMIN/MANAGER), and self-review is always rejected.
 - `attendance:location:read` gates viewing another employee's ON_SITE location history. It defaults to **OWNER and ADMIN only** and is deliberately not derived from `report:read`, so MANAGER and EMPLOYEE do not receive it. Employees retain self-access (and self-access is not audited as admin viewing).
 - Screenshot routes require both the underlying permission and the organization policy’s role list. Employees have no screenshot history, request, review, or policy-management permission; they can only read/acknowledge the disclosure.
 - Admin/agent screenshot services repeat authorization, ownership, and state checks independently of route middleware.
+- Leave catalog/policy administration, organization-wide balance listing, adjustments, and audit history require `leave:manage` (OWNER/ADMIN). Approval requires `leave:approve` (OWNER/ADMIN) and self-approval is rejected. Managers can read the catalog and manage only their own requests. Employees are always forced to their own requests and balances; cross-employee access returns `404`.
 
 ---
 
@@ -506,7 +553,10 @@ All identifiers are UUIDs. Timestamps are `TIMESTAMPTZ` in PostgreSQL and manage
 | `desktop_agents` | unique `(organization_id, user_id, device_identifier)`; `ELECTRON`/`MOBILE` `client_type` (default `ELECTRON`); HMAC `agent_key_hash`; last seen/connected/disconnected; logical `revoked_at` |
 | `time_sessions` | one open session per employee and per agent via partial unique indexes; `ACTIVE`/`ON_BREAK`/`STOPPED`; `ONLINE`/`OFFLINE` source; durable `last_heartbeat_at` |
 | `breaks` | one open break per session via partial unique index; `ACTIVE`/`ENDED`; interval stored as timestamps |
-| `application_activities` | foreground metadata only; unique `(desktop_agent_id, idempotency_key)`; server-derived `duration_seconds`; no screenshot/window-content columns |
+| `application_activities` | foreground metadata only; unique `(desktop_agent_id, idempotency_key)`; `platform`; server-derived `duration_seconds`; indexed by organization/application; no screenshot/window-content columns |
+| `activity_idle_intervals` | OS idle periods; unique `(desktop_agent_id, idempotency_key)`; session/employee/org scope; server-derived duration and threshold snapshot; merged at report time; purged after retention |
+| `organization_tracking_settings` | one row per organization; app tracking, idle detection/threshold, classification, raw retention, `policy_version`/`policy_updated_at` |
+| `application_classifications` | current org-scoped catalog; unique `(organization_id, application_identifier)`; `PRODUCTIVE`/`NEUTRAL`/`UNPRODUCTIVE`/`UNCLASSIFIED`; classifier and notes |
 | `agent_sync_events` | durable offline idempotency ledger; unique `(desktop_agent_id, event_id)`; `APPLIED`/`CONFLICT` + conflict code; JSON result |
 | `screenshot_policies` | one row per organization; disabled by default; role lists, cooldown, retention/audit retention, disclosure version/text, acknowledgement requirement |
 | `screenshot_policy_acknowledgements` | unique `(organization_id, employee_id, policy_version)`; acknowledges a specific disclosure version |
@@ -517,7 +567,13 @@ All identifiers are UUIDs. Timestamps are `TIMESTAMPTZ` in PostgreSQL and manage
 | `attendance_check_ins` | one per time session; `WFH`/`WFO`/`ON_SITE`; optional selfie/site-photo evidence FKs; nullable validated location; unique `(organization_id, employee_id, check_in_request_id)` for idempotency and unique evidence FKs |
 | `attendance_location_samples` | precise ON_SITE samples; organization/employee/agent/session FKs (`CASCADE`), client sample UUID, latitude/longitude/accuracy, `captured_at`/`received_at`, source; unique `(time_session_id, client_sample_id)` for idempotency; indexed by session/time and organization/time; purged after the retention window |
 | `attendance_location_tracking` | one row per ON_SITE session; `ACTIVE`/`PAUSED`/`STOPPED`, reason, reported permission (`ALWAYS`/`FOREGROUND_ONLY`/`DENIED`/`UNKNOWN`), `background_allowed`, last sample/report timestamps; unique `(time_session_id)` |
-| `audit_events` | organization-scoped append-only audit trail for screenshot, attendance-correction, attendance-evidence, and location-history-view actions; actor/target/entity references, sanitized JSON metadata, IP/user-agent; screenshot rows retained by policy |
+| `leave_types` | organization-scoped catalog; unique `(organization_id, name)`; paid/unpaid, balance requirement, negative-balance allowance, max consecutive days, minimum notice, documentation requirement, approved-cancellation policy |
+| `leave_policies` | exactly one per leave type (`unique organization_id + leave_type_id`); initial entitlement, accrual frequency/amount, annual period start month/day, carry-forward allowance, max balance, proration, ISO working days (default Mon–Fri), active flag |
+| `leave_holidays` | organization holiday calendar; unique `(organization_id, holiday_date)` |
+| `leave_balances` | unique `(organization_id, employee_id, leave_type_id, period_start)`; decimal buckets for entitled, accrued, adjustment, carried-forward, approved-consumed, pending-reserved, and available |
+| `leave_requests` | `PENDING`/`APPROVED`/`REJECTED`/`CANCELLED`/`CANCELLATION_REQUESTED`; server-calculated units, charged-date JSON, balance-period anchor, half-day flags, reviewer/cancellation fields; unique `(organization_id, employee_id, idempotency_key)` and overlap/status indexes |
+| `leave_ledger_entries` | append-only balance ledger with per-bucket deltas, `balanceAfter`, reason, actor, optional request link, JSON metadata; unique `(balance_id, idempotency_key)` prevents double-crediting |
+| `audit_events` | organization-scoped append-only audit trail for screenshot, attendance-correction, attendance-evidence, location-history-view, tracking-policy, application-classification, and leave actions; actor/target/entity references, sanitized JSON metadata, IP/user-agent; screenshot rows retained by policy |
 | `platform_audit_events` | append-only platform audit trail; actor and target-organization FKs `SET NULL` with a name snapshot, action, before/after metadata, IP/user-agent; retained independently of tenant data |
 
 Migrations live in `migrations/` and are the only production schema mechanism. `sequelize.sync({ alter: true })` is never used by application code; test suites use `sync()` only to create/reset their disposable schema.
@@ -556,7 +612,7 @@ Passwords/tokens are excluded from all API responses except the explicit desktop
 ## Testing
 
 ```bash
-npm test                 # 114 tests, in-memory SQLite, no external services
+npm test                 # 162 tests, in-memory SQLite, no external services
 npm run typecheck
 npm run build
 ```
@@ -592,6 +648,7 @@ The PostgreSQL path resets data between tests with `TRUNCATE` and can run agains
 - Tracking status transitions (`WORKING`, `ON_BREAK`, `ONLINE`, `OFFLINE`) from durable heartbeats.
 - Employee self-scoped daily/weekly/monthly attendance summaries, organization timezone boundaries, distinct session totals, and manager/organization scoping.
 - Missing-session and existing-session correction requests, pending duplicate/overlap rejection, manager review permissions, self-review denial, transactional approval, break replacement, original/applied snapshots, audit events, stale-conflict rollback, and idempotent repeat decisions.
+- Leave type/policy CRUD and role boundaries; lazy entitlement/accrual with idempotent ledger credits; balance breakdowns; sufficient, zero, and insufficient applications; pending reservation preventing overspend; approval consuming exactly once; rejection and pending cancellation releasing balance; approved cancellation restoring exactly once; cancellation-approval and non-cancellable flows; audited administrator credits/debits and balance caps; overlap/date/half-day validation; working-day and holiday calculations; no-balance and inactive type/employee behavior; idempotent retries; self vs cross-employee and cross-organization denial; role-gated approval; and concurrent competing requests.
 - WebSocket auth failures (missing/invalid/mismatched/expired), heartbeat persistence, live session pushes, reconnect, and revocation close.
 - Screenshot policy disabled/enabled behavior, role and organization scoping, request/view role containment, and employee disclosure/acknowledgement.
 - Idempotent creation, concurrent retries, duplicate pending prevention, cooldown, eligibility, offline delivery, and truthful expiration.
@@ -645,10 +702,24 @@ Map rendering and data-sharing disclosure are verified in the web suite.
 | Check | Result |
 | --- | --- |
 | `npm run typecheck` | Passed |
-| `npm test` (SQLite) | 114/114 passed (13 files; 9 platform tests) |
+| `npm test` (SQLite) | 162/162 passed (16 files; 25 leave tests) |
 | `npm run build` | Passed |
 | Migrations | `20261026000100` (platform role + organization soft delete) and `20261026000200` (platform audit events) must be applied with `npm run db:migrate`; they are additive and preserve existing rows |
 | Rollback | Both migrations implement `down`; rolling back drops only the added columns/table and does not touch tenant rows |
+
+### Leave management verification
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | Passed |
+| `npm test` (SQLite) | 162/162 passed (16 files), including 25 `tests/leave.test.ts` tests |
+| `tests/leave.test.ts` (PostgreSQL) | 25/25 passed against the migrated disposable database |
+| Full suite (PostgreSQL) | Last full run: 152/161, whose only leave failure was a test bug (used `INACTIVE` instead of the `MEMBERSHIP_STATUSES`/`USER_STATUSES` values). After the fix the leave file passed 24/24, and it now passes 25/25 after the final test was added. The other 8 failures are pre-existing PostgreSQL-only problems in `attendanceLocation.test.ts` (`FOR UPDATE` with an outer join) and `screenLive.test.ts` (test writes a time-session status outside its enum), both untouched by this phase. |
+| `npm run build` | Passed |
+| Lint | No lint script is configured in `package.json` |
+| Migration up | `20261027000100-create-leave-management` applied to a disposable PostgreSQL database; created 6 leave tables and 3 enums |
+| Migration down | `npx sequelize-cli db:migrate:undo` removed all 6 leave tables and 3 `enum_leave_*` types while unrelated tables remained; the migration re-applied cleanly and `db:migrate:status` reported it `up` |
+| Disposable database | `temponest_leave_verify` was created for verification. The CLI drop was blocked by the environment’s destructive-action guard; drop it manually with `DB_NAME=temponest_leave_verify npx sequelize-cli db:drop` when no longer needed. |
 
 ---
 
@@ -669,6 +740,9 @@ Map rendering and data-sharing disclosure are verified in the web suite.
 - **MFA/SSO**, session anomaly detection, and an audit log for organization-admin actions (platform operations are already audited).
 - **Organization lifecycle**: an approved permanent-purge/recovery workflow (current deletion is soft only), ownership transfer endpoint, slug changes, configurable per-role permissions.
 - **Invitation resend endpoint** (currently re-inviting the same e-mail rotates the token).
+- **Leave UI phases**: Phase 1 is backend-only. The admin panel (types, policies, balances, adjustments, approvals, audit) and the employee dashboard (balances, apply, history, cancel) remain to be built against the documented contracts.
+- **Scheduled leave accrual/materialization**: accrual and carry-forward currently run lazily on balance reads/reservations/adjustments. Add a scheduled job before organization-wide dashboards need pre-materialized balances at scale.
+- **Attendance integration**: approved leave is not yet deducted from attendance or time-tracking reports. A future phase can join approved leave dates by organization/employee/date without changing clock-in/clock-out behavior.
 - **OpenAPI specification**, CI pipeline, container image, and deployment manifests.
 - **Report exports** (CSV/PDF) and larger-range aggregation jobs for organization-wide reporting.
 

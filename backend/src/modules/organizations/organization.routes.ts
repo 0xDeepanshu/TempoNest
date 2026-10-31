@@ -16,6 +16,9 @@ import { createOrganizationTimeTrackingRouter } from '../timeTracking/timeSessio
 import { createOrganizationActivityRouter } from '../activity/activity.routes';
 import { createOrganizationReportingRouter } from '../reporting/reporting.routes';
 import { createOrganizationAttendanceRouter } from '../attendance/attendance.routes';
+import { createOrganizationLeaveRouter } from '../leave/leave.routes';
+import { createOrganizationHolidayRouter } from '../leave/holiday.routes';
+import { createOrganizationRolesRouter } from '../roles/customRole.routes';
 
 /**
  * Organization and nested membership/invitation routes. Every nested route
@@ -70,6 +73,9 @@ export function createOrganizationRouter(): Router {
   router.use(createOrganizationActivityRouter());
   router.use(createOrganizationReportingRouter());
   router.use(createOrganizationAttendanceRouter());
+  router.use(createOrganizationLeaveRouter());
+  router.use(createOrganizationHolidayRouter());
+  router.use(createOrganizationRolesRouter());
 
   return router;
 }

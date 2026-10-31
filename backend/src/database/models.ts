@@ -2,6 +2,8 @@ import type { Sequelize } from 'sequelize';
 import { initOrganization } from '../modules/organizations/organization.model';
 import { initUser } from '../modules/users/user.model';
 import { initMembership } from '../modules/memberships/membership.model';
+import { initCustomRole } from '../modules/roles/customRole.model';
+import { initManagerRoleOverride } from '../modules/roles/managerRoleOverride.model';
 import { initInvitation } from '../modules/invitations/invitation.model';
 import { initSession } from '../modules/auth/session.model';
 import { initDesktopAgent } from '../modules/desktopAgents/desktopAgent.model';
@@ -9,6 +11,9 @@ import { initTimeSession } from '../modules/timeTracking/timeSession.model';
 import { initBreak } from '../modules/timeTracking/break.model';
 import { initAgentSyncEvent } from '../modules/timeTracking/offlineEvent.model';
 import { initApplicationActivity } from '../modules/activity/applicationActivity.model';
+import { initOrganizationTrackingSettings } from '../modules/activity/trackingSettings.model';
+import { initApplicationClassification } from '../modules/activity/applicationClassification.model';
+import { initActivityIdleInterval } from '../modules/activity/idleInterval.model';
 import { initScreenshotPolicy } from '../modules/screenshots/screenshotPolicy.model';
 import { initScreenshotPolicyAcknowledgement } from '../modules/screenshots/screenshotPolicyAcknowledgement.model';
 import { initScreenshotRequest } from '../modules/screenshots/screenshotRequest.model';
@@ -22,17 +27,30 @@ import { initAttendanceEvidence } from '../modules/attendance/attendanceEvidence
 import { initAttendanceCheckIn } from '../modules/attendance/attendanceCheckIn.model';
 import { initAttendanceLocationSample } from '../modules/attendance/attendanceLocationSample.model';
 import { initAttendanceLocationTracking } from '../modules/attendance/attendanceLocationTracking.model';
+import { initLeaveType } from '../modules/leave/leaveType.model';
+import { initLeavePolicy } from '../modules/leave/leavePolicy.model';
+import { initLeaveHoliday } from '../modules/leave/leaveHoliday.model';
+import { initOrganizationHolidaySettings } from '../modules/leave/holidaySettings.model';
+import { initLeaveBalance } from '../modules/leave/leaveBalance.model';
+import { initLeaveRequest } from '../modules/leave/leaveRequest.model';
+import { initLeaveLedgerEntry } from '../modules/leave/leaveLedgerEntry.model';
+import { initPasswordResetToken } from '../modules/auth/passwordResetToken.model';
 
 export function initModels(sequelize: Sequelize) {
   const Organization = initOrganization(sequelize);
   const User = initUser(sequelize);
   const Membership = initMembership(sequelize);
+  const CustomRole = initCustomRole(sequelize);
+  const ManagerRoleOverride = initManagerRoleOverride(sequelize);
   const Invitation = initInvitation(sequelize);
   const Session = initSession(sequelize);
   const DesktopAgent = initDesktopAgent(sequelize);
   const TimeSession = initTimeSession(sequelize);
   const Break = initBreak(sequelize);
   const ApplicationActivity = initApplicationActivity(sequelize);
+  const OrganizationTrackingSettings = initOrganizationTrackingSettings(sequelize);
+  const ApplicationClassification = initApplicationClassification(sequelize);
+  const ActivityIdleInterval = initActivityIdleInterval(sequelize);
   const AgentSyncEvent = initAgentSyncEvent(sequelize);
   const ScreenshotPolicy = initScreenshotPolicy(sequelize);
   const ScreenshotPolicyAcknowledgement = initScreenshotPolicyAcknowledgement(sequelize);
@@ -47,6 +65,14 @@ export function initModels(sequelize: Sequelize) {
   const AttendanceCheckIn = initAttendanceCheckIn(sequelize);
   const AttendanceLocationSample = initAttendanceLocationSample(sequelize);
   const AttendanceLocationTracking = initAttendanceLocationTracking(sequelize);
+  const LeaveType = initLeaveType(sequelize);
+  const LeavePolicy = initLeavePolicy(sequelize);
+  const LeaveHoliday = initLeaveHoliday(sequelize);
+  const OrganizationHolidaySettings = initOrganizationHolidaySettings(sequelize);
+  const LeaveBalance = initLeaveBalance(sequelize);
+  const LeaveRequest = initLeaveRequest(sequelize);
+  const LeaveLedgerEntry = initLeaveLedgerEntry(sequelize);
+  const PasswordResetToken = initPasswordResetToken(sequelize);
 
   Organization.hasMany(Membership, {
     foreignKey: 'organizationId',
@@ -56,6 +82,16 @@ export function initModels(sequelize: Sequelize) {
   Organization.hasMany(Invitation, {
     foreignKey: 'organizationId',
     as: 'invitations',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(CustomRole, {
+    foreignKey: 'organizationId',
+    as: 'customRoles',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasOne(ManagerRoleOverride, {
+    foreignKey: 'organizationId',
+    as: 'managerRoleOverride',
     onDelete: 'CASCADE',
   });
   Organization.hasMany(DesktopAgent, {
@@ -76,6 +112,21 @@ export function initModels(sequelize: Sequelize) {
   Organization.hasMany(ApplicationActivity, {
     foreignKey: 'organizationId',
     as: 'applicationActivities',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasOne(OrganizationTrackingSettings, {
+    foreignKey: 'organizationId',
+    as: 'trackingSettings',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(ApplicationClassification, {
+    foreignKey: 'organizationId',
+    as: 'applicationClassifications',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(ActivityIdleInterval, {
+    foreignKey: 'organizationId',
+    as: 'activityIdleIntervals',
     onDelete: 'CASCADE',
   });
   Organization.hasOne(ScreenshotPolicy, {
@@ -144,6 +195,16 @@ export function initModels(sequelize: Sequelize) {
     as: 'sessions',
     onDelete: 'CASCADE',
   });
+  User.hasMany(PasswordResetToken, {
+    foreignKey: 'userId',
+    as: 'passwordResetTokens',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(CustomRole, {
+    foreignKey: 'createdByUserId',
+    as: 'createdCustomRoles',
+    onDelete: 'SET NULL',
+  });
   User.hasMany(DesktopAgent, {
     foreignKey: 'userId',
     as: 'desktopAgents',
@@ -157,6 +218,16 @@ export function initModels(sequelize: Sequelize) {
   User.hasMany(ApplicationActivity, {
     foreignKey: 'employeeId',
     as: 'applicationActivities',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(ApplicationClassification, {
+    foreignKey: 'classifiedByUserId',
+    as: 'applicationClassifications',
+    onDelete: 'SET NULL',
+  });
+  User.hasMany(ActivityIdleInterval, {
+    foreignKey: 'employeeId',
+    as: 'activityIdleIntervals',
     onDelete: 'CASCADE',
   });
   User.hasMany(ScreenshotRequest, {
@@ -235,6 +306,36 @@ export function initModels(sequelize: Sequelize) {
     as: 'user',
     onDelete: 'CASCADE',
   });
+  Membership.belongsTo(CustomRole, {
+    foreignKey: 'customRoleId',
+    as: 'customRole',
+    onDelete: 'SET NULL',
+  });
+  CustomRole.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  CustomRole.belongsTo(User, {
+    foreignKey: 'createdByUserId',
+    as: 'createdBy',
+    onDelete: 'SET NULL',
+  });
+  CustomRole.hasMany(Membership, {
+    foreignKey: 'customRoleId',
+    as: 'memberships',
+    onDelete: 'SET NULL',
+  });
+  ManagerRoleOverride.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  ManagerRoleOverride.belongsTo(User, {
+    foreignKey: 'updatedByUserId',
+    as: 'updatedBy',
+    onDelete: 'SET NULL',
+  });
 
   Invitation.belongsTo(Organization, {
     foreignKey: 'organizationId',
@@ -249,6 +350,11 @@ export function initModels(sequelize: Sequelize) {
   Invitation.belongsTo(User, {
     foreignKey: 'acceptedByUserId',
     as: 'acceptedByUser',
+    onDelete: 'SET NULL',
+  });
+  Invitation.belongsTo(CustomRole, {
+    foreignKey: 'customRoleId',
+    as: 'customRole',
     onDelete: 'SET NULL',
   });
 
@@ -276,6 +382,11 @@ export function initModels(sequelize: Sequelize) {
   DesktopAgent.hasMany(ApplicationActivity, {
     foreignKey: 'desktopAgentId',
     as: 'applicationActivities',
+    onDelete: 'SET NULL',
+  });
+  DesktopAgent.hasMany(ActivityIdleInterval, {
+    foreignKey: 'desktopAgentId',
+    as: 'activityIdleIntervals',
     onDelete: 'SET NULL',
   });
   DesktopAgent.hasMany(AgentSyncEvent, {
@@ -322,6 +433,11 @@ export function initModels(sequelize: Sequelize) {
   TimeSession.hasMany(ApplicationActivity, {
     foreignKey: 'timeSessionId',
     as: 'applicationActivities',
+    onDelete: 'CASCADE',
+  });
+  TimeSession.hasMany(ActivityIdleInterval, {
+    foreignKey: 'timeSessionId',
+    as: 'activityIdleIntervals',
     onDelete: 'CASCADE',
   });
   TimeSession.hasMany(AttendanceCorrectionRequest, {
@@ -377,6 +493,44 @@ export function initModels(sequelize: Sequelize) {
     onDelete: 'CASCADE',
   });
   ApplicationActivity.belongsTo(DesktopAgent, {
+    foreignKey: 'desktopAgentId',
+    as: 'desktopAgent',
+    onDelete: 'SET NULL',
+  });
+
+  OrganizationTrackingSettings.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+
+  ApplicationClassification.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  ApplicationClassification.belongsTo(User, {
+    foreignKey: 'classifiedByUserId',
+    as: 'classifiedBy',
+    onDelete: 'SET NULL',
+  });
+
+  ActivityIdleInterval.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  ActivityIdleInterval.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  ActivityIdleInterval.belongsTo(TimeSession, {
+    foreignKey: 'timeSessionId',
+    as: 'timeSession',
+    onDelete: 'CASCADE',
+  });
+  ActivityIdleInterval.belongsTo(DesktopAgent, {
     foreignKey: 'desktopAgentId',
     as: 'desktopAgent',
     onDelete: 'SET NULL',
@@ -717,16 +871,241 @@ export function initModels(sequelize: Sequelize) {
     onDelete: 'CASCADE',
   });
 
+  Organization.hasMany(LeaveType, {
+    foreignKey: 'organizationId',
+    as: 'leaveTypes',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(LeavePolicy, {
+    foreignKey: 'organizationId',
+    as: 'leavePolicies',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(LeaveHoliday, {
+    foreignKey: 'organizationId',
+    as: 'leaveHolidays',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasOne(OrganizationHolidaySettings, {
+    foreignKey: 'organizationId',
+    as: 'holidaySettings',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(LeaveBalance, {
+    foreignKey: 'organizationId',
+    as: 'leaveBalances',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(LeaveRequest, {
+    foreignKey: 'organizationId',
+    as: 'leaveRequests',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(LeaveLedgerEntry, {
+    foreignKey: 'organizationId',
+    as: 'leaveLedgerEntries',
+    onDelete: 'CASCADE',
+  });
+
+  User.hasMany(LeaveBalance, {
+    foreignKey: 'employeeId',
+    as: 'leaveBalances',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(LeaveRequest, {
+    foreignKey: 'employeeId',
+    as: 'leaveRequests',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(LeaveRequest, {
+    foreignKey: 'reviewedByUserId',
+    as: 'reviewedLeaveRequests',
+    onDelete: 'SET NULL',
+  });
+  User.hasMany(LeaveRequest, {
+    foreignKey: 'cancelledByUserId',
+    as: 'cancelledLeaveRequests',
+    onDelete: 'SET NULL',
+  });
+  User.hasMany(LeaveLedgerEntry, {
+    foreignKey: 'employeeId',
+    as: 'leaveLedgerEntries',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(LeaveLedgerEntry, {
+    foreignKey: 'actorUserId',
+    as: 'leaveBalanceActions',
+    onDelete: 'SET NULL',
+  });
+
+  LeaveType.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  LeaveType.hasOne(LeavePolicy, {
+    foreignKey: 'leaveTypeId',
+    as: 'policy',
+    onDelete: 'CASCADE',
+  });
+  LeaveType.hasMany(LeaveBalance, {
+    foreignKey: 'leaveTypeId',
+    as: 'balances',
+    onDelete: 'CASCADE',
+  });
+  LeaveType.hasMany(LeaveRequest, {
+    foreignKey: 'leaveTypeId',
+    as: 'requests',
+    onDelete: 'CASCADE',
+  });
+  LeaveType.hasMany(LeaveLedgerEntry, {
+    foreignKey: 'leaveTypeId',
+    as: 'ledgerEntries',
+    onDelete: 'CASCADE',
+  });
+
+  LeavePolicy.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  LeavePolicy.belongsTo(LeaveType, {
+    foreignKey: 'leaveTypeId',
+    as: 'leaveType',
+    onDelete: 'CASCADE',
+  });
+
+  LeaveHoliday.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  LeaveHoliday.belongsTo(User, {
+    foreignKey: 'createdByUserId',
+    as: 'createdBy',
+    onDelete: 'SET NULL',
+  });
+  LeaveHoliday.belongsTo(User, {
+    foreignKey: 'updatedByUserId',
+    as: 'updatedBy',
+    onDelete: 'SET NULL',
+  });
+
+  OrganizationHolidaySettings.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  OrganizationHolidaySettings.belongsTo(User, {
+    foreignKey: 'updatedByUserId',
+    as: 'updatedBy',
+    onDelete: 'SET NULL',
+  });
+
+  LeaveBalance.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  LeaveBalance.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  LeaveBalance.belongsTo(LeaveType, {
+    foreignKey: 'leaveTypeId',
+    as: 'leaveType',
+    onDelete: 'CASCADE',
+  });
+  LeaveBalance.hasMany(LeaveLedgerEntry, {
+    foreignKey: 'balanceId',
+    as: 'ledgerEntries',
+    onDelete: 'CASCADE',
+  });
+
+  LeaveRequest.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  LeaveRequest.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  LeaveRequest.belongsTo(User, {
+    foreignKey: 'reviewedByUserId',
+    as: 'reviewer',
+    onDelete: 'SET NULL',
+  });
+  LeaveRequest.belongsTo(User, {
+    foreignKey: 'cancelledByUserId',
+    as: 'cancelledBy',
+    onDelete: 'SET NULL',
+  });
+  LeaveRequest.belongsTo(LeaveType, {
+    foreignKey: 'leaveTypeId',
+    as: 'leaveType',
+    onDelete: 'CASCADE',
+  });
+  LeaveRequest.hasMany(LeaveLedgerEntry, {
+    foreignKey: 'leaveRequestId',
+    as: 'ledgerEntries',
+    onDelete: 'SET NULL',
+  });
+
+  LeaveLedgerEntry.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  LeaveLedgerEntry.belongsTo(LeaveBalance, {
+    foreignKey: 'balanceId',
+    as: 'balance',
+    onDelete: 'CASCADE',
+  });
+  LeaveLedgerEntry.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  LeaveLedgerEntry.belongsTo(LeaveType, {
+    foreignKey: 'leaveTypeId',
+    as: 'leaveType',
+    onDelete: 'CASCADE',
+  });
+  LeaveLedgerEntry.belongsTo(LeaveRequest, {
+    foreignKey: 'leaveRequestId',
+    as: 'leaveRequest',
+    onDelete: 'SET NULL',
+  });
+  LeaveLedgerEntry.belongsTo(User, {
+    foreignKey: 'actorUserId',
+    as: 'actor',
+    onDelete: 'SET NULL',
+  });
+
+  PasswordResetToken.belongsTo(User, {
+    foreignKey: 'userId',
+    as: 'user',
+    onDelete: 'CASCADE',
+  });
+
   return {
     Organization,
     User,
     Membership,
+    CustomRole,
+    ManagerRoleOverride,
     Invitation,
     Session,
     DesktopAgent,
     TimeSession,
     Break,
     ApplicationActivity,
+    OrganizationTrackingSettings,
+    ApplicationClassification,
+    ActivityIdleInterval,
     AgentSyncEvent,
     ScreenshotPolicy,
     ScreenshotPolicyAcknowledgement,
@@ -741,6 +1120,14 @@ export function initModels(sequelize: Sequelize) {
     AttendanceCheckIn,
     AttendanceLocationSample,
     AttendanceLocationTracking,
+    LeaveType,
+    LeavePolicy,
+    LeaveHoliday,
+    OrganizationHolidaySettings,
+    LeaveBalance,
+    LeaveRequest,
+    LeaveLedgerEntry,
+    PasswordResetToken,
   };
 }
 

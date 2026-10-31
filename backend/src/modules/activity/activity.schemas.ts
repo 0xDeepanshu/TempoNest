@@ -5,12 +5,17 @@ const isoDateTime = z.string().datetime({
   message: 'Must be an ISO-8601 timestamp with an offset',
 });
 
+export const platformSchema = z.string().trim().min(1).max(40);
+
 export const activityEventSchema = z
   .object({
     idempotencyKey: z.string().trim().min(8).max(160),
-    sessionId: z.string().uuid('sessionId must be a valid UUID'),
+    // Optional so an agent can let the server bind the event to its active
+    // session for this employee and device. A supplied ID is always verified.
+    sessionId: z.string().uuid('sessionId must be a valid UUID').optional(),
     applicationIdentifier: z.string().trim().min(1).max(200),
     applicationName: z.string().trim().min(1).max(255),
+    platform: platformSchema.optional(),
     startedAt: isoDateTime,
     endedAt: isoDateTime,
     // Present for Electron compatibility but deliberately ignored: the server
@@ -27,6 +32,14 @@ export const activityEventSchema = z
         code: z.ZodIssueCode.custom,
         path: ['endedAt'],
         message: 'endedAt must be after startedAt',
+      });
+      return;
+    }
+    if (end - start < 1_000) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endedAt'],
+        message: 'Activity interval must be at least one second',
       });
       return;
     }

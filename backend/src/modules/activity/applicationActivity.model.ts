@@ -18,6 +18,7 @@ export interface ApplicationActivityAttributes {
   desktopAgentId: string | null;
   applicationIdentifier: string;
   applicationName: string;
+  platform: string | null;
   startedAt: Date;
   endedAt: Date;
   durationSeconds: number;
@@ -28,7 +29,7 @@ export interface ApplicationActivityAttributes {
 
 export type ApplicationActivityCreationAttributes = Optional<
   ApplicationActivityAttributes,
-  'id' | 'durationSeconds' | 'createdAt' | 'updatedAt'
+  'id' | 'platform' | 'durationSeconds' | 'createdAt' | 'updatedAt'
 >;
 
 export class ApplicationActivity
@@ -42,6 +43,7 @@ export class ApplicationActivity
   declare desktopAgentId: string | null;
   declare applicationIdentifier: string;
   declare applicationName: string;
+  declare platform: string | null;
   declare startedAt: Date;
   declare endedAt: Date;
   declare durationSeconds: number;
@@ -106,6 +108,10 @@ export function initApplicationActivity(sequelize: Sequelize): typeof Applicatio
         allowNull: false,
         field: 'application_name',
       },
+      platform: {
+        type: DataTypes.STRING(40),
+        allowNull: true,
+      },
       startedAt: {
         type: DataTypes.DATE,
         allowNull: false,
@@ -153,6 +159,10 @@ export function initApplicationActivity(sequelize: Sequelize): typeof Applicatio
         },
         { name: 'application_activities_session_started_idx', fields: ['time_session_id', 'started_at'] },
         { name: 'application_activities_org_started_idx', fields: ['organization_id', 'started_at'] },
+        {
+          name: 'application_activities_org_identifier_idx',
+          fields: ['organization_id', 'application_identifier'],
+        },
       ],
     },
   );

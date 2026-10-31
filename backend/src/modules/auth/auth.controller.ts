@@ -7,6 +7,7 @@ import { AppError } from '../../utils/errors';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { toPublicUser } from '../memberships/membership.mapper';
 import { getAuthenticatedUser, loginUser, registerUser } from './auth.service';
+import { requestPasswordReset, resetPassword } from './password-reset.service';
 import {
   rotateSession,
   revokeOtherSessions,
@@ -15,7 +16,14 @@ import {
   toSessionSummary,
 } from './session.service';
 import type { IssuedTokens } from './session.service';
-import type { AuthClient, LoginInput, RefreshInput, RegisterInput } from './auth.schemas';
+import type {
+  AuthClient,
+  ForgotPasswordInput,
+  LoginInput,
+  RefreshInput,
+  RegisterInput,
+  ResetPasswordInput,
+} from './auth.schemas';
 
 function sessionPayload(
   issued: IssuedTokens,
@@ -64,6 +72,29 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 
   res.status(200).json({
     data: sessionPayload(issued, toPublicUser(user), memberships, client),
+  });
+});
+
+export const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+  const input = req.body as ForgotPasswordInput;
+  await requestPasswordReset(input.email);
+
+  // Identical response whether or not the address has an account.
+  res.status(202).json({
+    data: {
+      message: 'If an account exists for that email address, a reset link is on its way.',
+    },
+  });
+});
+
+export const resetPasswordController = asyncHandler(async (req: Request, res: Response) => {
+  const input = req.body as ResetPasswordInput;
+  await resetPassword(input.token, input.password);
+
+  res.status(200).json({
+    data: {
+      message: 'Your password has been updated. Sign in with your new password.',
+    },
   });
 });
 

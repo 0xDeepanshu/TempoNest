@@ -64,7 +64,7 @@ export function EmployeesView() {
         title="People"
         description="Employee directory with membership and account status. Open a profile for current tracking and a recent activity summary; use Reports for date-range analysis."
         actions={
-          hasPermission(membership?.role, "report:read") ? (
+          hasPermission(membership, "report:read") ? (
             <Link href="/admin/reports">
               <Button variant="secondary">Open reports</Button>
             </Link>
@@ -166,7 +166,7 @@ export function EmployeesView() {
                       </div>
                     </Td>
                     <Td>
-                      <RoleBadge role={member.role} />
+                      <RoleBadge role={member.role} customRoleName={member.customRole?.name} />
                     </Td>
                     <Td>
                       <div className="flex flex-wrap items-center gap-1">

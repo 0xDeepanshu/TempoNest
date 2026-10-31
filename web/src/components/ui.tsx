@@ -167,12 +167,19 @@ export function StatusBadge({ status }: { status: string }) {
     FAILED: { tone: "danger", label: "Failed" },
     EXPIRED: { tone: "neutral", label: "Expired" },
     CANCELLED: { tone: "neutral", label: "Cancelled" },
+    CANCELLATION_REQUESTED: { tone: "warning", label: "Cancellation requested" },
   };
   const entry = map[status] ?? { tone: "neutral" as const, label: status };
   return <Badge tone={entry.tone}>{entry.label}</Badge>;
 }
 
-export function RoleBadge({ role }: { role: Role }) {
+export function RoleBadge({
+  role,
+  customRoleName,
+}: {
+  role: Role;
+  customRoleName?: string | null;
+}) {
   const map: Record<Role, BadgeTone> = {
     OWNER: "indigo",
     ADMIN: "neutral",
@@ -180,8 +187,8 @@ export function RoleBadge({ role }: { role: Role }) {
     EMPLOYEE: "outline",
   };
   return (
-    <Badge tone={map[role]}>
-      {role.charAt(0) + role.slice(1).toLowerCase()}
+    <Badge tone={customRoleName ? "outline" : map[role]}>
+      {customRoleName ?? role.charAt(0) + role.slice(1).toLowerCase()}
     </Badge>
   );
 }

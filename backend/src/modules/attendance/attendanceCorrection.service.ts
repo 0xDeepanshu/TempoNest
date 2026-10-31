@@ -10,7 +10,11 @@ import {
 import { AppError } from '../../utils/errors';
 import { paginate } from '../../utils/pagination';
 import { serializeByKey } from '../../utils/serialize';
-import { hasPermission } from '../memberships/permissions';
+import {
+  hasPermission,
+  isSelfScoped,
+  type PermissionSubject,
+} from '../memberships/permissions';
 import { ensureEmployee } from '../reporting/reporting.service';
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
 import { toAttendanceCorrectionSummary } from './attendance.mapper';
@@ -471,25 +475,23 @@ export async function createAttendanceCorrection(options: {
 export async function listAttendanceCorrections(options: {
   organization: OrganizationModel;
   actorUserId: string;
-  actorRole: Role;
+  actorRole: Role | PermissionSubject;
   query: AttendanceCorrectionListQuery;
 }) {
   const { organization, actorUserId, actorRole, query } = options;
 
+  // Only an organization-scoped reviewer may read other employees' requests.
+  // Everyone else — including ORGANIZATION-scoped roles without
+  // correction:review — sees exactly their own history.
+  const teamScope =
+    hasPermission(actorRole, 'correction:review') && !isSelfScoped(actorRole);
+
   const where: Record<string | symbol, unknown> = { organizationId: organization.id };
-  if (actorRole === 'EMPLOYEE') {
+  if (!teamScope) {
     where.employeeId = actorUserId;
-  } else {
-    if (!hasPermission(actorRole, 'correction:review')) {
-      throw AppError.forbidden(
-        'Your role does not permit reviewing attendance corrections',
-        'PERMISSION_DENIED',
-      );
-    }
-    if (query.employeeId) {
-      await ensureEmployee(organization.id, query.employeeId);
-      where.employeeId = query.employeeId;
-    }
+  } else if (query.employeeId) {
+    await ensureEmployee(organization.id, query.employeeId);
+    where.employeeId = query.employeeId;
   }
 
   if (query.status) where.status = query.status;
@@ -524,20 +526,18 @@ export async function getAttendanceCorrectionForActor(options: {
   organization: OrganizationModel;
   correctionId: string;
   actorUserId: string;
-  actorRole: Role;
+  actorRole: Role | PermissionSubject;
 }) {
   const { organization, correctionId, actorUserId, actorRole } = options;
-  if (actorRole !== 'EMPLOYEE' && !hasPermission(actorRole, 'correction:review')) {
-    throw AppError.forbidden(
-      'Your role does not permit reviewing attendance corrections',
-      'PERMISSION_DENIED',
-    );
-  }
+  const teamScope =
+    hasPermission(actorRole, 'correction:review') && !isSelfScoped(actorRole);
 
+  // Non-reviewers only receive their own correction; someone else's ID is
+  // reported as not found instead of confirming that the record exists.
   const correction = await loadCorrection(
     organization.id,
     correctionId,
-    actorRole === 'EMPLOYEE' ? actorUserId : undefined,
+    teamScope ? undefined : actorUserId,
   );
   return toAttendanceCorrectionSummary(correction);
 }

@@ -115,7 +115,7 @@ export const detail = asyncHandler(async (req: Request, res: Response) => {
     organizationId: req.organization!.organization.id,
     sessionId: req.params.sessionId!,
     actorUserId: req.auth!.user.id,
-    actorRole: req.organization!.membership.role,
+    actorRole: req.organization!.effective,
   });
 
   res.status(200).json({ data: { session: toTimeSessionSummary(session), serverTime: now() } });
@@ -125,7 +125,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
   const result = await listSessions({
     organizationId: req.organization!.organization.id,
     actorUserId: req.auth!.user.id,
-    actorRole: req.organization!.membership.role,
+    actorRole: req.organization!.effective,
     query: req.query as unknown as SessionListQuery,
   });
 

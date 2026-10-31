@@ -1,4 +1,75 @@
+import type { Permission } from "./permissions";
+
 export type Role = "OWNER" | "ADMIN" | "MANAGER" | "EMPLOYEE";
+
+export type DataScope = "SELF" | "ORGANIZATION";
+
+export interface CustomRoleSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: readonly Permission[];
+  dataScope: DataScope;
+  onboardingEligible: boolean;
+}
+
+export interface RoleSummary {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  builtIn: boolean;
+  /** Built-in roles the organization may override (currently MANAGER only). */
+  customizable: boolean;
+  /** True when this organization has an override for a customizable built-in role. */
+  customized: boolean;
+  permissions: readonly Permission[];
+  permissionCount: number;
+  dataScope: DataScope;
+  onboardingEligible: boolean;
+  assignedUserCount: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface PermissionCatalogEntry {
+  id: Permission;
+  group: string;
+  label: string;
+  description: string;
+  grantableToCustomRole: boolean;
+  grantableToManager: boolean;
+}
+
+export interface PermissionCatalogGroup {
+  key: string;
+  label: string;
+  permissions: Permission[];
+}
+
+export interface PermissionCatalog {
+  permissions: PermissionCatalogEntry[];
+  groups: PermissionCatalogGroup[];
+  grantable: Permission[];
+  grantableManager: Permission[];
+  protected: Permission[];
+  dataScopes: Array<{ value: DataScope; label: string; description: string }>;
+  dataScopeNote: string;
+}
+
+export interface RoleListResponse {
+  data: RoleSummary[];
+}
+
+export interface RoleResponse {
+  data: { role: RoleSummary };
+}
+
+export interface PermissionCatalogResponse {
+  data: PermissionCatalog;
+}
+
+export type RoleUsersResponse = Paginated<MemberListItem>;
 
 export type MembershipStatus = "ACTIVE" | "SUSPENDED" | "REMOVED";
 export type OrganizationStatus = "ACTIVE" | "SUSPENDED";
@@ -44,7 +115,11 @@ export interface MembershipSummary {
   organizationId: string;
   userId: string;
   role: Role;
+  customRoleId?: string | null;
   status: MembershipStatus;
+  permissions?: readonly Permission[];
+  dataScope?: DataScope;
+  customRole?: CustomRoleSummary;
   createdAt: string;
   updatedAt: string;
   organization?: Organization;
@@ -667,8 +742,11 @@ export interface MemberListItem extends MembershipSummary {
 export interface Invitation {
   id: string;
   organizationId: string;
+  name: string | null;
   email: string;
   role: Role;
+  customRoleId: string | null;
+  customRole?: { id: string; name: string } | null;
   expiresAt: string;
   acceptedAt: string | null;
   revokedAt: string | null;
@@ -720,4 +798,851 @@ export interface PlatformAuditEvent {
   ipAddress: string | null;
   userAgent: string | null;
   createdAt: string;
+}
+
+export const LEAVE_REQUEST_STATUSES = [
+  "PENDING",
+  "APPROVED",
+  "REJECTED",
+  "CANCELLED",
+  "CANCELLATION_REQUESTED",
+] as const;
+
+export type LeaveRequestStatus = (typeof LEAVE_REQUEST_STATUSES)[number];
+
+export const LEAVE_ACCRUAL_FREQUENCIES = ["NONE", "MONTHLY", "QUARTERLY", "ANNUAL"] as const;
+
+export type LeaveAccrualFrequency = (typeof LEAVE_ACCRUAL_FREQUENCIES)[number];
+
+export const LEAVE_LEDGER_ENTRY_KINDS = [
+  "INITIAL_ENTITLEMENT",
+  "ACCRUAL",
+  "CARRY_FORWARD",
+  "ADJUSTMENT",
+  "RESERVATION",
+  "RESERVATION_RELEASE",
+  "CONSUMPTION",
+  "CONSUMPTION_RESTORE",
+] as const;
+
+export type LeaveLedgerEntryKind = (typeof LEAVE_LEDGER_ENTRY_KINDS)[number];
+
+export interface LeavePolicy {
+  id: string;
+  organizationId: string;
+  leaveTypeId: string;
+  initialEntitlement: number;
+  accrualFrequency: LeaveAccrualFrequency;
+  accrualAmount: number;
+  accrualDayOfMonth: number;
+  accrualEffectiveFrom: string | null;
+  prorateAccrual: boolean;
+  balancePeriodStartMonth: number;
+  balancePeriodStartDay: number;
+  carryForwardAllowance: number;
+  maxBalance: number | null;
+  prorateInitialEntitlement: boolean;
+  workingDays: number[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  leaveType?: {
+    id: string;
+    name: string;
+    isActive: boolean;
+    requiresBalance: boolean;
+  };
+}
+
+export interface LeaveType {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  isPaid: boolean;
+  requiresBalance: boolean;
+  allowNegativeBalance: boolean;
+  maxConsecutiveDays: number | null;
+  minNoticeDays: number;
+  requiresDocumentation: boolean;
+  allowApprovedCancellation: boolean;
+  cancellationRequiresApproval: boolean;
+  policy?: LeavePolicy;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const HOLIDAY_CATEGORIES = [
+  "PUBLIC",
+  "COMPANY",
+  "OPTIONAL",
+  "NATIONAL",
+  "STATE",
+  "GAZETTED",
+  "RESTRICTED",
+] as const;
+export type HolidayCategory = (typeof HOLIDAY_CATEGORIES)[number];
+
+export const GOVERNMENT_HOLIDAY_CATEGORIES = [
+  "NATIONAL",
+  "STATE",
+  "GAZETTED",
+  "RESTRICTED",
+] as const;
+export type GovernmentHolidayCategory = (typeof GOVERNMENT_HOLIDAY_CATEGORIES)[number];
+
+export type HolidaySource = "MANUAL" | "GOVERNMENT";
+
+export const HOLIDAY_DURATIONS = ["FULL_DAY", "FIRST_HALF", "SECOND_HALF"] as const;
+export type HolidayDuration = (typeof HOLIDAY_DURATIONS)[number];
+
+export interface LeaveHoliday {
+  id: string;
+  organizationId: string;
+  holidayDate: string;
+  name: string;
+  category: HolidayCategory;
+  duration: HolidayDuration;
+  description: string | null;
+  appliesToAll: boolean;
+  applicableEmployeeIds: string[];
+  departmentIds: string[];
+  locationIds: string[];
+  published: boolean;
+  source: HolidaySource;
+  sourceId: string | null;
+  sourceYear: number | null;
+  sourceName: string | null;
+  sourceUrl: string | null;
+  sourceReference: string | null;
+  jurisdictionCountry: string | null;
+  jurisdictionRegion: string | null;
+  importedAt: string | null;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
+  createdBy: { id: string; name: string; email: string } | null;
+  updatedBy: { id: string; name: string; email: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type Holiday = LeaveHoliday;
+
+export interface HolidaySettings {
+  id: string;
+  organizationId: string;
+  enabled: boolean;
+  optionalHolidaysEnabled: boolean;
+  allowHalfDayHolidays: boolean;
+  defaultCalendarYear: number | null;
+  defaultApplicability: "ORGANIZATION" | "EMPLOYEES";
+  workingDays: number[];
+  governmentCountry: string;
+  governmentRegion: string | null;
+  governmentYear: number | null;
+  updatedByUserId: string | null;
+  updatedBy: { id: string; name: string; email: string } | null;
+  updatedAt: string;
+}
+
+export interface HolidayCalendarResponse {
+  data: {
+    holidays: Holiday[];
+    settings: HolidaySettings;
+    year: number;
+    from: string;
+    to: string;
+    total: number;
+  };
+  serverTime: string;
+}
+
+export interface HolidayResponse {
+  data: { holiday: Holiday; serverTime: string };
+}
+
+export interface HolidaySettingsResponse {
+  data: { settings: HolidaySettings; serverTime: string };
+}
+
+export interface HolidayEmployee {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+}
+
+export interface HolidayEmployeesResponse {
+  data: HolidayEmployee[];
+  serverTime: string;
+}
+
+export interface GovernmentHolidaySourceInfo {
+  name: string;
+  issuer: string;
+  reference: string;
+  url: string;
+  retrievedOn: string;
+  verification: string;
+}
+
+export interface GovernmentJurisdictionYear {
+  year: number;
+  holidayCount: number;
+  source: GovernmentHolidaySourceInfo;
+}
+
+export interface GovernmentJurisdictionRegion {
+  code: string;
+  name: string;
+  years: GovernmentJurisdictionYear[];
+}
+
+export interface GovernmentCountry {
+  code: string;
+  name: string;
+  regions: GovernmentJurisdictionRegion[];
+}
+
+export interface GovernmentJurisdictionsResponse {
+  data: { countries: GovernmentCountry[] };
+  serverTime: string;
+}
+
+export type GovernmentPreviewStatus = "AVAILABLE" | "IMPORTED" | "DUPLICATE_NAME";
+
+export interface GovernmentPreviewEntry {
+  sourceId: string;
+  name: string;
+  holidayDate: string;
+  category: GovernmentHolidayCategory;
+  notes?: string;
+  status: GovernmentPreviewStatus;
+  existingHolidayId?: string;
+  existingCategory?: HolidayCategory;
+}
+
+export interface GovernmentPreview {
+  country: string;
+  countryName: string;
+  region: string;
+  regionName: string;
+  year: number;
+  availableYears: number[];
+  available: boolean;
+  source: GovernmentHolidaySourceInfo | null;
+  entries: GovernmentPreviewEntry[];
+  counts: { total: number; available: number; imported: number; duplicates: number };
+  message: string | null;
+}
+
+export interface GovernmentPreviewResponse {
+  data: GovernmentPreview;
+  serverTime: string;
+}
+
+export interface GovernmentImportResult {
+  country: string;
+  region: string;
+  year: number;
+  source: GovernmentHolidaySourceInfo;
+  imported: Holiday[];
+  skipped: Array<{
+    sourceId: string;
+    name: string;
+    reason: "ALREADY_IMPORTED" | "DUPLICATE_NAME";
+  }>;
+  published: false;
+}
+
+export interface GovernmentImportResponse {
+  data: GovernmentImportResult;
+  serverTime: string;
+}
+
+export interface HolidayPublicationResponse {
+  data: { published: boolean; changed: number; holidays: Holiday[] };
+  serverTime: string;
+}
+
+export interface LeaveChargedDay {
+  date: string;
+  units: number;
+}
+
+export interface LeaveRequest {
+  id: string;
+  organizationId: string;
+  employeeId: string;
+  leaveTypeId: string;
+  startDate: string;
+  endDate: string;
+  startHalfDay: boolean;
+  endHalfDay: boolean;
+  units: number;
+  chargedDates: LeaveChargedDay[];
+  balancePeriodStart: string | null;
+  reason: string;
+  documentationReference: string | null;
+  status: LeaveRequestStatus;
+  idempotencyKey: string | null;
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewedByUserId: string | null;
+  reviewerNote: string | null;
+  rejectionReason: string | null;
+  cancellationRequestedAt: string | null;
+  cancelledAt: string | null;
+  cancelledByUserId: string | null;
+  cancellationReason: string | null;
+  leaveType?: {
+    id: string;
+    name: string;
+    isPaid: boolean;
+    requiresBalance: boolean;
+  };
+  employee?: ScreenshotUserSummary;
+  reviewer?: ScreenshotUserSummary;
+  cancelledBy?: ScreenshotUserSummary;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeaveLedgerEntry {
+  id: string;
+  balanceId: string;
+  leaveRequestId: string | null;
+  kind: LeaveLedgerEntryKind;
+  accrualPeriod: string | null;
+  entitledDelta: number;
+  accruedDelta: number;
+  adjustmentDelta: number;
+  carriedForwardDelta: number;
+  reservedDelta: number;
+  consumedDelta: number;
+  availableDelta: number;
+  balanceAfter: number;
+  reason: string | null;
+  actorUserId: string | null;
+  metadata: Record<string, unknown> | null;
+  employee?: ScreenshotUserSummary;
+  leaveType?: { id: string; name: string };
+  actor?: ScreenshotUserSummary;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeaveBalance {
+  id: string;
+  organizationId: string;
+  employeeId: string;
+  leaveTypeId: string;
+  periodStart: string;
+  periodEnd: string;
+  entitledBalance: number;
+  accruedBalance: number;
+  adjustmentBalance: number;
+  carriedForwardBalance: number;
+  approvedConsumed: number;
+  pendingReserved: number;
+  availableBalance: number;
+  breakdown: {
+    entitled: number;
+    accrued: number;
+    adjustments: number;
+    carriedForward: number;
+    approvedConsumed: number;
+    pendingReserved: number;
+    available: number;
+  };
+  leaveType?: {
+    id: string;
+    name: string;
+    isPaid: boolean;
+    requiresBalance: boolean;
+  };
+  employee?: ScreenshotUserSummary;
+  ledger?: LeaveLedgerEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeaveTypesResponse {
+  data: LeaveType[];
+  serverTime: string;
+}
+
+export interface LeavePoliciesResponse {
+  data: LeavePolicy[];
+  serverTime: string;
+}
+
+export interface LeaveHolidaysResponse {
+  data: LeaveHoliday[];
+  serverTime: string;
+}
+
+export interface LeaveBalancesResponse extends Paginated<LeaveBalance> {
+  serverTime: string;
+}
+
+export interface LeaveEmployeeBalancesResponse {
+  data: {
+    employeeId: string;
+    timezone: string;
+    balances: LeaveBalance[];
+  };
+  serverTime: string;
+}
+
+export interface LeaveRequestsResponse extends Paginated<LeaveRequest> {
+  serverTime: string;
+}
+
+export interface LeaveRequestResponse {
+  data: { request: LeaveRequest };
+  serverTime: string;
+}
+
+export interface LeaveTypeResponse {
+  data: { leaveType: LeaveType };
+  serverTime: string;
+}
+
+export interface LeavePolicyResponse {
+  data: { policy: LeavePolicy };
+  serverTime: string;
+}
+
+export interface LeaveHolidayResponse {
+  data: { holiday: LeaveHoliday };
+  serverTime: string;
+}
+
+export interface LeaveBalanceResponse {
+  data: { balance: LeaveBalance };
+  serverTime: string;
+}
+
+export interface LeavePolicySnapshot {
+  initialEntitlement: number;
+  accrualFrequency: LeaveAccrualFrequency;
+  accrualAmount: number;
+  accrualDayOfMonth: number;
+  accrualEffectiveFrom: string | null;
+  prorateAccrual: boolean;
+  balancePeriodStartMonth: number;
+  balancePeriodStartDay: number;
+  carryForwardAllowance: number;
+  maxBalance: number | null;
+  prorateInitialEntitlement: boolean;
+  isActive: boolean;
+}
+
+export interface LeaveAdjustmentPreview {
+  employeeId: string;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: number;
+  availableBefore: number;
+  availableAfter: number;
+  adjustmentBefore: number;
+  adjustmentAfter: number;
+  balanceExists: boolean;
+}
+
+export interface LeaveAdjustmentPreviewResponse {
+  data: LeaveAdjustmentPreview;
+  serverTime: string;
+}
+
+export interface LeaveBulkAdjustmentPreviewItemSuccess {
+  employeeId: string;
+  ok: true;
+  preview: LeaveAdjustmentPreview;
+}
+
+export interface LeaveBulkAdjustmentFailure {
+  employeeId: string;
+  ok: false;
+  message: string;
+  code: string;
+}
+
+export type LeaveBulkAdjustmentPreviewItem =
+  | LeaveBulkAdjustmentPreviewItemSuccess
+  | LeaveBulkAdjustmentFailure;
+
+export interface LeaveBulkAdjustmentPreview {
+  summary: { requested: number; previewed: number; failed: number };
+  items: LeaveBulkAdjustmentPreviewItem[];
+}
+
+export interface LeaveBulkAdjustmentPreviewResponse {
+  data: LeaveBulkAdjustmentPreview;
+  serverTime: string;
+}
+
+export interface LeaveBulkAdjustmentSuccess {
+  employeeId: string;
+  ok: true;
+  balanceId: string;
+  periodStart: string;
+  periodEnd: string;
+  availableBalance: number;
+}
+
+export type LeaveBulkAdjustmentItem = LeaveBulkAdjustmentSuccess | LeaveBulkAdjustmentFailure;
+
+export interface LeaveBulkAdjustmentResult {
+  batchId: string;
+  summary: { requested: number; adjusted: number; failed: number };
+  items: LeaveBulkAdjustmentItem[];
+}
+
+export interface LeaveBulkAdjustmentResultResponse {
+  data: LeaveBulkAdjustmentResult;
+  serverTime: string;
+}
+
+export interface LeaveBackfillItem {
+  employee: ScreenshotUserSummary;
+  leaveType: { id: string; name: string };
+  periodStart: string;
+  periodEnd: string;
+  balanceExists: boolean;
+}
+
+export interface LeaveBackfillPreview {
+  asOf: string;
+  timezone: string;
+  summary: {
+    employees: number;
+    leaveTypes: number;
+    candidates: number;
+    missing: number;
+    existing: number;
+    unconfiguredTypes: number;
+  };
+  types: Array<{
+    id: string;
+    name: string;
+    periodStart: string;
+    periodEnd: string;
+    policy: LeavePolicySnapshot;
+  }>;
+  unconfiguredTypes: Array<{ id: string; name: string; reason: string }>;
+  items: LeaveBackfillItem[];
+  truncated: boolean;
+}
+
+export interface LeaveBackfillPreviewResponse {
+  data: LeaveBackfillPreview;
+  serverTime: string;
+}
+
+export interface LeaveBackfillEmployeeResult {
+  employeeId: string;
+  employeeName: string;
+  employeeEmail: string;
+  initialized: Array<{
+    leaveTypeId: string;
+    leaveTypeName: string;
+    balanceId: string;
+    availableBalance: number;
+  }>;
+  alreadyPresent: Array<{ leaveTypeId: string; leaveTypeName: string; balanceId: string }>;
+  failed: Array<{ leaveTypeId: string; leaveTypeName: string; message: string; code: string }>;
+}
+
+export interface LeaveBackfillResult {
+  batchId: string;
+  asOf: string;
+  timezone: string;
+  summary: {
+    employees: number;
+    initialized: number;
+    alreadyPresent: number;
+    failed: number;
+    unconfiguredTypes: number;
+  };
+  employees: LeaveBackfillEmployeeResult[];
+  unconfiguredTypes: Array<{ id: string; name: string; reason: string }>;
+}
+
+export interface LeaveBackfillResultResponse {
+  data: LeaveBackfillResult;
+  serverTime: string;
+}
+
+export interface LeaveReconciliationBalance {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  canonical: boolean;
+  zero: boolean;
+  ledgerEntries: number;
+  requests: number;
+  safeToRemove: boolean;
+  entitledBalance: number;
+  accruedBalance: number;
+  adjustmentBalance: number;
+  carriedForwardBalance: number;
+  approvedConsumed: number;
+  pendingReserved: number;
+  availableBalance: number;
+}
+
+export interface LeaveReconciliationGroup {
+  employeeId: string;
+  employeeName: string;
+  employeeEmail: string;
+  employeeActive: boolean;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  policy: LeavePolicySnapshot | null;
+  canonicalPeriodStart: string | null;
+  issues: string[];
+  balances: LeaveReconciliationBalance[];
+}
+
+export interface LeaveReconciliationReport {
+  generatedAt: string;
+  asOf: string;
+  timezone: string;
+  summary: {
+    balancesScanned: number;
+    groupsScanned: number;
+    groupsNeedingAttention: number;
+    overlappingGroups: number;
+    currentMissingGroups: number;
+    inactiveEmployeeGroups: number;
+    unconfiguredTypes: number;
+    unkeyedAccrualEntries: number;
+    safeToRemoveBalances: number;
+    manualReviewBalances: number;
+  };
+  unconfiguredTypes: Array<{ id: string; name: string; reason: string }>;
+  groups: LeaveReconciliationGroup[];
+}
+
+export interface LeaveReconciliationResponse {
+  data: LeaveReconciliationReport;
+  serverTime: string;
+}
+
+export interface LeaveReconciliationRepairResult {
+  batchId: string;
+  repaired: number;
+  failed: number;
+  results: Array<{ balanceId: string; repaired: boolean; message?: string; code?: string }>;
+}
+
+export interface LeaveReconciliationRepairResponse {
+  data: LeaveReconciliationRepairResult;
+  serverTime: string;
+}
+
+export interface LeaveAccrualPreviewItem {
+  employee: ScreenshotUserSummary;
+  leaveType: { id: string; name: string };
+  balanceExists: boolean;
+  periodStart: string;
+  periodEnd: string;
+  currentAvailable: number;
+  nextAccrualDate: string | null;
+  nextAccrualAmount: number;
+  projectedAvailable: number | null;
+  accrualDayOfMonth: number;
+  accrualFrequency: LeaveAccrualFrequency;
+  accruedThisPeriod: number;
+}
+
+export interface LeaveAccrualPreviewReport {
+  asOf: string;
+  timezone: string;
+  summary: {
+    employees: number;
+    leaveTypes: number;
+    previews: number;
+    missingBalances: number;
+  };
+  items: LeaveAccrualPreviewItem[];
+  truncated: boolean;
+}
+
+export interface LeaveAccrualPreviewResponse {
+  data: LeaveAccrualPreviewReport;
+  serverTime: string;
+}
+
+export interface LeaveLedgerResponse extends Paginated<LeaveLedgerEntry> {
+  serverTime: string;
+}
+
+export const ACTIVITY_CATEGORIES = [
+  "PRODUCTIVE",
+  "NEUTRAL",
+  "UNPRODUCTIVE",
+  "UNCLASSIFIED",
+] as const;
+
+export type ActivityCategory = (typeof ACTIVITY_CATEGORIES)[number];
+
+export interface TrackingSettings {
+  organizationId: string;
+  appTrackingEnabled: boolean;
+  idleDetectionEnabled: boolean;
+  idleThresholdMinutes: number;
+  productivityClassificationEnabled: boolean;
+  activityRetentionDays: number;
+  policyVersion: number;
+  policyUpdatedAt: string;
+  updatedAt: string;
+}
+
+export interface TrackingSettingsResponse {
+  data: { settings: TrackingSettings };
+  serverTime: string;
+}
+
+export interface ActivityPolicySnapshot {
+  appTrackingEnabled: boolean;
+  idleDetectionEnabled: boolean;
+  idleThresholdMinutes: number;
+  productivityClassificationEnabled: boolean;
+  activityRetentionDays: number;
+  policyVersion: number;
+  policyUpdatedAt: string;
+}
+
+export interface ActivityTotals {
+  sessionCount: number;
+  trackedSeconds: number;
+  workingSeconds: number;
+  breakSeconds: number;
+  idleSeconds: number;
+  activeSeconds: number;
+  applicationSeconds: number;
+  unaccountedActiveSeconds: number;
+  activityCoveragePercent: number;
+  productiveSeconds: number;
+  neutralSeconds: number;
+  unproductiveSeconds: number;
+  unclassifiedSeconds: number;
+  productivePercentOfActive: number | null;
+  unclassifiedPercentOfActive: number | null;
+  hasActivityData: boolean;
+  hasIdleData: boolean;
+}
+
+export interface ActivityDayTotals extends ActivityTotals {
+  date: string;
+}
+
+export interface ActivityCategoryTotal {
+  category: ActivityCategory;
+  seconds: number;
+  percentOfActiveTime: number;
+}
+
+export interface ActivityApplicationUsage {
+  applicationIdentifier: string;
+  applicationName: string;
+  category: ActivityCategory;
+  classified: boolean;
+  totalSeconds: number;
+  percentageOfActiveTime: number;
+  eventCount: number;
+  sessionCount: number;
+}
+
+export interface ActivitySummary {
+  employeeId: string;
+  from: string;
+  to: string;
+  timezone: string;
+  policy: ActivityPolicySnapshot;
+  totals: ActivityTotals;
+  categories: ActivityCategoryTotal[];
+  applications: ActivityApplicationUsage[];
+  days: ActivityDayTotals[];
+  disclaimer: string;
+}
+
+export interface ActivitySummaryResponse {
+  data: ActivitySummary;
+}
+
+export interface ActivityOverviewRow extends ActivityTotals {
+  employee: PublicUser;
+  topApplications: Array<{
+    applicationIdentifier: string;
+    applicationName: string;
+    category: ActivityCategory;
+    totalSeconds: number;
+  }>;
+}
+
+export interface ActivityOverviewAggregate {
+  trackedSeconds: number;
+  workingSeconds: number;
+  breakSeconds: number;
+  idleSeconds: number;
+  activeSeconds: number;
+  applicationSeconds: number;
+  productiveSeconds: number;
+  neutralSeconds: number;
+  unproductiveSeconds: number;
+  unclassifiedSeconds: number;
+  activityCoveragePercent: number;
+  productivePercentOfActive: number | null;
+  unclassifiedPercentOfActive: number | null;
+}
+
+export interface ActivityOverviewResponse extends Paginated<ActivityOverviewRow> {
+  from: string;
+  to: string;
+  timezone: string;
+  policy: ActivityPolicySnapshot;
+  totals: ActivityOverviewAggregate;
+  disclaimer: string;
+}
+
+export interface ApplicationClassificationRow {
+  classificationId: string | null;
+  applicationIdentifier: string;
+  applicationName: string;
+  category: ActivityCategory;
+  classified: boolean;
+  classifiedByUserId: string | null;
+  notes: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ApplicationClassificationsResponse
+  extends Paginated<ApplicationClassificationRow> {
+  summary: { total: number; classified: number; unclassified: number };
+}
+
+export interface ApplicationClassificationRecord {
+  id: string;
+  organizationId: string;
+  applicationIdentifier: string;
+  applicationName: string;
+  category: ActivityCategory;
+  classified: boolean;
+  classifiedByUserId: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationClassificationResponse {
+  data: { classification: ApplicationClassificationRecord };
+  serverTime: string;
 }

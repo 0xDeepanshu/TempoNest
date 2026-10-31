@@ -2,11 +2,15 @@ import type { Request } from 'express';
 import { Op } from 'sequelize';
 import { config } from '../../config/env';
 import { logger } from '../../config/logger';
-import { Membership, Organization, Session, User } from '../../database';
+import { CustomRole, Membership, Organization, Session, User } from '../../database';
 import { generateOpaqueToken, hashOpaqueToken } from '../../utils/crypto';
 import { AppError } from '../../utils/errors';
 import { getClientIp, getUserAgent } from '../../utils/pagination';
 import { toMembershipSummary } from '../memberships/membership.mapper';
+import {
+  getManagerRoleOverrides,
+  toManagerRoleOverrideAccess,
+} from '../roles/managerRole.service';
 import type { User as UserModel } from '../users/user.model';
 import type { Session as SessionModel } from './session.model';
 
@@ -229,6 +233,7 @@ export async function getUserMemberships(userId: string) {
         required: true,
         where: { deletedAt: null },
       },
+      { model: CustomRole, as: 'customRole', required: false },
     ],
     order: [
       ['createdAt', 'ASC'],
@@ -236,5 +241,15 @@ export async function getUserMemberships(userId: string) {
     ],
   });
 
-  return memberships.map(toMembershipSummary);
+  const managerOrganizationIds = memberships
+    .filter((membership) => membership.role === 'MANAGER' && !membership.customRoleId)
+    .map((membership) => membership.organizationId);
+  const overrides = await getManagerRoleOverrides(managerOrganizationIds);
+
+  return memberships.map((membership) =>
+    toMembershipSummary(
+      membership,
+      toManagerRoleOverrideAccess(overrides.get(membership.organizationId)),
+    ),
+  );
 }

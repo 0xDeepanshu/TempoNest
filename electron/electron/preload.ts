@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  ActivityBridge,
+  ActivityTrackingStatus,
   AppBridge,
   AppInfo,
   AuthBridge,
@@ -62,6 +64,11 @@ const monitoring: MonitoringBridge = {
   onStatusChanged: (listener) => subscribe('monitoring:statusChanged', listener)
 }
 
+const activity: ActivityBridge = {
+  getStatus: () => invoke<ActivityTrackingStatus>('activity:status'),
+  onStatusChanged: (listener) => subscribe('activity:statusChanged', listener)
+}
+
 const bridge: AppBridge = {
   platform: process.platform,
   versions: {
@@ -72,7 +79,8 @@ const bridge: AppBridge = {
   getAppInfo: () => ipcRenderer.invoke('app:info') as Promise<AppInfo>,
   auth,
   tracking,
-  monitoring
+  monitoring,
+  activity
 }
 
 contextBridge.exposeInMainWorld('temponest', bridge)

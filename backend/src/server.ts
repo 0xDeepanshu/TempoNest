@@ -10,6 +10,8 @@ import { agentHub } from './realtime/agentHub';
 import { startScreenshotMaintenance } from './modules/screenshots/screenshot.maintenance';
 import { startScreenLiveMaintenance } from './modules/screenshots/screenLive.maintenance';
 import { startAttendanceLocationMaintenance } from './modules/attendance/attendanceLocation.maintenance';
+import { startLeaveAccrualMaintenance } from './modules/leave/leaveAccrual.maintenance';
+import { startActivityMaintenance } from './modules/activity/activity.maintenance';
 
 let shuttingDown = false;
 
@@ -21,6 +23,8 @@ async function shutdown(
   relay?: ScreenLiveRelay,
   stopLiveMaintenance?: () => void,
   stopLocationMaintenance?: () => void,
+  stopLeaveAccrualMaintenance?: () => void,
+  stopActivityMaintenance?: () => void,
 ): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -29,6 +33,8 @@ async function shutdown(
   stopMaintenance?.();
   stopLiveMaintenance?.();
   stopLocationMaintenance?.();
+  stopLeaveAccrualMaintenance?.();
+  stopActivityMaintenance?.();
   agentHub.closeAll(1001, 'Server shutting down');
   wss?.close();
   if (relay) {
@@ -79,6 +85,8 @@ async function main(): Promise<void> {
   const stopMaintenance = startScreenshotMaintenance();
   const stopLiveMaintenance = startScreenLiveMaintenance();
   const stopLocationMaintenance = startAttendanceLocationMaintenance();
+  const stopLeaveAccrualMaintenance = startLeaveAccrualMaintenance();
+  const stopActivityMaintenance = startActivityMaintenance();
 
   // Both realtime endpoints above ignore paths they do not own. Reject any
   // other upgrade request so unhandled sockets do not linger.
@@ -108,6 +116,8 @@ async function main(): Promise<void> {
       relay,
       stopLiveMaintenance,
       stopLocationMaintenance,
+      stopLeaveAccrualMaintenance,
+      stopActivityMaintenance,
     ).then(() => process.exit(process.exitCode ?? 0));
   };
 
@@ -128,6 +138,8 @@ async function main(): Promise<void> {
       relay,
       stopLiveMaintenance,
       stopLocationMaintenance,
+      stopLeaveAccrualMaintenance,
+      stopActivityMaintenance,
     ).then(() => process.exit(1));
   });
 }

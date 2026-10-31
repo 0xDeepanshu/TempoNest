@@ -85,7 +85,7 @@ describe('organizations', () => {
     const invite = await ownerB.agent
       .post(`${API}/organizations/${ownerA.organization.id}/invitations`)
       .set('x-csrf-token', ownerB.csrf)
-      .send({ email: uniqueEmail(), role: 'EMPLOYEE' });
+      .send({ name: 'Invited Person', email: uniqueEmail(), role: 'EMPLOYEE' });
     expect(invite.status).toBe(404);
 
     const roleChange = await ownerB.agent
@@ -154,7 +154,7 @@ describe('membership management and role permissions', () => {
     const managerInvite = await manager.agent
       .post(`${API}/organizations/${owner.organization.id}/invitations`)
       .set('x-csrf-token', manager.csrf)
-      .send({ email: uniqueEmail(), role: 'EMPLOYEE' });
+      .send({ name: 'Invited Person', email: uniqueEmail(), role: 'EMPLOYEE' });
     expect(managerInvite.status).toBe(403);
     expect(managerInvite.body.error.code).toBe('PERMISSION_DENIED');
 
@@ -178,13 +178,13 @@ describe('membership management and role permissions', () => {
     const adminInvitesEmployee = await admin.agent
       .post(`${API}/organizations/${owner.organization.id}/invitations`)
       .set('x-csrf-token', admin.csrf)
-      .send({ email: uniqueEmail(), role: 'EMPLOYEE' });
+      .send({ name: 'Invited Person', email: uniqueEmail(), role: 'EMPLOYEE' });
     expect(adminInvitesEmployee.status).toBe(201);
 
     const adminInvitesAdmin = await admin.agent
       .post(`${API}/organizations/${owner.organization.id}/invitations`)
       .set('x-csrf-token', admin.csrf)
-      .send({ email: uniqueEmail(), role: 'ADMIN' });
+      .send({ name: 'Admin Target', email: uniqueEmail(), role: 'ADMIN' });
     expect(adminInvitesAdmin.status).toBe(403);
     expect(adminInvitesAdmin.body.error.code).toBe('ROLE_ASSIGNMENT_FORBIDDEN');
 

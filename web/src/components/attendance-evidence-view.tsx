@@ -163,10 +163,9 @@ export function AttendanceEvidenceView() {
     <AttendanceEvidenceContent
       key={`${organization.id}:${organization.timezone}`}
       organization={organization}
-      canViewLocationHistory={hasPermission(
-        membership?.role,
-        "attendance:location:read",
-      )}
+      canViewLocationHistory={hasPermission(membership, "attendance:location:read")}
+      canViewEvidence={hasPermission(membership, "time:read")}
+      canBrowseMembers={hasPermission(membership, "member:read")}
     />
   );
 }
@@ -174,9 +173,13 @@ export function AttendanceEvidenceView() {
 function AttendanceEvidenceContent({
   organization,
   canViewLocationHistory,
+  canViewEvidence,
+  canBrowseMembers,
 }: {
   organization: Organization;
   canViewLocationHistory: boolean;
+  canViewEvidence: boolean;
+  canBrowseMembers: boolean;
 }) {
   const organizationId = organization.id;
   const timezone = organization.timezone;
@@ -254,19 +257,28 @@ function AttendanceEvidenceContent({
       </Alert>
 
       <Card>
-        <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
-          <Field label="Employee" htmlFor="attendance-employee">
-            <EmployeePicker
-              id="attendance-employee"
-              organizationId={organizationId}
-              value={employeeId}
-              onChange={(nextEmployeeId) => {
-                setEmployeeId(nextEmployeeId);
-                setPage(1);
-              }}
-              placeholder="All employees"
-            />
-          </Field>
+        <div
+          className={`grid gap-3 p-4 sm:grid-cols-2 ${
+            canBrowseMembers
+              ? "xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+              : "xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+          } xl:items-end`}
+        >
+          {canBrowseMembers ? (
+            <Field label="Employee" htmlFor="attendance-employee">
+              <EmployeePicker
+                id="attendance-employee"
+                organizationId={organizationId}
+                value={employeeId}
+                onChange={(nextEmployeeId) => {
+                  setEmployeeId(nextEmployeeId);
+                  setPage(1);
+                }}
+                placeholder="All employees"
+                canBrowse={canBrowseMembers}
+              />
+            </Field>
+          ) : null}
           <Field label="Work mode" htmlFor="attendance-mode">
             <Select
               id="attendance-mode"
@@ -469,6 +481,7 @@ function AttendanceEvidenceContent({
           organizationId={organizationId}
           timezone={timezone}
           canViewLocationHistory={canViewLocationHistory}
+          canViewEvidence={canViewEvidence}
           onClose={closeDialog}
         />
       ) : null}
@@ -539,12 +552,14 @@ function AttendanceDetailDialog({
   organizationId,
   timezone,
   canViewLocationHistory,
+  canViewEvidence,
   onClose,
 }: {
   checkIn: AttendanceCheckIn;
   organizationId: string;
   timezone: string;
   canViewLocationHistory: boolean;
+  canViewEvidence: boolean;
   onClose: () => void;
 }) {
   const titleId = useId();
@@ -721,26 +736,33 @@ function AttendanceDetailDialog({
             </DetailSection>
 
             <DetailSection title="Private evidence">
-              <div className="grid gap-3 md:grid-cols-2">
-                <EvidencePhotoPanel
-                  title="Selfie"
-                  description="Captured by the employee at check-in."
-                  evidence={checkIn.selfie}
-                  required={selfieRequired}
-                  organizationId={organizationId}
-                  timezone={timezone}
-                  employeeName={employeeName}
-                />
-                <EvidencePhotoPanel
-                  title="Site photo"
-                  description="Optional photo from older check-ins. New check-ins capture only a selfie and location."
-                  evidence={checkIn.sitePhoto}
-                  required={false}
-                  organizationId={organizationId}
-                  timezone={timezone}
-                  employeeName={employeeName}
-                />
-              </div>
+              {!canViewEvidence ? (
+                <Alert tone="warning" title="Evidence access required">
+                  Opening private photos requires attendance read access. Ask an owner or
+                  administrator if you need to review check-in evidence.
+                </Alert>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <EvidencePhotoPanel
+                    title="Selfie"
+                    description="Captured by the employee at check-in."
+                    evidence={checkIn.selfie}
+                    required={selfieRequired}
+                    organizationId={organizationId}
+                    timezone={timezone}
+                    employeeName={employeeName}
+                  />
+                  <EvidencePhotoPanel
+                    title="Site photo"
+                    description="Optional photo from older check-ins. New check-ins capture only a selfie and location."
+                    evidence={checkIn.sitePhoto}
+                    required={false}
+                    organizationId={organizationId}
+                    timezone={timezone}
+                    employeeName={employeeName}
+                  />
+                </div>
+              )}
             </DetailSection>
 
             <DetailSection title="Captured location">

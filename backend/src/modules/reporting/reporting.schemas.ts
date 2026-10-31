@@ -66,6 +66,23 @@ export const applicationTimelineQuerySchema = dateRangeSchema(7).and(
   }),
 );
 
+export const activitySummaryQuerySchema = dateRangeSchema(92).and(
+  z.object({
+    // Optional for employees (always self) and for admins reading their own
+    // summary. Supplying another employee requires report:read.
+    employeeId: z.string().uuid().optional(),
+  }),
+);
+
+export const activityOverviewQuerySchema = dateRangeSchema(31).and(
+  paginationSchema.extend({
+    employeeId: z.string().uuid().optional(),
+  }),
+);
+
+export type ActivitySummaryQuery = z.infer<typeof activitySummaryQuerySchema>;
+export type ActivityOverviewQuery = z.infer<typeof activityOverviewQuerySchema>;
+
 export type TrackingStatusQuery = z.infer<typeof trackingStatusQuerySchema>;
 export type SessionReportQuery = z.infer<typeof sessionReportQuerySchema>;
 export type DailyReportQuery = z.infer<typeof dailyReportQuerySchema>;

@@ -288,7 +288,7 @@ export function AttendanceView({ timezone }: { timezone: string }) {
     () => groupSessionsByDay(sessions.data?.data ?? [], timezone),
     [sessions.data, timezone],
   );
-  const canSeeTeam = hasPermission(membership?.role, "report:read");
+  const canSeeTeam = hasPermission(membership, "report:read");
 
   return (
     <div className="space-y-5">

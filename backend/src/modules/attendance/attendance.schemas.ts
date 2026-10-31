@@ -34,6 +34,12 @@ export const attendanceSummaryQuerySchema = dateRangeSchema(366).and(
   }),
 );
 
+export const attendanceDayStatusQuerySchema = dateRangeSchema(366).and(
+  z.object({
+    employeeId: z.string().uuid().optional(),
+  }),
+);
+
 export const attendanceCorrectionIdParamsSchema = z.object({
   organizationId: z.string().uuid('Organization ID must be a valid UUID'),
   correctionId: z.string().uuid('Correction ID must be a valid UUID'),
@@ -248,6 +254,7 @@ export const attendanceLocationHistoryQuerySchema = z.object({
 });
 
 export type AttendanceSummaryQuery = z.infer<typeof attendanceSummaryQuerySchema>;
+export type AttendanceDayStatusQuery = z.infer<typeof attendanceDayStatusQuerySchema>;
 export type AttendanceCorrectionListQuery = z.infer<typeof attendanceCorrectionListQuerySchema>;
 export type AttendanceCheckInListQuery = z.infer<typeof attendanceCheckInListQuerySchema>;
 export type CreateAttendanceCorrectionInput = z.infer<typeof createAttendanceCorrectionSchema>;

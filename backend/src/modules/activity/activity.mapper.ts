@@ -9,6 +9,7 @@ export function toApplicationActivitySummary(activity: ApplicationActivity) {
     desktopAgentId: activity.desktopAgentId,
     applicationIdentifier: activity.applicationIdentifier,
     applicationName: activity.applicationName,
+    platform: activity.platform,
     startedAt: activity.startedAt,
     endedAt: activity.endedAt,
     durationSeconds: activity.durationSeconds,

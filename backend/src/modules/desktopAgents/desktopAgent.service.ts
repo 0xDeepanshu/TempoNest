@@ -5,7 +5,11 @@ import { config } from '../../config/env';
 import { generateOpaqueToken, hashOpaqueToken, safeEqualStrings } from '../../utils/crypto';
 import { AppError } from '../../utils/errors';
 import { paginate } from '../../utils/pagination';
-import { hasPermission } from '../memberships/permissions';
+import {
+  hasPermission,
+  isSelfScoped,
+  type PermissionSubject,
+} from '../memberships/permissions';
 import { serializeByKey } from '../../utils/serialize';
 import { agentHub } from '../../realtime/agentHub';
 import { terminateActiveScreenLiveSessionsForAgent } from '../screenshots/screenLive.service';
@@ -13,6 +17,7 @@ import { logger } from '../../config/logger';
 import { toDesktopAgentSummary } from './desktopAgent.mapper';
 import type { RegisterAgentInput } from './desktopAgent.schemas';
 import type { DesktopAgent as DesktopAgentModel } from './desktopAgent.model';
+import type { Role } from '../memberships/roles';
 
 const AGENT_KEY_PREFIX = 'tna_';
 
@@ -168,12 +173,12 @@ export async function requireDesktopAgent(
 export async function listDesktopAgents(
   organizationId: string,
   actorUserId: string,
-  actorRole: Parameters<typeof hasPermission>[0],
+  actorRole: Role | PermissionSubject,
   query: { page: number; limit: number; userId?: string; status: 'ACTIVE' | 'REVOKED' | 'ALL' },
 ) {
   const where: Record<string, unknown> = { organizationId };
 
-  if (actorRole === 'EMPLOYEE') {
+  if (isSelfScoped(actorRole)) {
     where.userId = actorUserId;
   } else if (query.userId) {
     where.userId = query.userId;
@@ -205,7 +210,7 @@ export async function listDesktopAgents(
 export async function revokeDesktopAgent(
   agentId: string,
   organizationId: string,
-  actor: { userId: string; role: Parameters<typeof hasPermission>[0] },
+  actor: { userId: string; role: Role | PermissionSubject },
 ): Promise<{ agent: DesktopAgentModel; stoppedSessionIds: string[]; alreadyRevoked: boolean }> {
   const agent = await DesktopAgent.findOne({ where: { id: agentId, organizationId } });
   if (!agent) {

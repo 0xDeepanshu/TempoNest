@@ -78,6 +78,8 @@ Collection (paginated):
 | `time:read` | ✅ | ✅ | ✅ | ✅ |
 | `time:write` | ✅ | ✅ | ✅ | ✅ |
 | `report:read` | ✅ | ✅ | ✅ | — |
+| `activity:policy` | ✅ | ✅ | — | — |
+| `classification:manage` | ✅ | ✅ | — | — |
 | `attendance:location:read` | ✅ | ✅ | — | — |
 | `correction:review` | ✅ | ✅ | ✅ | — |
 | `agent:read` | ✅ | ✅ | ✅ | ✅ |
@@ -86,8 +88,17 @@ Collection (paginated):
 | `screenshot:request` | ✅ | ✅ | — | — |
 | `screenshot:manage` | ✅ | ✅ | — | — |
 | `screenshot:policy` | ✅ | ✅ | — | — |
+| `leave:read` | ✅ | ✅ | ✅ | ✅ |
+| `leave:write` | ✅ | ✅ | ✅ | ✅ |
+| `leave:approve` | ✅ | ✅ | — | — |
+| `leave:manage` | ✅ | ✅ | — | — |
+| `holiday:view` | ✅ | ✅ | ✅ | ✅ |
+| `holiday:create` | ✅ | ✅ | — | — |
+| `holiday:update` | ✅ | ✅ | — | — |
+| `holiday:delete` | ✅ | ✅ | — | — |
+| `holiday:settings:manage` | ✅ | ✅ | — | — |
 
-Additional constraints: no self role change/suspension/removal; `ADMIN` may manage only `MANAGER`/`EMPLOYEE`; only `OWNER` may administer `OWNER`/`ADMIN`; `OWNER` is not invitable; at least one active owner is required. Employees are always forced to their own employee ID for time/device lists, attendance summaries/corrections, current check-in, and evidence they created. Attendance correction review requires `correction:review`; self-review is always rejected. Attendance evidence access requires `time:read` and is limited to the owning employee or an organization reviewer. Viewing another employee's ON_SITE location history requires the dedicated `attendance:location:read` permission, which defaults to OWNER/ADMIN only and is intentionally not implied by `report:read`. New mobile check-in/evidence-write routes additionally require a registered `MOBILE` device. Revoking a device is additionally allowed for its owner even without `agent:revoke`. Screenshot routes additionally enforce the organization’s policy role lists: route permissions are necessary but not sufficient, so an organization can narrow access but cannot grant it to a role that lacks the underlying permission.
+Additional constraints: no self role change/suspension/removal; `ADMIN` may manage only `MANAGER`/`EMPLOYEE`; only `OWNER` may administer `OWNER`/`ADMIN`; `OWNER` is not invitable; at least one active owner is required. Employees are always forced to their own employee ID for time/device lists, attendance summaries/corrections, current check-in, evidence they created, and leave requests/balances. Attendance correction review requires `correction:review`; self-review is always rejected. Leave approval requires `leave:approve` and self-approval is always rejected; leave catalog/policy administration and balance adjustments require `leave:manage`. Holiday calendar administration is governed by the separate `holiday:*` permissions: every active member may read the calendar with `holiday:view`, while create/update/delete and settings management default to OWNER/ADMIN only. Managers deliberately receive `holiday:view` but not holiday management, and custom roles can be granted any holiday permission individually. Attendance evidence access requires `time:read` and is limited to the owning employee or an organization reviewer. Viewing another employee's ON_SITE location history requires the dedicated `attendance:location:read` permission, which defaults to OWNER/ADMIN only and is intentionally not implied by `report:read`. New mobile check-in/evidence-write routes additionally require a registered `MOBILE` device. Revoking a device is additionally allowed for its owner even without `agent:revoke`. Screenshot routes additionally enforce the organization’s policy role lists: route permissions are necessary but not sufficient, so an organization can narrow access but cannot grant it to a role that lacks the underlying permission. Desktop tracking settings (`activity:policy`) and application classification administration (`classification:manage`) are OWNER/ADMIN only; `GET /activity/settings` requires `time:read` so every employee and desktop agent can read the effective policy, and `GET /application-classifications` requires `report:read`.
 
 Non-members receive `404 ORGANIZATION_NOT_FOUND` for organization-scoped routes.
 
@@ -183,11 +194,49 @@ Desktop success (`200`) sets **no cookies** and additionally returns:
 
 Mobile success (`200`) uses the same body-token contract as desktop: it sets **no cookies**, returns a `client` value of `"mobile"`, and includes `accessToken`, `refreshToken`, and `tokenType: "Bearer"`.
 
-Errors: `401 INVALID_CREDENTIALS`, `403 ACCOUNT_DISABLED`, `429 RATE_LIMITED`.
+Errors: `401 INVALID_CREDENTIALS`, `403 ACCOUNT_DISABLED`, `429 ACCOUNT_LOCKED`, `429 RATE_LIMITED`.
+
+Per-account throttling: after `LOGIN_MAX_FAILED_ATTEMPTS` consecutive failures the account is locked for `LOGIN_LOCKOUT_SECONDS`. The lock state is only revealed after a correct password, so unknown addresses still return `401 INVALID_CREDENTIALS`. A successful login clears the counters. Password reset also clears the lock.
 
 Electron guidance: keep the refresh token encrypted via `safeStorage` in the main process, keep the access token in main-process memory, and never store either in renderer `localStorage`.
 
 Mobile guidance: store the refresh token in the OS Keychain/Keystore, keep the access token in memory where possible, send it only in the `Authorization` header, and never write tokens to logs or URLs. Authentication identifies the employee only; time-tracking writes still require a separately registered device (see [Desktop agents](#desktop-agents)).
+
+### `POST /auth/forgot-password`
+
+Public, rate-limited, and safe against account enumeration: the response is identical whether or not the address exists.
+
+```json
+{ "email": "ada@example.com" }
+```
+
+`202`
+
+```json
+{ "data": { "message": "If an account exists for that email address, a reset link is on its way." } }
+```
+
+If an `ACTIVE` account matches, the server sends a single-use link to `${WEB_APP_URL}/reset-password?token=…`. Only an HMAC hash of the token is stored. Issuing a new link invalidates any previous unused link. Links expire after `PASSWORD_RESET_TTL_SECONDS` (default 30 minutes). Disabled accounts receive no link.
+
+Errors: `422 VALIDATION_ERROR`, `429 RATE_LIMITED`.
+
+### `POST /auth/reset-password`
+
+Public, rate-limited.
+
+```json
+{ "token": "<token from the reset link>", "password": "at-least-12-characters" }
+```
+
+`200`
+
+```json
+{ "data": { "message": "Your password has been updated. Sign in with your new password." } }
+```
+
+The token is claimed conditionally inside a transaction, so concurrent or repeated use succeeds only once. A successful reset stores a fresh Argon2id hash, clears failed-login counters and any lockout, and revokes every active session for the account. Tokens are never logged.
+
+Errors: `400 PASSWORD_RESET_INVALID` (unknown, expired, or already used), `403 ACCOUNT_DISABLED`, `422 VALIDATION_ERROR`, `429 RATE_LIMITED`.
 
 ### `POST /auth/refresh`
 
@@ -418,14 +467,20 @@ Requires `member:remove`. Soft-removes the membership (`status=REMOVED`, `remove
 
 ## Invitations
 
-Invitation tokens are 256-bit random values, HMAC-hashed at rest, single-use, and expiring (default 7 days).
+Invitation tokens are 256-bit random values, HMAC-hashed at rest, single-use, and expiring (default 7 days). The invitation stores the invitee's name, the invited e-mail address, the granted role (or onboarding-eligible custom role), and the inviter.
 
 ### `POST /organizations/:organizationId/invitations`
 
-Requires `member:invite`. Roles: `ADMIN`, `MANAGER`, `EMPLOYEE`. `OWNER` is rejected with `422`.
+Requires `member:invite`. Roles: `ADMIN`, `MANAGER`, `EMPLOYEE`. `OWNER` is rejected with `422`. `name` is required (2–120 characters).
 
 ```json
-{ "email": "newhire@example.com", "role": "EMPLOYEE" }
+{ "name": "Ada Lovelace", "email": "newhire@example.com", "role": "EMPLOYEE" }
+```
+
+Custom role:
+
+```json
+{ "name": "Ada Lovelace", "email": "newhire@example.com", "role": "EMPLOYEE", "customRoleId": "…" }
 ```
 
 `201`
@@ -436,27 +491,36 @@ Requires `member:invite`. Roles: `ADMIN`, `MANAGER`, `EMPLOYEE`. `OWNER` is reje
     "invitation": {
       "id": "…",
       "organizationId": "…",
+      "name": "Ada Lovelace",
       "email": "newhire@example.com",
       "role": "EMPLOYEE",
+      "customRoleId": null,
       "expiresAt": "2026-10-29T00:00:00.000Z",
       "acceptedAt": null,
       "revokedAt": null,
       "createdAt": "…",
-      "invitedBy": { "id": "…", "name": "Ada Lovelace", "email": "ada@example.com" }
+      "invitedBy": { "id": "…", "name": "Owner Name", "email": "owner@example.com" }
     },
     "token": "one-time raw invitation token",
-    "expiresAt": "2026-10-29T00:00:00.000Z"
+    "expiresAt": "2026-10-29T00:00:00.000Z",
+    "emailSent": true
   }
 }
 ```
 
-`token` is returned only at creation, only to the authorized inviter, so it can be delivered out of band until e-mail delivery exists. It is never stored in plaintext or logged.
+The server e-mails an acceptance link to the invited address (`${WEB_APP_URL}/invitations/accept?token=…`). `emailSent` reports whether delivery succeeded; a failed send does not roll back the invitation. The `token` is also returned once to the authorized inviter as a manual delivery fallback. It is never stored in plaintext or logged.
 
 Notes:
 
 - Re-inviting the same e-mail revokes the previous live invitation and rotates the token.
 - Existing `ACTIVE`/`SUSPENDED` members cannot be invited (`409`).
 - Previous `ADMIN` authority rules apply (only an `OWNER` may invite an `ADMIN`).
+
+### `POST /organizations/:organizationId/invitations/:invitationId/resend`
+
+Requires `member:invite` or `member:onboard`. Rotates the token, extends the expiry, re-sends the e-mail, and returns the same shape as creation (including a fresh `token` and `emailSent`). Onboarding-only actors may resend only invitations they created.
+
+Errors: `404 INVITATION_NOT_FOUND`, `409 INVITATION_ALREADY_ACCEPTED`, `410 INVITATION_REVOKED`.
 
 ### `GET /organizations/:organizationId/invitations`
 
@@ -474,7 +538,7 @@ Accepted invitations cannot be revoked (`409 INVITATION_ALREADY_ACCEPTED`); revo
 
 ### `POST /invitations/preview`
 
-Public (rate-limited). Reveals only organization name/slug, invited e-mail, role, and expiry.
+Public (rate-limited). The caller proves possession of the e-mailed token. Reveals the organization name/slug, invitee name and e-mail, role/custom role, expiry, and whether an account already exists. If an authenticated session is present, also reports its e-mail and whether it matches the invited account.
 
 ```json
 { "token": "…" }
@@ -486,20 +550,33 @@ Public (rate-limited). Reveals only organization name/slug, invited e-mail, role
 {
   "data": {
     "invitation": {
-      "organization": { "id": "…", "name": "Acme Corp", "slug": "acme-corp", "status": "ACTIVE", "createdAt": "…", "updatedAt": "…" },
+      "organization": { "id": "…", "name": "Acme Corp", "slug": "acme-corp", "status": "ACTIVE", "timezone": "UTC", "createdAt": "…", "updatedAt": "…" },
+      "name": "Ada Lovelace",
       "email": "newhire@example.com",
       "role": "EMPLOYEE",
-      "expiresAt": "…"
+      "customRole": null,
+      "expiresAt": "…",
+      "existingAccount": false,
+      "signedInEmail": null,
+      "signedInMatches": false
     }
   }
 }
 ```
 
-Errors: `400 INVITATION_INVALID`, `410 INVITATION_EXPIRED`, `410 INVITATION_REVOKED`, `410 INVITATION_ALREADY_USED`.
+Errors: `400 INVITATION_INVALID`, `403 ORGANIZATION_SUSPENDED`, `410 INVITATION_EXPIRED`, `410 INVITATION_REVOKED`, `410 INVITATION_ALREADY_USED`.
 
 ### `POST /invitations/accept`
 
-Requires authentication. The signed-in account's normalized e-mail must match the invitation e-mail. The invitation role is applied server-side; clients cannot supply a role.
+The invitation link is sufficient proof of e-mail ownership. A first-time invitee supplies a password and the server creates the account, membership, and a browser session in one flow. An existing account must already be signed in as the invited address; its password is never changed.
+
+New account:
+
+```json
+{ "token": "…", "password": "at-least-12-characters" }
+```
+
+Existing, signed-in account:
 
 ```json
 { "token": "…" }
@@ -519,12 +596,19 @@ Requires authentication. The signed-in account's normalized e-mail must match th
       "createdAt": "…",
       "updatedAt": "…"
     },
-    "organization": { "id": "…", "name": "Acme Corp", "slug": "acme-corp", "status": "ACTIVE", "createdAt": "…", "updatedAt": "…" }
+    "organization": { "id": "…", "name": "Acme Corp", "slug": "acme-corp", "status": "ACTIVE", "createdAt": "…", "updatedAt": "…" },
+    "user": { "id": "…", "name": "Ada Lovelace", "email": "newhire@example.com", "status": "ACTIVE" },
+    "accountCreated": true,
+    "session": { "id": "…", "transport": "cookie", "csrfToken": "…", "accessExpiresAt": "…", "refreshExpiresAt": "…" }
   }
 }
 ```
 
-Errors: `401 UNAUTHENTICATED`, `403 INVITATION_EMAIL_MISMATCH`, `403 ORGANIZATION_SUSPENDED`, `410 INVITATION_EXPIRED`, `410 INVITATION_REVOKED`, `410 INVITATION_ALREADY_USED`, `409 ALREADY_MEMBER`, `409 MEMBERSHIP_SUSPENDED`, `422 VALIDATION_ERROR` (e.g. extra `role` field).
+For a new account, the response sets the normal `tn_access`, `tn_refresh`, and `tn_csrf` cookies; `session` describes them. For an existing signed-in account, `accountCreated` is `false`, `session` is `null`, and the current session is kept.
+
+The invitation role is applied server-side; clients cannot supply a role. Passwords are hashed with Argon2id before the transaction, and the single-use claim and membership creation share one transaction, so concurrent acceptance cannot create duplicates.
+
+Errors: `400 INVITATION_INVALID`, `401 ACCOUNT_EXISTS_SIGN_IN` (existing account, not signed in), `403 INVITATION_EMAIL_MISMATCH`, `403 ACCOUNT_DISABLED`, `403 ORGANIZATION_SUSPENDED`, `410 INVITATION_EXPIRED`, `410 INVITATION_REVOKED`, `410 INVITATION_ALREADY_USED`, `409 ALREADY_MEMBER`, `409 MEMBERSHIP_SUSPENDED`, `422 PASSWORD_REQUIRED` (new account without a password), `422 VALIDATION_ERROR` (weak password or extra `role` field).
 
 For a previously `REMOVED` membership, acceptance reactivates the existing row with the invited role. A `SUSPENDED` membership must be reactivated by an administrator instead.
 
@@ -829,11 +913,13 @@ Requires `time:write` + agent credentials. Stores foreground application metadat
 Rules:
 
 - 1–200 events per batch; `idempotencyKey` is unique per agent.
-- The session must belong to the authenticated user, organization, and agent.
-- Intervals must end after they start, be at most 24 hours long, and must not overlap another activity event for that employee (`EVENT_OVERLAP`).
+- `sessionId` is optional. When supplied, the session must belong to the authenticated user, organization, and agent; when omitted, the agent's current open session is used.
+- `platform` is an optional short OS label (1–40 characters) and falls back to the registered agent platform.
+- Intervals must end after they start, be at least one second, be at most 24 hours long, and must not overlap another activity event for that employee (`EVENT_OVERLAP`).
 - Events may start slightly before a session or end slightly after it within `ACTIVITY_FUTURE_SKEW_SECONDS`; they are clipped to actual working intervals in reports.
 - Activity outside the session, too old (`ACTIVITY_MAX_BACKFILL_SECONDS`, default 30 days), or too far in the future is rejected per event.
 - Repeats return `duplicate`; one rejected/duplicate event does not discard the batch.
+- When the organization policy disables app tracking, the entire request returns `403 APP_TRACKING_DISABLED`. Existing history is retained; no data is deleted.
 
 `200`
 
@@ -854,13 +940,148 @@ Rules:
 
 Rejection codes include `EVENT_IN_FUTURE`, `EVENT_TOO_OLD`, `SESSION_NOT_FOUND`, `EVENT_OUTSIDE_SESSION`, and `EVENT_OVERLAP`.
 
+### `POST /organizations/:organizationId/activity/idle-intervals/batch`
+
+Requires `time:write` + agent credentials. Records operating-system idle periods only (no keystroke, pointer content, window title, clipboard, URL, or screenshot data). Idle detection is independent of application tracking: it works while app tracking is disabled and stops only when `idleDetectionEnabled` is false.
+
+```json
+{
+  "intervals": [
+    {
+      "idempotencyKey": "idle-20261022-001",
+      "sessionId": "…",
+      "platform": "win32",
+      "startedAt": "2026-10-22T12:00:00.000Z",
+      "endedAt": "2026-10-22T12:07:30.000Z"
+    }
+  ]
+}
+```
+
+- 1–200 intervals per batch; `idempotencyKey` is unique per agent.
+- The server computes the duration; client durations are not accepted.
+- Intervals shorter than the organization's `idleThresholdMinutes` are rejected per interval (`IDLE_BELOW_THRESHOLD`), equal or longer intervals are accepted.
+- Intervals must end after they start, be at most 24 hours long, belong to a session owned by the agent/employee, and fall within the activity backfill/future-skew windows.
+- Overlapping idle intervals are not rejected; they are merged when reports are built, so retries after sleep/resume cannot double count.
+- When idle detection is disabled, the request returns `403 IDLE_DETECTION_DISABLED`.
+
+`200`
+
+```json
+{
+  "data": {
+    "received": 1,
+    "accepted": 1,
+    "duplicated": 0,
+    "rejected": 0,
+    "results": [
+      { "idempotencyKey": "idle-20261022-001", "status": "accepted", "idleIntervalId": "…" }
+    ],
+    "thresholdSeconds": 300,
+    "disclaimer": "Idle detection uses operating-system inactivity signals only. No keystrokes, pointer content, window titles, clipboard data, or screenshots are collected."
+  }
+}
+```
+
+### `GET /organizations/:organizationId/activity/settings`
+
+Requires `time:read`. Returns the effective policy (creating the default row on first read). `policyVersion` increases on every successful update and `policyUpdatedAt` is the server timestamp of the last change. `serverTime` is included so agents can detect clock drift.
+
+```json
+{
+  "data": {
+    "settings": {
+      "organizationId": "…",
+      "appTrackingEnabled": true,
+      "idleDetectionEnabled": true,
+      "idleThresholdMinutes": 5,
+      "productivityClassificationEnabled": true,
+      "activityRetentionDays": 90,
+      "policyVersion": 1,
+      "policyUpdatedAt": "2026-10-30T00:00:00.000Z",
+      "updatedAt": "2026-10-30T00:00:00.000Z"
+    }
+  },
+  "serverTime": "2026-10-30T00:00:00.000Z"
+}
+```
+
+Defaults: app tracking on, idle detection on, threshold 5 minutes (1–120), classification on, retention 90 days (7–3650).
+
+### `PATCH /organizations/:organizationId/activity/settings`
+
+Requires `activity:policy` (OWNER/ADMIN). Strict body; at least one field is required. All fields are optional in a single request:
+
+```json
+{
+  "appTrackingEnabled": true,
+  "idleDetectionEnabled": true,
+  "idleThresholdMinutes": 5,
+  "productivityClassificationEnabled": true,
+  "activityRetentionDays": 90
+}
+```
+
+Returns the same shape as the read endpoint. Each successful update increments `policyVersion`, updates `policyUpdatedAt`, and writes an `APP_TRACKING_POLICY_UPDATED` audit event with the changed fields and the new values. Disabling a feature stops new ingestion for it but never deletes historical activity, idle intervals, or classifications. Employee-level overrides are not supported; the policy is organization-wide.
+
+### `GET /organizations/:organizationId/application-classifications`
+
+Requires `report:read`. Lists the organization's current classification catalog, merging stored classifications with applications observed in activity history. Observed applications with no stored row appear as `UNCLASSIFIED`. Query: `page`, `limit`, `category` (`PRODUCTIVE` | `NEUTRAL` | `UNPRODUCTIVE` | `UNCLASSIFIED`), `q` (identifier/name search), `includeObserved` (`true` default; set `false` to list stored rows only).
+
+Each row: `classificationId` (null for observed-only), `applicationIdentifier`, `applicationName`, `category`, `classified`, `classifiedByUserId`, `notes`, `createdAt`, `updatedAt`. `summary` includes `total`, `classified`, `unclassified`.
+
+Unknown applications are always `UNCLASSIFIED`, never `UNPRODUCTIVE`.
+
+### `POST /organizations/:organizationId/application-classifications`
+
+Requires `classification:manage` (OWNER/ADMIN). Strict body:
+
+```json
+{
+  "applicationIdentifier": "code",
+  "applicationName": "Visual Studio Code",
+  "category": "PRODUCTIVE",
+  "notes": "Primary editor"
+}
+```
+
+`category` defaults to `UNCLASSIFIED`. Identifiers are trimmed and lowercased. Duplicate identifiers in the same organization return `409 CLASSIFICATION_EXISTS`. Writes an `APPLICATION_CLASSIFICATION_CREATED` audit event.
+
+### `PATCH /organizations/:organizationId/application-classifications/:classificationId`
+
+Requires `classification:manage`. Strict body with at least one of `applicationName`, `category`, `notes`. Returns the updated row and writes an `APPLICATION_CLASSIFICATION_UPDATED` audit event including `previousCategory` and the new category. Unknown or cross-organization IDs return `404 CLASSIFICATION_NOT_FOUND`.
+
+Classification changes are **retroactive at report time**: reports resolve each application against the current catalog, so reclassifying an application changes how historical activity is grouped by category. Raw activity rows are not rewritten; the audit trail preserves what changed and when. This behavior is deliberate and covered by tests.
+
+### Privacy, retention, and audit
+
+- Collected data is limited to foreground application identifier/name, platform label, observed interval, and OS idle intervals. No keystrokes, clipboard, screenshots, browser URL history, full window titles, or pointer content are accepted or stored.
+- Activity events, idle intervals, and classifications are always scoped to the authenticated organization; organization/employee identity is derived from the session and agent, never from the body.
+- `activityRetentionDays` controls raw activity and idle retention per organization (default 90, range 7–3650). A background maintenance loop deletes rows whose `endedAt` is older than the window. Classifications are policy, not raw events, and are not purged. Disabling tracking does not delete data.
+- Policy changes (`APP_TRACKING_POLICY_UPDATED`) and classification changes (`APPLICATION_CLASSIFICATION_CREATED`, `APPLICATION_CLASSIFICATION_UPDATED`) are written to the append-only audit trail with actor and metadata.
+- Ingestion is idempotent per `(agent, idempotencyKey)`, so retries and offline uploads cannot double count. Overlapping activity is rejected; overlapping idle intervals are merged at report time.
+
 ---
 
 ## Reporting
 
 All report dates are organization-local calendar dates (`YYYY-MM-DD`) using the organization's IANA `timezone`; timestamps remain stored in UTC. The organization timezone defaults to `UTC` and can be set when creating or updating the organization.
 
-All endpoints require `report:read` (OWNER, ADMIN, MANAGER). `from`/`to` are inclusive. Ranges are bounded: sessions 366 days, daily 92 days, application usage 31 days, timeline 7 days.
+All endpoints below require `report:read` (OWNER, ADMIN, MANAGER) except `reports/activity-summary`, which requires `time:read` and lets an employee read their own summary while blocking other employees. `from`/`to` are inclusive. Ranges are bounded: sessions 366 days, daily 92 days, application usage 31 days, activity summary 92 days, activity overview 31 days, timeline 7 days.
+
+**Activity calculation rules (new summary endpoints):**
+
+- Session time is authoritative and clipped to the requested window.
+- `workingSeconds` = tracked session time minus breaks.
+- `idleSeconds` = accepted OS idle intervals clipped to working time (overlaps merged).
+- `activeSeconds` = working time minus idle time.
+- Application activity is clipped to `activeSeconds`; idle and break time can never count toward an application or a category.
+- `applicationSeconds` is the union of clipped activity intervals, so overlapping events cannot inflate totals.
+- `unaccountedActiveSeconds` = `activeSeconds - applicationSeconds` (never negative).
+- Categories sum clipped application time. Unknown or unclassified applications count as `UNCLASSIFIED`.
+- `productivePercentOfActive` and `unclassifiedPercentOfActive` use `activeSeconds` as the denominator and are `null` when classification is disabled or no application data exists.
+- `activityCoveragePercent` is `applicationSeconds / activeSeconds`, capped at 100.
+- Empty windows return zero totals with `hasActivityData: false`; no synthetic values are produced.
 
 ### `GET /organizations/:organizationId/reports/tracking-status`
 
@@ -925,7 +1146,7 @@ Query: `from`, `to`, `employeeId` (required). Returns one row per local calendar
 
 ### `GET /organizations/:organizationId/reports/application-usage`
 
-Query: `from`, `to`, `employeeId` (required), `page`, `limit`. Activity is clipped to working intervals, so breaks and stopped time are excluded.
+Query: `from`, `to`, `employeeId` (required), `page`, `limit`. Activity is clipped to active working intervals, so breaks, stopped time, and accepted idle intervals are excluded.
 
 ```json
 {
@@ -945,16 +1166,30 @@ Query: `from`, `to`, `employeeId` (required), `page`, `limit`. Activity is clipp
   "to": "2026-10-01",
   "timezone": "Europe/Berlin",
   "trackedWorkingSeconds": 18000,
+  "idleSeconds": 1800,
+  "activeSeconds": 16200,
   "totalApplicationSeconds": 6300,
   "disclaimer": "Application usage is foreground metadata only. It is not a definitive measure or proof of productivity."
 }
 ```
 
-`percentageOfTrackedTime` uses `trackedWorkingSeconds` as its denominator. Metadata is not proof of productivity.
+`percentageOfTrackedTime` uses `activeSeconds` (`trackedWorkingSeconds` minus idle) as its denominator. Metadata is not proof of productivity.
 
 ### `GET /organizations/:organizationId/reports/application-timeline`
 
-Query: `from`, `to`, `employeeId` (required), `page`, `limit` (max 500, default 100). Returns clipped activity segments in chronological order with the same disclaimer and range/timezone metadata.
+Query: `from`, `to`, `employeeId` (required), `page`, `limit` (max 500, default 100). Returns clipped activity segments in chronological order with the same disclaimer and range/timezone metadata. Segments exclude breaks and idle intervals.
+
+### `GET /organizations/:organizationId/reports/activity-summary`
+
+Requires `time:read`. Query: `from`, `to` (inclusive, max 92 days), and optional `employeeId`. Without `employeeId`, the caller's own summary is returned. An `EMPLOYEE` may only request their own summary and receives `403 PERMISSION_DENIED` for anyone else; OWNER/ADMIN/MANAGER may pass any employee in the organization (`404 EMPLOYEE_NOT_FOUND` otherwise).
+
+Returns `data` with `employeeId`, `from`, `to`, `timezone`, the effective `policy` snapshot, `totals`, `categories`, `applications`, per-day `days`, and a `disclaimer`. `totals` contains `trackedSeconds`, `workingSeconds`, `breakSeconds`, `idleSeconds`, `activeSeconds`, `applicationSeconds`, `unaccountedActiveSeconds`, `activityCoveragePercent`, per-category seconds, `productivePercentOfActive`, `unclassifiedPercentOfActive`, `hasActivityData`, and `hasIdleData`. `applications` lists `applicationIdentifier`, `applicationName`, `category`, `classified`, `totalSeconds`, `percentageOfActiveTime`, `eventCount`, and `sessionCount`. `days` repeats the totals for each organization-local calendar day.
+
+`productivePercentOfActive` is a descriptive ratio of classified application time to active time, not a performance score. It is `null` when classification is disabled or no activity exists.
+
+### `GET /organizations/:organizationId/reports/activity-overview`
+
+Requires `report:read`. Query: `from`, `to` (max 31 days), optional `employeeId`, `page`, `limit`. Returns one row per active membership with the same totals, up to three `topApplications`, and the employee summary. The response adds aggregate `totals`, the effective `policy`, range/timezone metadata, and the disclaimer. Per-employee rows are computed independently, so totals are sums of employee metrics and never overlap across employees.
 
 ---
 
@@ -1016,6 +1251,63 @@ distinct session IDs so a session crossing days is not double-counted.
 
 Ranges are limited to 366 days. Managers/admins/owners without `employeeId` receive
 `422 EMPLOYEE_ID_REQUIRED`.
+
+### `GET /organizations/:organizationId/attendance/day-status`
+
+Requires `time:read`. Query: `from`, `to` (inclusive organization-local dates, max 366 days)
+and optional `employeeId`. Employees are always scoped to their own records. Returns a
+derived classification for every date in the range plus a status summary:
+
+```json
+{
+  "data": {
+    "employeeId": "uuid",
+    "from": "2026-12-01",
+    "to": "2026-12-31",
+    "workingDays": [1, 2, 3, 4, 5],
+    "days": [
+      {
+        "date": "2026-12-25",
+        "status": "HOLIDAY",
+        "isWorkingDay": true,
+        "holidayUnits": 1,
+        "leaveUnits": 0,
+        "expectedWorkFraction": 0,
+        "workedSeconds": 0,
+        "holidays": [
+          { "id": "uuid", "name": "Christmas Day", "category": "PUBLIC", "duration": "FULL_DAY" }
+        ]
+      }
+    ],
+    "summary": {
+      "PRESENT": 0,
+      "ABSENT": 0,
+      "ON_LEAVE": 0,
+      "HOLIDAY": 1,
+      "HALF_DAY_HOLIDAY": 0,
+      "HOLIDAY_WORKED": 0,
+      "WEEKLY_OFF": 0,
+      "SCHEDULED": 0
+    }
+  },
+  "serverTime": "…"
+}
+```
+
+Statuses:
+
+- `PRESENT` — a working, non-holiday day with tracked time.
+- `ABSENT` — a past working, non-holiday day with no tracked time and no approved leave.
+- `ON_LEAVE` — an approved leave `chargedDates` entry covers the day.
+- `HOLIDAY` — a full-day applicable holiday with no tracked time.
+- `HALF_DAY_HOLIDAY` — a half-day holiday; `expectedWorkFraction` is `0.5`.
+- `HOLIDAY_WORKED` — a full-day holiday where the employee nevertheless tracked time; the recorded attendance is not converted or discarded.
+- `WEEKLY_OFF` — a day outside the organization holiday settings working days.
+- `SCHEDULED` — a future working, non-holiday day.
+
+Classification is derived on read from the current holiday calendar, holiday settings
+working days, approved leave `chargedDates`, and recorded sessions. It never mutates
+sessions or leave rows, and optional holidays are excluded from holiday classification.
 
 ### Correction requests
 
@@ -2127,6 +2419,400 @@ Every session and viewer transition is audited (`SCREEN_LIVE_SESSION_STARTED`, `
 
 ---
 
+## Leave management
+
+All routes are organization-scoped: `/organizations/:organizationId/leave/…`. Non-members receive `404 ORGANIZATION_NOT_FOUND`; organization suspension and inactive memberships are enforced by the shared organization middleware.
+
+| Permission | OWNER | ADMIN | MANAGER | EMPLOYEE |
+| --- | :---: | :---: | :---: | :---: |
+| `leave:read` | ✅ | ✅ | ✅ | ✅ |
+| `leave:write` | ✅ | ✅ | ✅ | ✅ |
+| `leave:approve` | ✅ | ✅ | — | — |
+| `leave:manage` | ✅ | ✅ | — | — |
+
+- `leave:read` lists the active catalog, holidays, and balances; `leave:write` submits and cancels requests.
+- `leave:approve` is required to approve/reject a request. Self-approval and self-rejection are always rejected (`403 SELF_APPROVAL_FORBIDDEN`).
+- `leave:manage` is required for catalog/policy administration, organization-wide balance listing, balance adjustments, and leave audit history. Managers deliberately do not receive it.
+- Employees see only their own requests and balances. A manager without `leave:approve`/`leave:manage` also sees only their own requests. Cross-employee reads return `404` rather than revealing the resource.
+
+### Calendar, balance periods, and units
+
+- Dates are ISO `YYYY-MM-DD`. Organizations have an IANA timezone; “today” (past-date and notice checks) uses that timezone.
+- A leave type has exactly one policy. The policy defines an **annual balance period** starting on `balancePeriodStartMonth`/`balancePeriodStartDay` (default January 1). Balance rows are unique per organization + employee + leave type + period start.
+- Chargeable units are computed server-side from the policy’s ISO working days (1 = Monday … 7 = Sunday, default Monday–Friday), minus organization holidays. A full-day holiday removes the whole working day; a half-day holiday removes only 0.5, so a full-day request across it is charged 0.5. Optional holidays never reduce the charge. Half-day flags subtract 0.5 from the first/last chargeable date without increasing an already reduced half-day holiday.
+- A request must fall inside **one** balance period. A request spanning a period boundary is rejected with `422 LEAVE_SPANS_BALANCE_PERIODS`; submit one request per period.
+- Client-supplied `units`, `availableBalance`, `approvedConsumed`, or `pendingReserved` are never accepted.
+
+### Balance formula and ledger
+
+```text
+available = entitled + accrued + adjustments + carried_forward
+          - approved_consumed - pending_reserved
+```
+
+- Pending requests reserve balance immediately; approval atomically converts the reservation into consumption (exactly once); rejection/cancellation of a pending request releases the reservation; cancelling an approved request restores consumption (exactly once) when the type allows it.
+- Leave types with `requiresBalance=false` never create or touch balance rows; their requests skip reservation and consumption.
+- Entitlement, accrual, and carry-forward are applied lazily when a balance is read, reserved, or adjusted. Every credit is written to `leave_ledger_entries` with an idempotency key (`initial:<periodStart>`, `carry:<periodStart>`, `accrual:<trancheDate>`), so repeated reads cannot double-credit.
+- Ledger kinds: `INITIAL_ENTITLEMENT`, `ACCRUAL`, `CARRY_FORWARD`, `ADJUSTMENT`, `RESERVATION`, `RESERVATION_RELEASE`, `CONSUMPTION`, `CONSUMPTION_RESTORE`.
+
+### Leave types
+
+`GET /organizations/:organizationId/leave/types`
+
+Query: `includeInactive=true` (OWNER/ADMIN only). Defaults to active types.
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "name": "Casual Leave",
+      "description": "Personal time off",
+      "isActive": true,
+      "isPaid": true,
+      "requiresBalance": true,
+      "allowNegativeBalance": false,
+      "maxConsecutiveDays": 10,
+      "minNoticeDays": 0,
+      "requiresDocumentation": false,
+      "allowApprovedCancellation": true,
+      "cancellationRequiresApproval": false,
+      "policy": { "id": "uuid", "initialEntitlement": 20, "workingDays": [1, 2, 3, 4, 5], "…": "…" },
+      "createdAt": "…",
+      "updatedAt": "…"
+    }
+  ]
+}
+```
+
+`POST /organizations/:organizationId/leave/types` — `leave:manage`. Body fields are all optional except `name` (2–120 chars): `description`, `isActive`, `isPaid`, `requiresBalance`, `allowNegativeBalance`, `maxConsecutiveDays`, `minNoticeDays`, `requiresDocumentation`, `allowApprovedCancellation`, `cancellationRequiresApproval`. Creates the type and its default policy in one transaction. Returns `201 { data: { leaveType } }`.
+
+`PATCH /organizations/:organizationId/leave/types/:leaveTypeId` — `leave:manage`. Partial update; an empty body is rejected. Duplicate names (case-insensitive) return `409 LEAVE_TYPE_NAME_CONFLICT`. Changing `requiresBalance` while the type has pending/approved/cancellation-requested requests returns `409 LEAVE_TYPE_IN_USE`; deactivating the type remains allowed.
+
+### Leave policies
+
+`GET /organizations/:organizationId/leave/policies` — `leave:read`. Returns the policy plus a `leaveType` summary.
+
+`PUT /organizations/:organizationId/leave/policies/:policyId` — `leave:manage`. Partial update of:
+
+- `initialEntitlement` (0–3650)
+- `accrualFrequency`: `NONE`, `MONTHLY`, `QUARTERLY`, `ANNUAL`
+- `accrualAmount`
+- `balancePeriodStartMonth` (1–12) / `balancePeriodStartDay` (1–31, clamped to the month’s length)
+- `carryForwardAllowance`
+- `maxBalance` (nullable; caps automatic credits and rejects administrator credits that would exceed it)
+- `prorateInitialEntitlement` (true prorates the initial entitlement for mid-period joiners)
+- `workingDays` (unique ISO weekdays 1–7)
+- `isActive`
+
+Accrual tranches are credited once their date is on or before today, up to the period end. There is no background accrual job: reads/reservations advance the ledger. Turning accrual on mid-period credits tranches from the period start; it does not backfill earlier periods. Carry-forward is credited once at period initialization from the previous period’s `availableBalance`, capped by `carryForwardAllowance` and `maxBalance`.
+
+### Holidays
+
+The organization holiday calendar is a separate resource from the legacy `/leave/holidays` endpoints. It supports categories, half-days, employee applicability, organization settings, and historical-change protection.
+
+| Permission | OWNER | ADMIN | MANAGER | EMPLOYEE |
+| --- | :---: | :---: | :---: | :---: |
+| `holiday:view` | ✅ | ✅ | ✅ | ✅ |
+| `holiday:create` | ✅ | ✅ | — | — |
+| `holiday:update` | ✅ | ✅ | — | — |
+| `holiday:delete` | ✅ | ✅ | — | — |
+| `holiday:settings:manage` | ✅ | ✅ | — | — |
+
+- Categories: `PUBLIC`, `COMPANY`, `OPTIONAL`.
+- Durations: `FULL_DAY`, `FIRST_HALF`, `SECOND_HALF`. `FIRST_HALF`/`SECOND_HALF` remove 0.5 of the working day for leave charging and attendance classification.
+- Applicability: `appliesToAll=true` applies to the whole organization. Otherwise `applicableEmployeeIds` must list at least one active member. `departmentIds`/`locationIds` are reserved and currently rejected with `422 HOLIDAY_DEPARTMENT_APPLICABILITY_UNSUPPORTED` / `HOLIDAY_LOCATION_APPLICABILITY_UNSUPPORTED` because no department or location model exists.
+- Optional holidays appear on calendars but never reduce leave charging or make a day a holiday for attendance.
+- Multiple different holidays may share a date; the same name on the same date is rejected with `409 HOLIDAY_DUPLICATE`.
+- Creating, editing, or deleting a holiday dated before “today” in the organization timezone requires `confirmHistorical=true` (body or query). Without it the API returns `409 HOLIDAY_HISTORICAL_LOCKED`. Confirmed historical changes are audited as `LEAVE_HOLIDAY_CREATED`, `LEAVE_HOLIDAY_UPDATED`, `LEAVE_HOLIDAY_DELETED`, or `LEAVE_HOLIDAY_DUPLICATED`.
+- Holiday settings can disable management (`HOLIDAY_MANAGEMENT_DISABLED`), optional holidays (`HOLIDAY_OPTIONAL_DISABLED`), or half-day holidays (`HOLIDAY_HALF_DAY_DISABLED`).
+
+#### `GET /organizations/:organizationId/holidays` — `holiday:view`
+
+Query (all optional):
+
+- `year` (1900–2200) or `from`/`to` ISO dates (mutually exclusive with `year`; default is the current year in the organization timezone).
+- `category`, `duration`.
+- `includeOptional=false` excludes optional holidays.
+- `mine=true` filters to holidays applicable to the authenticated employee. Employee-scoped actors are always filtered even without `mine`.
+
+```json
+{
+  "data": {
+    "holidays": [
+      {
+        "id": "uuid",
+        "organizationId": "uuid",
+        "holidayDate": "2026-12-25",
+        "name": "Christmas Day",
+        "category": "PUBLIC",
+        "duration": "FULL_DAY",
+        "description": "Public holiday",
+        "appliesToAll": true,
+        "applicableEmployeeIds": [],
+        "departmentIds": [],
+        "locationIds": [],
+        "createdByUserId": "uuid",
+        "updatedByUserId": "uuid",
+        "createdBy": { "id": "uuid", "name": "Ada Lovelace", "email": "ada@example.com" },
+        "updatedBy": { "id": "uuid", "name": "Ada Lovelace", "email": "ada@example.com" },
+        "createdAt": "…",
+        "updatedAt": "…"
+      }
+    ],
+    "settings": {
+      "id": "uuid",
+      "organizationId": "uuid",
+      "enabled": true,
+      "optionalHolidaysEnabled": true,
+      "allowHalfDayHolidays": true,
+      "defaultCalendarYear": 2026,
+      "defaultApplicability": "ORGANIZATION",
+      "workingDays": [1, 2, 3, 4, 5],
+      "updatedByUserId": "uuid",
+      "updatedBy": { "id": "uuid", "name": "Ada Lovelace", "email": "ada@example.com" },
+      "updatedAt": "…"
+    },
+    "year": 2026,
+    "from": "2026-01-01",
+    "to": "2026-12-31",
+    "total": 1
+  },
+  "serverTime": "…"
+}
+```
+
+#### `GET /organizations/:organizationId/holidays/:holidayId` — `holiday:view`
+
+Returns `{ "data": { "holiday": { … }, "serverTime": "…" } }`. A holiday that is not applicable to an employee-scoped actor returns `404 HOLIDAY_NOT_FOUND` rather than revealing its existence.
+
+#### `POST /organizations/:organizationId/holidays` — `holiday:create`
+
+```json
+{
+  "name": "Company Foundation Day",
+  "holidayDate": "2026-11-14",
+  "category": "COMPANY",
+  "duration": "FULL_DAY",
+  "description": "Annual company holiday",
+  "appliesToAll": false,
+  "applicableEmployeeIds": ["uuid"],
+  "confirmHistorical": false
+}
+```
+
+Returns `201 { data: { holiday, serverTime } }`. Defaults: `category=COMPANY`, `duration=FULL_DAY`, `appliesToAll=true`. An empty `applicableEmployeeIds` with `appliesToAll=true` is required; selecting employees while `appliesToAll=true` returns `422 VALIDATION_ERROR`, as does `appliesToAll=false` with no employees. Unknown employee IDs return `422 HOLIDAY_EMPLOYEE_NOT_FOUND`.
+
+#### `PATCH /organizations/:organizationId/holidays/:holidayId` — `holiday:update`
+
+Partial update of `name`, `holidayDate`, `category`, `duration`, `description`, `appliesToAll`, `applicableEmployeeIds`, `departmentIds`, `locationIds`, and `confirmHistorical`. An empty update is rejected. If `appliesToAll` or `applicableEmployeeIds` is supplied, both resulting values must be consistent (`422 HOLIDAY_APPLICABILITY_REQUIRED` / `HOLIDAY_APPLICABILITY_INVALID`). Moving a holiday into the past follows the same historical-confirmation rule.
+
+#### `DELETE /organizations/:organizationId/holidays/:holidayId` — `holiday:delete`
+
+Query: `confirmHistorical=true` when the holiday is in the past. Returns `204`. Deleting a holiday never mutates existing approved leave rows or recorded sessions.
+
+#### `POST /organizations/:organizationId/holidays/:holidayId/duplicate` — `holiday:create`
+
+Body: `{ "holidayDate": "YYYY-MM-DD", "name": "Optional override", "confirmHistorical": false }`. Copies the source holiday’s category, duration, description, and applicability to the new date. Returns `201 { data: { holiday, serverTime } }`.
+
+#### `GET /organizations/:organizationId/holidays/employees` — `holiday:view`
+
+Returns active members for the employee applicability picker:
+
+```json
+{
+  "data": [
+    { "id": "uuid", "name": "Ada Lovelace", "email": "ada@example.com", "role": "EMPLOYEE" }
+  ],
+  "serverTime": "…"
+}
+```
+
+#### `GET /organizations/:organizationId/holidays/settings` — `holiday:view`
+
+Returns `{ "data": { "settings": { … }, "serverTime": "…" } }`. Settings are created lazily with defaults: enabled, optional holidays enabled, half-day holidays enabled, `defaultApplicability=ORGANIZATION`, and `workingDays=[1,2,3,4,5]`.
+
+#### `PUT /organizations/:organizationId/holidays/settings` — `holiday:settings:manage`
+
+Partial update of `enabled`, `optionalHolidaysEnabled`, `allowHalfDayHolidays`, `defaultCalendarYear` (nullable, 1900–2200), `defaultApplicability` (`ORGANIZATION`/`EMPLOYEES`), and `workingDays` (unique ISO weekdays 1–7, at least one). An empty body is rejected. Changes are audited as `LEAVE_HOLIDAY_SETTINGS_UPDATED`.
+
+> **Historical policy.** Attendance day classification is derived on read from the current holiday calendar, working days, approved leave `chargedDates`, and recorded sessions. Changing a future holiday affects new leave applications and future attendance reads; it does not rewrite stored sessions or approved leave rows. Confirmed past-date changes affect derived historical classification and are audited, which is why they require explicit confirmation.
+
+#### Legacy holiday endpoints
+
+`GET /organizations/:organizationId/leave/holidays` — `leave:read`. Query `from`, `to`. Returns the extended holiday summaries for backward compatibility.
+
+`POST /organizations/:organizationId/leave/holidays` — `leave:manage`. Body `{ "holidayDate": "YYYY-MM-DD", "name": "…" }`. Delegates to the holiday service and therefore respects holiday settings, duplicate detection (`409 HOLIDAY_DUPLICATE`), and historical confirmation.
+
+`DELETE /organizations/:organizationId/leave/holidays/:holidayId` — `leave:manage`. Delegates to the holiday service. Returns `204`.
+
+
+### Balances
+
+`GET /organizations/:organizationId/leave/balances/me` — authenticated employee’s own balances.
+
+Query: optional `leaveTypeId`, `periodStart` (an ISO date inside the desired period). Without `periodStart`, the response contains the current period plus any period referenced by the employee’s active requests (so future-dated requests remain visible).
+
+```json
+{
+  "data": {
+    "employeeId": "uuid",
+    "timezone": "Asia/Kolkata",
+    "balances": [
+      {
+        "id": "uuid",
+        "leaveTypeId": "uuid",
+        "periodStart": "2026-01-01",
+        "periodEnd": "2026-12-31",
+        "entitledBalance": 20,
+        "accruedBalance": 0,
+        "adjustmentBalance": 0,
+        "carriedForwardBalance": 0,
+        "approvedConsumed": 2,
+        "pendingReserved": 1,
+        "availableBalance": 17,
+        "breakdown": { "entitled": 20, "accrued": 0, "adjustments": 0, "carriedForward": 0, "approvedConsumed": 2, "pendingReserved": 1, "available": 17 },
+        "leaveType": { "id": "uuid", "name": "Casual Leave", "isPaid": true, "requiresBalance": true },
+        "ledger": ["…latest 20 entries…"]
+      }
+    ]
+  },
+  "serverTime": "…"
+}
+```
+
+`GET /organizations/:organizationId/leave/balances/:employeeId` — self or `leave:manage`. Other callers receive `404 LEAVE_BALANCE_NOT_FOUND`.
+
+`GET /organizations/:organizationId/leave/balances` — `leave:manage`. Paginated organization-wide listing. Query: `page`, `limit`, `employeeId`, `leaveTypeId`, `periodStart` (defaults to the current period). Active members’ balances for active balance-requiring types are materialized for the selected period.
+
+`POST /organizations/:organizationId/leave/balances/:employeeId/adjustments` — `leave:manage`.
+
+```json
+{ "leaveTypeId": "uuid", "amount": -1.5, "reason": "Correction agreed with employee" }
+```
+
+`amount` is a non-zero signed decimal (up to ±3650) and `reason` is required (3–500 chars). Credits that exceed `maxBalance` return `409 LEAVE_BALANCE_CAP_EXCEEDED`; debits that would make the balance negative return `409 LEAVE_BALANCE_NEGATIVE_NOT_ALLOWED` unless the type allows negative balances. The adjustment, ledger entry, and `LEAVE_BALANCE_ADJUSTED` audit event are written in one transaction.
+
+### Leave requests
+
+`POST /organizations/:organizationId/leave/requests` — `leave:write`.
+
+```json
+{
+  "leaveTypeId": "uuid",
+  "startDate": "2026-11-02",
+  "endDate": "2026-11-06",
+  "startHalfDay": false,
+  "endHalfDay": false,
+  "reason": "Family trip",
+  "documentationReference": "optional-reference"
+}
+```
+
+Optional `Idempotency-Key` header (≤128 chars). A replay with the same key and payload returns the original request; a different payload returns `409 IDEMPOTENCY_KEY_REUSED`. Units, charged dates, and the balance period are calculated server-side.
+
+`GET /organizations/:organizationId/leave/requests` — `leave:read`. Query: `page`, `limit`, `status`, `leaveTypeId`, `from`, `to`, `employeeId` (reviewers only; employees are always forced to self).
+
+`GET /organizations/:organizationId/leave/requests/:requestId` — self or reviewer (`leave:approve`/`leave:manage`); otherwise `404 LEAVE_REQUEST_NOT_FOUND`.
+
+`POST /organizations/:organizationId/leave/requests/:requestId/approve` — `leave:approve`. Optional body `{ "note": "…" }`. Re-approving an already approved request is idempotent; any non-pending status returns `409 LEAVE_REQUEST_NOT_PENDING`.
+
+`POST /organizations/:organizationId/leave/requests/:requestId/reject` — `leave:approve`.
+
+```json
+{ "reason": "Coverage required", "note": "optional reviewer note" }
+```
+
+Re-rejecting an already rejected request is idempotent. Rejecting a `CANCELLATION_REQUESTED` request returns it to `APPROVED` and audits `LEAVE_CANCELLATION_REJECTED`.
+
+`POST /organizations/:organizationId/leave/requests/:requestId/cancel` — self or reviewer.
+
+```json
+{ "reason": "Plans changed" }
+```
+
+Cancellation rules:
+
+- `PENDING` → `CANCELLED`; the reservation is released.
+- `APPROVED` with `allowApprovedCancellation=false` → `409 LEAVE_REQUEST_NOT_CANCELLABLE`.
+- `APPROVED`, `cancellationRequiresApproval=false` (or the caller has review permission) → `CANCELLED`; consumption is restored.
+- `APPROVED`, `cancellationRequiresApproval=true`, employee caller → `CANCELLATION_REQUESTED`; balance remains consumed until a reviewer cancels (restores) or rejects the cancellation (returns to `APPROVED`). Repeated employee cancellation requests are idempotent.
+- `REJECTED`/`CANCELLED` → `409 LEAVE_REQUEST_NOT_CANCELLABLE`.
+
+### Status transitions
+
+```text
+PENDING ──approve──▶ APPROVED ──cancel (allowed)──▶ CANCELLED
+   │                     └──employee cancel (requires approval)──▶ CANCELLATION_REQUESTED
+   │                                                                   ├──reviewer cancel──▶ CANCELLED
+   │                                                                   └──reviewer reject──▶ APPROVED
+   ├──reject──▶ REJECTED
+   └──cancel──▶ CANCELLED
+```
+
+### Leave audit
+
+`GET /organizations/:organizationId/leave/audit` — `leave:manage`. Query: `page`, `limit`, `action`, `entityType`, `employeeId`, `from`, `to`. Only leave-related actions are returned:
+
+`LEAVE_TYPE_CREATED`, `LEAVE_TYPE_UPDATED`, `LEAVE_POLICY_UPDATED`, `LEAVE_HOLIDAY_CREATED`, `LEAVE_HOLIDAY_DELETED`, `LEAVE_REQUEST_SUBMITTED`, `LEAVE_REQUEST_APPROVED`, `LEAVE_REQUEST_REJECTED`, `LEAVE_REQUEST_CANCELLED`, `LEAVE_CANCELLATION_REQUESTED`, `LEAVE_CANCELLATION_REJECTED`, `LEAVE_BALANCE_ADJUSTED`.
+
+The audit trail is organization-scoped and excludes credentials, tokens, and secrets.
+
+### Leave error codes
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `LEAVE_TYPE_NOT_FOUND` | 404 | Unknown leave type in this organization |
+| `LEAVE_TYPE_NAME_CONFLICT` | 409 | Duplicate (case-insensitive) type name |
+| `LEAVE_TYPE_INACTIVE` | 409 | Type deactivated |
+| `LEAVE_TYPE_IN_USE` | 409 | Cannot switch `requiresBalance` while active requests exist |
+| `LEAVE_POLICY_NOT_FOUND` | 404 | Unknown policy |
+| `LEAVE_POLICY_INACTIVE` | 409 | Policy deactivated |
+| `HOLIDAY_NOT_FOUND` | 404 | Holiday missing, outside the organization, or not applicable to the employee |
+| `HOLIDAY_DUPLICATE` | 409 | Same holiday name already exists on that date |
+| `HOLIDAY_HISTORICAL_LOCKED` | 409 | Past-date change requires `confirmHistorical=true` |
+| `HOLIDAY_MANAGEMENT_DISABLED` | 409 | Holiday management is disabled in organization settings |
+| `HOLIDAY_EMPLOYEE_NOT_FOUND` | 422 | Applicable employee is not an active organization member |
+| `HOLIDAY_APPLICABILITY_REQUIRED` | 422 | Employee-specific holiday has no employees |
+| `HOLIDAY_APPLICABILITY_INVALID` | 422 | Employee selections conflict with `appliesToAll` |
+| `HOLIDAY_HALF_DAY_DISABLED` | 422 | Half-day holidays are disabled in organization settings |
+| `HOLIDAY_OPTIONAL_DISABLED` | 422 | Optional holidays are disabled in organization settings |
+| `HOLIDAY_DEPARTMENT_APPLICABILITY_UNSUPPORTED` | 422 | Department applicability is reserved; no department model exists |
+| `HOLIDAY_LOCATION_APPLICABILITY_UNSUPPORTED` | 422 | Location applicability is reserved; no location model exists |
+| `LEAVE_REQUEST_NOT_FOUND` | 404 | Missing or not visible to the caller |
+| `LEAVE_REQUEST_NOT_PENDING` | 409 | Approve/reject on a finalized request |
+| `LEAVE_REQUEST_NOT_CANCELLABLE` | 409 | Cancellation not permitted in this state/type |
+| `LEAVE_REQUEST_OVERLAP` | 409 | Overlaps a pending/approved/cancellation-requested leave |
+| `INSUFFICIENT_LEAVE_BALANCE` | 409 | Available balance is below the requested units |
+| `LEAVE_DATE_IN_PAST` | 422 | Start date before today in the organization timezone |
+| `LEAVE_MIN_NOTICE_NOT_MET` | 422 | Below the type’s minimum notice |
+| `LEAVE_MAX_CONSECUTIVE_DAYS_EXCEEDED` | 422 | Calendar span above the type limit |
+| `LEAVE_DOCUMENTATION_REQUIRED` | 422 | `documentationReference` missing |
+| `LEAVE_REQUEST_INVALID_DATES` | 422 | Invalid or inverted range |
+| `LEAVE_REQUEST_INVALID_HALF_DAY` | 422 | Half-day on a non-chargeable date or both ends of one day |
+| `LEAVE_NO_WORKING_DAYS` | 422 | Range contains no chargeable working day |
+| `LEAVE_SPANS_BALANCE_PERIODS` | 422 | Request crosses a balance-period boundary |
+| `LEAVE_BALANCE_NOT_FOUND` | 404 / 409 | Balance not visible or no longer available |
+| `LEAVE_BALANCE_NOT_APPLICABLE` | 422 | Adjustment on a type that does not use balances |
+| `LEAVE_BALANCE_NEGATIVE_NOT_ALLOWED` | 409 | Debit would make the balance negative |
+| `LEAVE_BALANCE_CAP_EXCEEDED` | 409 | Credit would exceed `maxBalance` |
+| `LEAVE_BALANCE_INCONSISTENT` | 409 | Stored reservation/consumption does not match the request |
+| `EMPLOYEE_NOT_FOUND` | 404 | Target is not a member of the organization |
+| `EMPLOYEE_INACTIVE` | 403 | Target membership or account is inactive |
+| `SELF_APPROVAL_FORBIDDEN` | 403 | Reviewer is the requester |
+| `IDEMPOTENCY_KEY_REUSED` | 409 | Same key, different request payload |
+| `IDEMPOTENCY_KEY_INVALID` | 422 | Key longer than 128 characters |
+
+### Leave limitations and integration notes
+
+- Balance periods are annual; there is no payroll export, encashment, or mid-period policy migration.
+- Approved-cancellation restoration depends on the policy flag; historical policy changes are not versioned, so changing a policy affects subsequent lazy calculations for the current period.
+- Leave charging and attendance classification use organization holidays through the holiday service. Approved leave is joined to attendance through `GET /attendance/day-status`; recorded sessions are never converted into leave or holiday rows. Optional holidays are informational only.
+- Holiday settings working days control calendar display and attendance classification only. Each leave type continues to charge leave using its own policy `workingDays`.
+- Balance listing materializes rows for active members on demand; very large organizations should add a scheduled accrual/materialization job before relying on organization-wide dashboards.
+
+---
+
 ## Platform administration
 
 Platform routes are available only to an authenticated user whose database `users.platform_role` is `SUPERADMIN`. Organization roles (`OWNER`/`ADMIN`) grant no platform authority, and platform routes do not require or accept `X-Organization-Id`. The role is re-read on every request, so granting or revoking it takes effect immediately. Provision it with the server-only CLI (`npm run platform:grant -- <email>` / `npm run platform:revoke -- <email>`); there is no HTTP provisioning endpoint, default account, or hardcoded credential.
@@ -2259,8 +2945,10 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 400 | `ORGANIZATION_CONTEXT_INVALID` | Header is not a UUID |
 | 400 | `ORGANIZATION_NAME_MISMATCH` | Typed organization name does not match for platform soft delete |
 | 400 | `INVITATION_INVALID` | Unknown or malformed invitation token |
+| 400 | `PASSWORD_RESET_INVALID` | Password reset token is unknown, expired, or already used |
 | 401 | `UNAUTHENTICATED` | No valid credentials supplied |
 | 401 | `INVALID_CREDENTIALS` | Wrong e-mail or password |
+| 401 | `ACCOUNT_EXISTS_SIGN_IN` | An account already exists for the invited e-mail; sign in before accepting |
 | 401 | `AUTH_TOKEN_INVALID` | Access token invalid/revoked |
 | 401 | `AUTH_TOKEN_EXPIRED` | Access token expired; refresh required |
 | 401 | `REFRESH_TOKEN_REQUIRED` | No refresh token supplied |
@@ -2345,6 +3033,7 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 422 | `CORRECTION_IN_FUTURE` | Correction includes future timestamps |
 | 422 | `WORK_DATE_MISMATCH` | `workDate` does not match the affected session date |
 | 422 | `EMPLOYEE_ID_REQUIRED` | Reviewer omitted `employeeId` on a summary request |
+| 422 | `PASSWORD_REQUIRED` | A new invited account was accepted without a password |
 | 409 | `SCREENSHOT_POLICY_ACKNOWLEDGEMENT_REQUIRED` | Employee must acknowledge the current disclosure |
 | 409 | `INVALID_SCREENSHOT_AGENT` | Employee has no usable non-revoked desktop agent |
 | 409 | `NO_ELIGIBLE_SCREENSHOT_SESSION` | No active `ELECTRON` session with a fresh heartbeat |
@@ -2381,6 +3070,7 @@ Public readiness. Runs `SELECT 1`. Returns `200` when ready, otherwise `503` wit
 | 422 | `SCREENSHOT_CONTENT_TYPE_MISMATCH` | Upload type differs from the claimed/expected type |
 | 422 | `SCREENSHOT_DISCLOSURE_VERSION_REQUIRED` | Acknowledged disclosure text changed without a new version |
 | 429 | `RATE_LIMITED` | Rate limit exceeded |
+| 429 | `ACCOUNT_LOCKED` | Account temporarily locked after repeated failed sign-ins |
 | 429 | `SCREENSHOT_REQUEST_COOLDOWN` | Per-administrator request cooldown is active |
 | 500 | `INTERNAL_ERROR` | Unexpected server error |
 | 503 | `SERVICE_UNAVAILABLE` | Generic unavailable condition |

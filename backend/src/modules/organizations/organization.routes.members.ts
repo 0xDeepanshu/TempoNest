@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/authenticate';
 import { validate } from '../../middleware/validate';
-import { requirePermission } from '../memberships/permissions';
+import { requireAnyPermission, requirePermission } from '../memberships/permissions';
 import { loadOrganizationContext } from '../memberships/organizationContext';
 import {
   changeRoleSchema,
@@ -15,7 +15,12 @@ import {
   invitationIdParamsSchema,
   invitationListQuerySchema,
 } from '../invitations/invitation.schemas';
-import { create as createInvitation, list as listInvitations, revoke as revokeInvitation } from '../invitations/invitation.controller';
+import {
+  create as createInvitation,
+  list as listInvitations,
+  resend as resendInvitation,
+  revoke as revokeInvitation,
+} from '../invitations/invitation.controller';
 
 /**
  * Nested routes mounted under /organizations/:organizationId. Params are
@@ -76,7 +81,7 @@ export function createOrganizationMembersRouter(): Router {
     requireAuth,
     validate({ params: organizationIdParamsSchema }),
     loadOrganizationContext,
-    requirePermission('member:invite'),
+    requireAnyPermission(['member:invite', 'member:onboard']),
     validate({ body: createInvitationSchema }),
     createInvitation,
   );
@@ -86,9 +91,18 @@ export function createOrganizationMembersRouter(): Router {
     requireAuth,
     validate({ params: organizationIdParamsSchema }),
     loadOrganizationContext,
-    requirePermission('invitation:read'),
+    requireAnyPermission(['invitation:read', 'member:onboard']),
     validate({ query: invitationListQuerySchema }),
     listInvitations,
+  );
+
+  router.post(
+    '/:organizationId/invitations/:invitationId/resend',
+    requireAuth,
+    validate({ params: invitationIdParamsSchema }),
+    loadOrganizationContext,
+    requireAnyPermission(['member:invite', 'member:onboard']),
+    resendInvitation,
   );
 
   router.delete(
@@ -96,7 +110,7 @@ export function createOrganizationMembersRouter(): Router {
     requireAuth,
     validate({ params: invitationIdParamsSchema }),
     loadOrganizationContext,
-    requirePermission('invitation:revoke'),
+    requireAnyPermission(['invitation:revoke', 'member:onboard']),
     revokeInvitation,
   );
 

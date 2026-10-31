@@ -50,10 +50,10 @@ export function LiveTrackingView() {
   const { organization, membership } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const timezone = organization?.timezone ?? "UTC";
-  const role = membership?.role;
-  const canViewScreenshots = hasPermission(role, "screenshot:read");
-  const canRequestScreenshots = hasPermission(role, "screenshot:request");
-  const canLive = hasPermission(role, "screenshot:live");
+  const canViewScreenshots = hasPermission(membership, "screenshot:read");
+  const canRequestScreenshots = hasPermission(membership, "screenshot:request");
+  const canLive = hasPermission(membership, "screenshot:live");
+  const canBrowseMembers = hasPermission(membership, "member:read");
 
   const [employeeId, setEmployeeId] = useState("");
   const [page, setPage] = useState(1);
@@ -66,7 +66,7 @@ export function LiveTrackingView() {
         query: { limit: 100, status: "ACTIVE" },
       }),
     [organizationId],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canBrowseMembers },
   );
 
   const tracking = useApi<TrackingStatusResponse>(
@@ -89,7 +89,7 @@ export function LiveTrackingView() {
     {
       enabled:
         Boolean(organizationId) &&
-        (hasPermission(role, "screenshot:policy") || canLive),
+        (hasPermission(membership, "screenshot:policy") || canLive),
     },
   );
 
@@ -135,10 +135,10 @@ export function LiveTrackingView() {
   const policyValue = policy.data?.data.policy;
   const monitoringEnabled = policyValue?.enabled === true;
   const liveRoleAllowed =
-    role !== undefined &&
+    membership !== undefined &&
     policyValue !== undefined &&
-    policyValue.requestRoles.includes(role) &&
-    policyValue.viewRoles.includes(role);
+    policyValue.requestRoles.includes(membership.role) &&
+    policyValue.viewRoles.includes(membership.role);
   const screenshotStateUnavailable = Boolean(pending.error || claimed.error);
 
   function refreshAll() {
@@ -205,32 +205,38 @@ export function LiveTrackingView() {
       </div>
 
       <Card>
-        <div className="grid gap-3 p-4 sm:grid-cols-[1fr_auto] sm:items-end">
-          <Field label="Employee" htmlFor="live-employee">
-            <Select
-              id="live-employee"
-              value={employeeId}
-              onChange={(event) => {
-                setEmployeeId(event.target.value);
-                setPage(1);
-              }}
-              disabled={members.loading}
-            >
-              <option value="">All active employees</option>
-              {(members.data?.data ?? []).map((member) => (
-                <option key={member.userId} value={member.userId}>
-                  {member.user.name} · {member.role.toLowerCase()}
-                </option>
-              ))}
-            </Select>
-          </Field>
+        <div
+          className={`grid gap-3 p-4 sm:items-end ${
+            canBrowseMembers ? "sm:grid-cols-[1fr_auto]" : "sm:grid-cols-[1fr]"
+          }`}
+        >
+          {canBrowseMembers ? (
+            <Field label="Employee" htmlFor="live-employee">
+              <Select
+                id="live-employee"
+                value={employeeId}
+                onChange={(event) => {
+                  setEmployeeId(event.target.value);
+                  setPage(1);
+                }}
+                disabled={members.loading}
+              >
+                <option value="">All active employees</option>
+                {(members.data?.data ?? []).map((member) => (
+                  <option key={member.userId} value={member.userId}>
+                    {member.user.name} · {member.role.toLowerCase()}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           <p className="text-[11px] text-muted">
             {tracking.data
               ? `${tracking.data.meta.total} employee${tracking.data.meta.total === 1 ? "" : "s"} · heartbeat stale after ${tracking.data.heartbeatStaleAfterSeconds}s`
               : "Loading server tracking state…"}
           </p>
         </div>
-        {members.error ? (
+        {canBrowseMembers && members.error ? (
           <div className="px-4 pb-4">
             <Alert tone="warning">
               The employee filter could not be loaded. Tracking rows still show the server names.
@@ -467,12 +473,14 @@ export function LiveTrackingView() {
                             onRequested={refreshAll}
                           />
                         ) : null}
-                        <Link
-                          href={`/admin/screenshots?employeeId=${encodeURIComponent(row.employee.id)}`}
-                          className="text-xs font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
-                        >
-                          Open review
-                        </Link>
+                        {canViewScreenshots ? (
+                          <Link
+                            href={`/admin/screenshots?employeeId=${encodeURIComponent(row.employee.id)}`}
+                            className="text-xs font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
+                          >
+                            Open review
+                          </Link>
+                        ) : null}
                       </div>
                     </Td>
                   </tr>

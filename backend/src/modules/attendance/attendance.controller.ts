@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { AppError } from '../../utils/errors';
 import { getClientIp, getUserAgent } from '../../utils/pagination';
+import { isSelfScoped } from '../memberships/permissions';
 import {
   approveAttendanceCorrection,
   createAttendanceCorrection,
@@ -10,6 +11,7 @@ import {
   rejectAttendanceCorrection,
 } from './attendanceCorrection.service';
 import { getAttendanceSummary } from './attendanceSummary.service';
+import { getAttendanceDayStatus } from './attendanceDayStatus.service';
 import {
   checkIn,
   getCurrentAttendance,
@@ -37,6 +39,7 @@ import type {
   AttendanceCheckInInput,
   AttendanceCheckInListQuery,
   AttendanceCorrectionListQuery,
+  AttendanceDayStatusQuery,
   AttendanceLocationHistoryQuery,
   AttendanceLocationSamplesInput,
   AttendanceLocationStatusInput,
@@ -58,8 +61,19 @@ export const summary = asyncHandler(async (req: Request, res: Response) => {
   const result = await getAttendanceSummary({
     organization: req.organization!.organization,
     actorUserId: req.auth!.user.id,
-    actorRole: req.organization!.membership.role,
+    actorRole: req.organization!.effective,
     query: req.query as unknown as AttendanceSummaryQuery,
+  });
+
+  res.status(200).json({ data: result, serverTime: now() });
+});
+
+export const dayStatus = asyncHandler(async (req: Request, res: Response) => {
+  const result = await getAttendanceDayStatus({
+    organization: req.organization!.organization,
+    actorUserId: req.auth!.user.id,
+    actorRole: req.organization!.effective,
+    query: req.query as unknown as AttendanceDayStatusQuery,
   });
 
   res.status(200).json({ data: result, serverTime: now() });
@@ -69,7 +83,7 @@ export const listCorrections = asyncHandler(async (req: Request, res: Response) 
   const result = await listAttendanceCorrections({
     organization: req.organization!.organization,
     actorUserId: req.auth!.user.id,
-    actorRole: req.organization!.membership.role,
+    actorRole: req.organization!.effective,
     query: req.query as unknown as AttendanceCorrectionListQuery,
   });
 
@@ -81,7 +95,7 @@ export const getCorrection = asyncHandler(async (req: Request, res: Response) =>
     organization: req.organization!.organization,
     correctionId: req.params.correctionId!,
     actorUserId: req.auth!.user.id,
-    actorRole: req.organization!.membership.role,
+    actorRole: req.organization!.effective,
   });
 
   res.status(200).json({ data: { correction, serverTime: now() } });
@@ -100,6 +114,12 @@ export const createCorrection = asyncHandler(async (req: Request, res: Response)
 
 export const approveCorrection = asyncHandler(async (req: Request, res: Response) => {
   const input = req.body as ApproveAttendanceCorrectionInput;
+  if (isSelfScoped(req.organization!.effective)) {
+    throw AppError.forbidden(
+      'Your role cannot review attendance corrections',
+      'PERMISSION_DENIED',
+    );
+  }
   const correction = await approveAttendanceCorrection({
     organization: req.organization!.organization,
     correctionId: req.params.correctionId!,
@@ -113,6 +133,12 @@ export const approveCorrection = asyncHandler(async (req: Request, res: Response
 
 export const rejectCorrection = asyncHandler(async (req: Request, res: Response) => {
   const input = req.body as RejectAttendanceCorrectionInput;
+  if (isSelfScoped(req.organization!.effective)) {
+    throw AppError.forbidden(
+      'Your role cannot review attendance corrections',
+      'PERMISSION_DENIED',
+    );
+  }
   const correction = await rejectAttendanceCorrection({
     organization: req.organization!.organization,
     correctionId: req.params.correctionId!,
@@ -143,6 +169,8 @@ export const checkInAttendance = asyncHandler(async (req: Request, res: Response
 export const listCheckIns = asyncHandler(async (req: Request, res: Response) => {
   const result = await listAttendanceCheckIns({
     organization: req.organization!.organization,
+    actorUserId: req.auth!.user.id,
+    actorRole: req.organization!.effective,
     query: req.query as unknown as AttendanceCheckInListQuery,
   });
 
@@ -195,7 +223,7 @@ export const locationHistory = asyncHandler(async (req: Request, res: Response) 
     organization: req.organization!.organization,
     checkInId: req.params.checkInId!,
     actorUserId: req.auth!.user.id,
-    actorRole: req.organization!.membership.role,
+    actorRole: req.organization!.effective,
     query: req.query as unknown as AttendanceLocationHistoryQuery,
     context: auditContext(req),
   });
@@ -254,7 +282,7 @@ export const accessEvidence = asyncHandler(async (req: Request, res: Response) =
     organizationId: req.organization!.organization.id,
     evidenceId: req.params.evidenceId!,
     actorUserId: req.auth!.user.id,
-    actorRole: req.organization!.membership.role,
+    actorRole: req.organization!.effective,
     context: auditContext(req),
   });
 

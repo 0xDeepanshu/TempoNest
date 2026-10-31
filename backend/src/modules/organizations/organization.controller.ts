@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { createOrganization, getOrganizationDetails, listOrganizationsForUser, updateOrganization } from './organization.service';
 import { toOrganizationSummary } from '../memberships/membership.mapper';
+import { ROLE_PERMISSIONS } from '../memberships/permissions';
 import type { CreateOrganizationInput, UpdateOrganizationInput } from './organization.schemas';
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
@@ -17,6 +18,9 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
         id: membership.id,
         role: membership.role,
         status: membership.status,
+        customRoleId: null,
+        permissions: ROLE_PERMISSIONS.OWNER,
+        dataScope: 'ORGANIZATION' as const,
       },
     },
   });

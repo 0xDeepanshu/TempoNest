@@ -9,12 +9,13 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import { authService, trackingService } from '@/services'
+import { authService, activityService, trackingService } from '@/services'
 import { getOpenBreak, getTodayTotals, ongoingBreakMs, timerReducer, workElapsedMs } from '@/tracking/timerMachine'
 import { loadTimerState, saveTimerState, timerOwnerKey } from '@/tracking/timerStorage'
 import { toWorkSession } from '@/tracking/serverMapping'
 import type { AuthSession } from '@/types/auth'
 import type {
+  ActivityTrackingStatus,
   TrackingConnectionState,
   TrackingOperationResult,
   TrackingRuntimeStatus,
@@ -42,6 +43,8 @@ interface TimerContextValue {
   connection: TrackingConnectionState
   syncMessage: string | null
   pendingEvents: number
+  /** Server policy and local collector state; null until it is available. */
+  activity: ActivityTrackingStatus | null
   startWork: () => void
   stopWork: () => void
   startBreak: () => void
@@ -76,6 +79,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(timerReducer, null, () => loadTimerState(null))
   const [now, setNow] = useState(() => Date.now())
   const [runtime, setRuntime] = useState<TrackingRuntimeStatus>(INITIAL_RUNTIME_STATUS)
+  const [activity, setActivity] = useState<ActivityTrackingStatus | null>(null)
   const [ready, setReady] = useState(false)
   const [totalsState, setTotalsState] = useState<TotalsLoadState>('loading')
   const [totalsError, setTotalsError] = useState<string | null>(null)
@@ -271,6 +275,12 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       }
       setTotalsState('loading')
       setTotalsError(null)
+      void activityService
+        .getStatus()
+        .then((status) => {
+          if (active) setActivity(status)
+        })
+        .catch(() => undefined)
       reconcile(nextOwner)
     }
 
@@ -280,6 +290,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       sequence += 1
       operationSequence.current += 1
       setRuntime(INITIAL_RUNTIME_STATUS)
+      setActivity(null)
       setTotalsState('loading')
       setTotalsError(null)
       setReady(true)
@@ -299,6 +310,9 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     })
     const unsubscribeStatus = trackingService.onStatusChanged((status) => {
       if (active) setRuntime(status)
+    })
+    const unsubscribeActivity = activityService.onStatusChanged((status) => {
+      if (active) setActivity(status)
     })
     const unsubscribeAuth = authService.onSessionChanged?.((session) => {
       if (!active) return
@@ -330,6 +344,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       active = false
       unsubscribeState()
       unsubscribeStatus()
+      unsubscribeActivity()
       unsubscribeAuth?.()
     }
   }, [applySnapshot])
@@ -395,6 +410,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       connection: runtime.connection,
       syncMessage: runtime.message,
       pendingEvents: runtime.pendingEvents,
+      activity,
       startWork,
       stopWork,
       startBreak,
@@ -402,6 +418,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       retryTotals
     }
   }, [
+    activity,
     now,
     ready,
     resumeWork,

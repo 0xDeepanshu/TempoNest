@@ -1,6 +1,7 @@
 import { Op } from 'sequelize';
 import { DateTime, IANAZone } from 'luxon';
 import {
+  ActivityIdleInterval,
   ApplicationActivity,
   Break,
   DesktopAgent,
@@ -380,7 +381,7 @@ async function buildActivitySegments(options: {
   employeeId: string;
   start: Date;
   end: Date;
-}): Promise<{ segments: ActivitySegment[]; working: Interval[]; now: Date }> {
+}): Promise<{ segments: ActivitySegment[]; working: Interval[]; active: Interval[]; now: Date }> {
   const { organization, employeeId, start, end } = options;
   const now = new Date();
   const sessions = await loadSessionsOverlapping({
@@ -391,22 +392,52 @@ async function buildActivitySegments(options: {
   });
   const working = workingIntervalsForSessions(sessions, now, start, end);
 
-  const activities = await ApplicationActivity.findAll({
-    where: {
-      organizationId: organization.id,
-      employeeId,
-      startedAt: { [Op.lt]: end },
-      endedAt: { [Op.gt]: start },
-    },
-    order: [
-      ['startedAt', 'ASC'],
-      ['id', 'ASC'],
-    ],
-  });
+  const [activities, idleRows] = await Promise.all([
+    ApplicationActivity.findAll({
+      where: {
+        organizationId: organization.id,
+        employeeId,
+        startedAt: { [Op.lt]: end },
+        endedAt: { [Op.gt]: start },
+      },
+      order: [
+        ['startedAt', 'ASC'],
+        ['id', 'ASC'],
+      ],
+    }),
+    ActivityIdleInterval.findAll({
+      where: {
+        organizationId: organization.id,
+        employeeId,
+        startedAt: { [Op.lt]: end },
+        endedAt: { [Op.gt]: start },
+      },
+      order: [
+        ['startedAt', 'ASC'],
+        ['id', 'ASC'],
+      ],
+    }),
+  ]);
+
+  // Idle time never counts as application usage: subtract idle from working
+  // time before clipping activity, so segments cannot inflate usage.
+  const idleCuts: Interval[] = [];
+  for (const idle of idleRows) {
+    const idleInterval = clampInterval({ start: idle.startedAt, end: idle.endedAt }, start, end);
+    if (!idleInterval) continue;
+    for (const interval of working) {
+      const clipped = intersectIntervals(idleInterval, interval);
+      if (clipped) idleCuts.push(clipped);
+    }
+  }
+  const idle = mergeIntervals(idleCuts);
+  const active = mergeIntervals(
+    working.flatMap((interval) => subtractIntervals(interval, idle)),
+  );
 
   const segments: ActivitySegment[] = [];
   for (const activity of activities) {
-    for (const interval of working) {
+    for (const interval of active) {
       const clipped = intersectIntervals(
         { start: activity.startedAt, end: activity.endedAt },
         interval,
@@ -424,7 +455,7 @@ async function buildActivitySegments(options: {
     }
   }
 
-  return { segments, working, now };
+  return { segments, working, active, now };
 }
 
 export async function getApplicationUsageReport(options: {
@@ -434,7 +465,7 @@ export async function getApplicationUsageReport(options: {
   const { organization, query } = options;
   await ensureEmployee(organization.id, query.employeeId);
   const range = reportRange(query.from, query.to, organization.timezone);
-  const { segments, working } = await buildActivitySegments({
+  const { segments, working, active } = await buildActivitySegments({
     organization,
     employeeId: query.employeeId,
     start: range.start,
@@ -472,15 +503,17 @@ export async function getApplicationUsageReport(options: {
   );
   const totalSecondsAll = sorted.reduce((sum, group) => sum + group.totalSeconds, 0);
   const trackedWorkingSeconds = totalSeconds(working);
+  const activeSeconds = totalSeconds(active);
+  const idleSeconds = Math.max(0, trackedWorkingSeconds - activeSeconds);
   const pageStart = (query.page - 1) * query.limit;
   const data = sorted.slice(pageStart, pageStart + query.limit).map((group) => ({
     applicationIdentifier: group.applicationIdentifier,
     applicationName: group.applicationName,
     totalSeconds: group.totalSeconds,
     percentageOfTrackedTime:
-      trackedWorkingSeconds === 0
+      activeSeconds === 0
         ? 0
-        : Math.round((group.totalSeconds / trackedWorkingSeconds) * 1000) / 10,
+        : Math.round((group.totalSeconds / activeSeconds) * 1000) / 10,
     eventCount: group.eventIds.size,
     sessionCount: group.sessionIds.size,
   }));
@@ -492,6 +525,8 @@ export async function getApplicationUsageReport(options: {
     to: query.to,
     timezone: organization.timezone,
     trackedWorkingSeconds,
+    idleSeconds,
+    activeSeconds,
     totalApplicationSeconds: totalSecondsAll,
     disclaimer: DISCLAIMER,
   };

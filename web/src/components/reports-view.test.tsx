@@ -5,8 +5,11 @@ import { EmployeeDetailView } from "@/components/employee-detail-view";
 import { ReportsView } from "@/components/reports-view";
 import { WorkspaceProvider } from "@/components/workspace";
 import { apiRequest } from "@/lib/api-client";
+import type { Permission } from "@/lib/permissions";
 import type {
+  ActivitySummary,
   DailyReport,
+  DataScope,
   MemberListItem,
   Organization,
   SessionData,
@@ -170,6 +173,45 @@ const tracking: TrackingStatusResponse = {
   serverTime: "2026-10-25T12:00:00.000Z",
 };
 
+const activitySummary: ActivitySummary = {
+  employeeId: "employee-1",
+  from: "2026-09-01",
+  to: "2026-09-30",
+  timezone: "UTC",
+  policy: {
+    appTrackingEnabled: true,
+    idleDetectionEnabled: true,
+    idleThresholdMinutes: 5,
+    productivityClassificationEnabled: true,
+    activityRetentionDays: 90,
+    policyVersion: 1,
+    policyUpdatedAt: "2026-10-01T00:00:00.000Z",
+  },
+  totals: {
+    sessionCount: 1,
+    trackedSeconds: 7200,
+    workingSeconds: 6900,
+    breakSeconds: 300,
+    idleSeconds: 900,
+    activeSeconds: 6000,
+    applicationSeconds: 4500,
+    unaccountedActiveSeconds: 1500,
+    activityCoveragePercent: 75,
+    productiveSeconds: 3000,
+    neutralSeconds: 1000,
+    unproductiveSeconds: 500,
+    unclassifiedSeconds: 0,
+    productivePercentOfActive: 50,
+    unclassifiedPercentOfActive: 0,
+    hasActivityData: true,
+    hasIdleData: true,
+  },
+  categories: [],
+  applications: [],
+  days: [],
+  disclaimer: "Application usage is foreground metadata only.",
+};
+
 function mockApi() {
   mockedApiRequest.mockImplementation(async (path, options) => {
     const query = (options as { query?: Record<string, unknown> } | undefined)?.query ?? {};
@@ -180,13 +222,51 @@ function mockApi() {
     if (path.endsWith("/reports/sessions")) return sessionReport;
     if (path.endsWith("/reports/daily")) return { data: dailyReport };
     if (path.endsWith("/reports/tracking-status")) return tracking;
+    if (path.endsWith("/reports/activity-summary")) return { data: activitySummary };
     throw new Error(`Unexpected request: ${path}`);
   });
 }
 
-function renderReports(props: React.ComponentProps<typeof ReportsView> = {}) {
+function customRoleSession(
+  permissions: Permission[],
+  options: { userId?: string; dataScope?: DataScope } = {},
+): SessionData {
+  const userId = options.userId ?? "lead-1";
+  return {
+    ...session,
+    user: {
+      ...session.user,
+      id: userId,
+      name: "Team Lead",
+      email: "lead@example.com",
+    },
+    memberships: [
+      {
+        ...session.memberships[0],
+        userId,
+        role: "EMPLOYEE",
+        customRoleId: "role-1",
+        permissions,
+        dataScope: options.dataScope ?? "ORGANIZATION",
+        customRole: {
+          id: "role-1",
+          name: "team lead",
+          description: null,
+          permissions,
+          dataScope: options.dataScope ?? "ORGANIZATION",
+          onboardingEligible: false,
+        },
+      },
+    ],
+  };
+}
+
+function renderReports(
+  props: React.ComponentProps<typeof ReportsView> = {},
+  activeSession: SessionData = session,
+) {
   return render(
-    <WorkspaceProvider session={session}>
+    <WorkspaceProvider session={activeSession}>
       <ReportsView {...props} />
     </WorkspaceProvider>,
   );
@@ -291,6 +371,105 @@ describe("ReportsView", () => {
       "href",
       "/admin/employees/employee-1?from=2026-09-01&to=2026-09-30",
     );
+  });
+
+  it("opens the activity tab from a deep link and requests the summary", async () => {
+    mockApi();
+    renderReports({
+      initialEmployeeId: "employee-1",
+      initialFrom: "2026-09-01",
+      initialTo: "2026-09-30",
+      initialTab: "activity",
+    });
+
+    expect(await screen.findByText("Data availability")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockedApiRequest).toHaveBeenCalledWith(
+        "/organizations/org-1/reports/activity-summary",
+        expect.objectContaining({
+          query: {
+            from: "2026-09-01",
+            to: "2026-09-30",
+            employeeId: "employee-1",
+          },
+        }),
+      );
+    });
+    expect(
+      mockedApiRequest.mock.calls.some(([path]) => path.endsWith("/reports/sessions")),
+    ).toBe(false);
+  });
+
+  it("hides the activity tab from a report-only role and never requests its summary", async () => {
+    mockApi();
+    renderReports(
+      {
+        initialEmployeeId: "employee-1",
+        initialFrom: "2026-09-01",
+        initialTo: "2026-09-30",
+        initialTab: "activity",
+      },
+      customRoleSession(["report:read"], { dataScope: "ORGANIZATION" }),
+    );
+
+    await waitFor(() => {
+      expect(mockedApiRequest).toHaveBeenCalledWith(
+        "/organizations/org-1/reports/sessions",
+        expect.objectContaining({
+          query: expect.objectContaining({ employeeId: "employee-1" }),
+        }),
+      );
+    });
+
+    expect(screen.getByRole("button", { name: "Sessions" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Activity" })).not.toBeInTheDocument();
+    expect(
+      mockedApiRequest.mock.calls.some(([path]) => path.endsWith("/reports/activity-summary")),
+    ).toBe(false);
+    expect(
+      mockedApiRequest.mock.calls.some(([path]) => path.endsWith("/members")),
+    ).toBe(false);
+    expect(screen.getByRole("combobox", { name: "Employee" })).toBeDisabled();
+    expect(screen.getByText("Directory access required")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Open employee profile/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("lets a self-scoped role read its own activity without directory access", async () => {
+    mockApi();
+    renderReports(
+      {
+        initialEmployeeId: "employee-1",
+        initialFrom: "2026-09-01",
+        initialTo: "2026-09-30",
+        initialTab: "activity",
+      },
+      customRoleSession(["time:read", "report:read"], {
+        userId: "employee-1",
+        dataScope: "SELF",
+      }),
+    );
+
+    expect(await screen.findByText("Data availability")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Activity" })).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(mockedApiRequest).toHaveBeenCalledWith(
+        "/organizations/org-1/reports/activity-summary",
+        expect.objectContaining({
+          query: {
+            from: "2026-09-01",
+            to: "2026-09-30",
+            employeeId: "employee-1",
+          },
+        }),
+      );
+    });
+    expect(
+      mockedApiRequest.mock.calls.some(([path]) => path.endsWith("/members")),
+    ).toBe(false);
+    expect(screen.getByRole("combobox", { name: "Employee" })).toBeDisabled();
   });
 
   it("shows an employee prompt until someone is selected", () => {

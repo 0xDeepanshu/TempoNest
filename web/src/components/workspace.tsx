@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -52,6 +53,8 @@ function serverOrganizationId(): string | null {
   return null;
 }
 
+const PERMISSION_REFRESH_THROTTLE_MS = 5_000;
+
 export function WorkspaceProvider({
   session,
   children,
@@ -59,14 +62,77 @@ export function WorkspaceProvider({
   session: SessionData;
   children: ReactNode;
 }) {
+  // The server session is the source of truth after a navigation or refresh.
+  // A client-side refresh can update it in place when a role changes, but a new
+  // server prop always wins.
+  const [sessionState, setSessionState] = useState(() => ({
+    source: session,
+    value: session,
+  }));
+  if (sessionState.source !== session) {
+    setSessionState({ source: session, value: session });
+  }
+  const currentSession = sessionState.value;
+
+  useEffect(() => {
+    let disposed = false;
+    let inFlight = false;
+    let lastFetchAt = 0;
+
+    async function refresh(force: boolean) {
+      if (disposed || inFlight) return;
+      const now = Date.now();
+      if (!force && now - lastFetchAt < PERMISSION_REFRESH_THROTTLE_MS) return;
+      inFlight = true;
+      lastFetchAt = now;
+      try {
+        const response = await apiRequest<{ data?: SessionData }>("/auth/me");
+        const next = response.data;
+        if (disposed || !next) return;
+        setSessionState((previous) => {
+          if (previous.source !== session) return previous;
+          if (JSON.stringify(previous.value) === JSON.stringify(next)) return previous;
+          return { source: session, value: next };
+        });
+      } catch {
+        // Keep the last known permissions. Authentication expiry is handled by
+        // the API client's global 401 event.
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    function refreshOnFocus() {
+      void refresh(false);
+    }
+    function refreshOnVisible() {
+      if (document.visibilityState === "visible") void refresh(false);
+    }
+    function refreshNow() {
+      void refresh(true);
+    }
+
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnVisible);
+    window.addEventListener("tn:permissions-changed", refreshNow);
+    window.addEventListener("tn:permission-denied", refreshNow);
+    return () => {
+      disposed = true;
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnVisible);
+      window.removeEventListener("tn:permissions-changed", refreshNow);
+      window.removeEventListener("tn:permission-denied", refreshNow);
+    };
+  }, [session]);
+
   const activeMemberships = useMemo(
     () =>
-      session.memberships.filter(
+      currentSession.memberships.filter(
         (membership) =>
           membership.status === "ACTIVE" &&
           membership.organization?.status === "ACTIVE",
       ),
-    [session.memberships],
+    [currentSession.memberships],
   );
 
   // Reading the persisted selection through useSyncExternalStore keeps the
@@ -85,9 +151,9 @@ export function WorkspaceProvider({
 
   const value = useMemo<WorkspaceValue>(
     () => ({
-      session,
-      user: session.user,
-      memberships: session.memberships,
+      session: currentSession,
+      user: currentSession.user,
+      memberships: currentSession.memberships,
       activeMemberships,
       membership,
       organization: membership?.organization,
@@ -96,7 +162,7 @@ export function WorkspaceProvider({
         window.dispatchEvent(new Event(STORAGE_EVENT));
       },
     }),
-    [session, activeMemberships, membership],
+    [currentSession, activeMemberships, membership],
   );
 
   return <WorkspaceContext value={value}>{children}</WorkspaceContext>;
@@ -255,9 +321,13 @@ export function AccessDenied({
         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted">
           {organization ? (
             <>
-              Your <strong>{membership?.role.toLowerCase()}</strong> role in{" "}
-              <strong>{organization.name}</strong> does not include <code>{label}</code>. Switch
-              organizations or ask an administrator if you need access.
+              Your{" "}
+              <strong>
+                {membership?.customRole?.name ?? membership?.role.toLowerCase()}
+              </strong>{" "}
+              role in <strong>{organization.name}</strong> does not include{" "}
+              <code>{label}</code>. Switch organizations or ask an administrator if you need
+              access.
             </>
           ) : (
             "Select or create an organization first."
@@ -288,8 +358,8 @@ export function PermissionGate({
   const { membership } = useWorkspace();
   if (!membership) return <NoOrganization />;
   const allowed = permission
-    ? hasPermission(membership.role, permission)
-    : hasAnyPermission(membership.role, anyOf ?? []);
+    ? hasPermission(membership, permission)
+    : hasAnyPermission(membership, anyOf ?? []);
   if (!allowed) return <AccessDenied permission={permission} anyOf={anyOf} />;
   return <>{children}</>;
 }

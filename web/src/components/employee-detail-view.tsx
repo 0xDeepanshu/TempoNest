@@ -11,6 +11,7 @@ import {
   formatTimeRange,
 } from "@/lib/format";
 import { findMember } from "@/lib/members";
+import { hasPermission, isSelfScoped } from "@/lib/permissions";
 import { reportRangeFromUrl } from "@/lib/report-range";
 import type {
   DailyReport,
@@ -22,6 +23,7 @@ import { useApi } from "@/lib/use-api";
 import { ArrowRightIcon, CalendarIcon, ClockIcon } from "./icons";
 import { CorrectionHistory } from "./correction-history";
 import {
+  Alert,
   Avatar,
   Button,
   Card,
@@ -54,9 +56,13 @@ export function EmployeeDetailView({
 }) {
   const params = useParams<{ employeeId: string }>();
   const employeeId = params.employeeId;
-  const { organization } = useWorkspace();
+  const { organization, membership, user } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const timezone = organization?.timezone ?? "UTC";
+  const canViewReports = hasPermission(membership, "report:read");
+  const canReviewTeam =
+    hasPermission(membership, "correction:review") &&
+    !isSelfScoped(membership, membership?.dataScope);
   const range = useMemo(
     () => reportRangeFromUrl(initialFrom, initialTo, timezone, 30, 92),
     [initialFrom, initialTo, timezone],
@@ -76,7 +82,7 @@ export function EmployeeDetailView({
         query: { employeeId, limit: 1 },
       }),
     [organizationId, employeeId],
-    { enabled: Boolean(organizationId && employeeId) },
+    { enabled: Boolean(organizationId && employeeId) && canViewReports },
   );
 
   const sessions = useApi<SessionReportResponse>(
@@ -86,7 +92,7 @@ export function EmployeeDetailView({
         query: { employeeId, from: range.from, to: range.to, limit: 8 },
       }),
     [organizationId, employeeId, range.from, range.to],
-    { enabled: Boolean(organizationId && employeeId) },
+    { enabled: Boolean(organizationId && employeeId) && canViewReports },
   );
 
   const daily = useApi<{ data: DailyReport }>(
@@ -96,7 +102,7 @@ export function EmployeeDetailView({
         query: { employeeId, from: range.from, to: range.to },
       }),
     [organizationId, employeeId, range.from, range.to],
-    { enabled: Boolean(organizationId && employeeId) },
+    { enabled: Boolean(organizationId && employeeId) && canViewReports },
   );
 
   if (!organization) return <NoOrganization />;
@@ -126,6 +132,23 @@ export function EmployeeDetailView({
   }
 
   const employee = member.data;
+  const canViewCorrections =
+    canReviewTeam ||
+    (employee.userId === user.id && hasPermission(membership, "time:read"));
+  const activeTab: DetailTab | null =
+    tab === "activity" && !canViewReports
+      ? canViewCorrections
+        ? "corrections"
+        : null
+      : tab === "corrections" && !canViewCorrections
+        ? canViewReports
+          ? "activity"
+          : null
+        : tab;
+  const tabs = [
+    ...(canViewReports ? [{ value: "activity" as const, label: "Recent activity" }] : []),
+    ...(canViewCorrections ? [{ value: "corrections" as const, label: "Corrections" }] : []),
+  ];
   const trackingRow = tracking.data?.data[0];
   const sessionRows = sessions.data?.data ?? [];
   const dailyRows = daily.data?.data.days ?? [];
@@ -150,12 +173,14 @@ export function EmployeeDetailView({
           title={employee.user.name}
           description={`${employee.user.email} · ${employee.role.toLowerCase()} · joined ${formatDateTime(employee.createdAt, timezone)}`}
           actions={
-            <Link href={reportsHref}>
-              <Button>
-                Open reports
-                <ArrowRightIcon className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
+            canViewReports ? (
+              <Link href={reportsHref}>
+                <Button>
+                  Open reports
+                  <ArrowRightIcon className="h-3.5 w-3.5" />
+                </Button>
+              </Link>
+            ) : undefined
           }
         />
       </div>
@@ -169,7 +194,7 @@ export function EmployeeDetailView({
                 <p className="truncate text-base font-semibold text-ink">{employee.user.name}</p>
                 <p className="truncate text-xs text-muted">{employee.user.email}</p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  <RoleBadge role={employee.role} />
+                  <RoleBadge role={employee.role} customRoleName={employee.customRole?.name} />
                   <MembershipStatusBadge status={employee.status} />
                 </div>
               </div>
@@ -198,7 +223,11 @@ export function EmployeeDetailView({
             actions={trackingRow ? <StatusBadge status={trackingRow.state} /> : null}
           />
           <CardBody>
-            {tracking.error ? (
+            {!canViewReports ? (
+              <Alert tone="info" title="Tracking state restricted">
+                Viewing an employee&apos;s live tracking state requires report access.
+              </Alert>
+            ) : tracking.error ? (
               <ErrorState message={tracking.error} onRetry={tracking.reload} />
             ) : trackingRow ? (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -254,6 +283,12 @@ export function EmployeeDetailView({
         </Card>
       </div>
 
+      {!canViewReports ? (
+        <Alert tone="info" title="Attendance metrics restricted">
+          Worked hours, breaks, and session totals require report access. The profile and
+          membership details remain available.
+        </Alert>
+      ) : (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Worked"
@@ -282,25 +317,35 @@ export function EmployeeDetailView({
           accent="emerald"
         />
       </div>
+      )}
 
-      {daily.error ? <ErrorState message={daily.error} onRetry={daily.reload} /> : null}
+      {canViewReports && daily.error ? (
+        <ErrorState message={daily.error} onRetry={daily.reload} />
+      ) : null}
 
+      {tabs.length > 0 ? (
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
-          value={tab}
+          value={activeTab ?? "activity"}
           onChange={setTab}
-          tabs={[
-            { value: "activity", label: "Recent activity", count: sessionRows.length },
-            { value: "corrections", label: "Corrections" },
-          ]}
+          tabs={
+            canViewReports
+              ? tabs.map((item) =>
+                  item.value === "activity"
+                    ? { ...item, count: sessionRows.length }
+                    : item,
+                )
+              : tabs
+          }
         />
         <p className="flex items-center gap-1.5 text-xs text-muted">
           <CalendarIcon className="h-3.5 w-3.5" />
           {formatDateRange(range.from, range.to)} · {timezone}
         </p>
       </div>
+      ) : null}
 
-      {tab === "activity" ? (
+      {activeTab === "activity" ? (
         <Card>
           <CardHeader
             title="Recent activity"
@@ -360,12 +405,13 @@ export function EmployeeDetailView({
         </Card>
       ) : null}
 
-      {tab === "corrections" ? (
+      {activeTab === "corrections" ? (
         <CorrectionHistory
           organizationId={organization.id}
           timezone={timezone}
           showEmployee={false}
           employeeId={employee.userId}
+          enabled={canViewCorrections}
         />
       ) : null}
     </div>

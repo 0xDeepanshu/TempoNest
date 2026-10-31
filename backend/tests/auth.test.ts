@@ -13,7 +13,7 @@ import {
   resetDatabase,
   uniqueEmail,
 } from './helpers';
-import { Session } from '../src/database';
+import { Session, User } from '../src/database';
 
 beforeEach(async () => {
   await resetDatabase();
@@ -137,6 +137,59 @@ describe('login and browser sessions', () => {
 
     const stored = await Session.findOne({ where: { userId: session.user.id } });
     expect(stored?.revokedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe('login brute-force protection', () => {
+  it('locks an account after repeated failures and clears the lock on success', async () => {
+    const email = uniqueEmail('locked');
+    await registerUser(email);
+
+    // Default threshold: 10 failed attempts within the lockout window.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const response = await request(app)
+        .post(`${API}/auth/login`)
+        .send({ email, password: 'WrongPassword123!' });
+      expect(response.status).toBe(401);
+      expect(response.body.error.code).toBe('INVALID_CREDENTIALS');
+    }
+
+    const locked = await request(app)
+      .post(`${API}/auth/login`)
+      .send({ email, password: PASSWORD });
+    expect(locked.status).toBe(429);
+    expect(locked.body.error.code).toBe('ACCOUNT_LOCKED');
+
+    // Once the lock elapses, a successful sign-in clears the counter.
+    await User.update(
+      { lockedUntil: new Date(Date.now() - 1_000) },
+      { where: { email } },
+    );
+    const recovered = await loginBrowser(email);
+    expect(recovered.response.status).toBe(200);
+    const stored = await User.findOne({ where: { email } });
+    expect(stored!.failedLoginAttempts).toBe(0);
+    expect(stored!.lockedUntil).toBeNull();
+
+    // Unknown addresses never reveal lockout state.
+    const unknown = await request(app)
+      .post(`${API}/auth/login`)
+      .send({ email: uniqueEmail('unknown'), password: PASSWORD });
+    expect(unknown.status).toBe(401);
+    expect(unknown.body.error.code).toBe('INVALID_CREDENTIALS');
+  });
+
+  it('does not lock accounts for successful sign-ins', async () => {
+    const email = uniqueEmail('healthy');
+    await registerUser(email);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const login = await loginBrowser(email);
+      expect(login.response.status).toBe(200);
+    }
+
+    const session = await loginBrowser(email);
+    expect(session.response.status).toBe(200);
   });
 });
 

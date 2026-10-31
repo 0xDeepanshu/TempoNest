@@ -5,6 +5,8 @@ import { requirePermission } from '../memberships/permissions';
 import { loadOrganizationContext } from '../memberships/organizationContext';
 import { organizationIdParamsSchema } from '../organizations/organization.schemas';
 import {
+  activityOverviewQuerySchema,
+  activitySummaryQuerySchema,
   applicationTimelineQuerySchema,
   applicationUsageQuerySchema,
   dailyReportQuerySchema,
@@ -12,6 +14,8 @@ import {
   trackingStatusQuerySchema,
 } from './reporting.schemas';
 import {
+  activityOverview,
+  activitySummary,
   applicationTimeline,
   applicationUsage,
   daily,
@@ -75,6 +79,28 @@ export function createOrganizationReportingRouter(): Router {
     requirePermission('report:read'),
     validate({ query: applicationTimelineQuerySchema }),
     applicationTimeline,
+  );
+
+  // Employees can read their own summary (time:read); the service blocks
+  // reading anybody else's. Administrators and managers may pass employeeId.
+  router.get(
+    '/:organizationId/reports/activity-summary',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('time:read'),
+    validate({ query: activitySummaryQuerySchema }),
+    activitySummary,
+  );
+
+  router.get(
+    '/:organizationId/reports/activity-overview',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('report:read'),
+    validate({ query: activityOverviewQuerySchema }),
+    activityOverview,
   );
 
   return router;

@@ -111,10 +111,12 @@ export function CorrectionForm({
   organizationId,
   timezone,
   onCreated,
+  canListSessions = true,
 }: {
   organizationId: string;
   timezone: string;
   onCreated: () => void;
+  canListSessions?: boolean;
 }) {
   const today = useMemo(() => todayInTimeZone(timezone), [timezone]);
   const defaults = useMemo(() => defaultCorrectionWindow(today, timezone), [today, timezone]);
@@ -143,7 +145,7 @@ export function CorrectionForm({
         },
       }),
     [organizationId, timezone, today],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId) && canListSessions },
   );
 
   const stoppedSessions = sessions.data?.data ?? [];
@@ -327,12 +329,17 @@ export function CorrectionForm({
         <Field
           label="Session to correct"
           htmlFor="correction-session"
-          hint="Choose a stopped session, or request a missing session."
+          hint={
+            canListSessions
+              ? "Choose a stopped session, or request a missing session."
+              : "Requesting a missing session. Reading stopped sessions requires attendance read access."
+          }
         >
           <Select
             id="correction-session"
             value={target}
             onChange={(event) => selectTarget(event.target.value)}
+            disabled={!canListSessions}
           >
             <option value="new">Missing session — create a new record</option>
             {stoppedSessions.map((session) => (
