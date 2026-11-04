@@ -1,4 +1,4 @@
-# WorkZen / TempoNest — Production Deployment Guide
+# WorkZen — Production Deployment Guide
 
 This guide describes the exact commands to run **manually** on the Hostinger Ubuntu VPS.
 Nothing in this repository has been deployed, and no production database has been
@@ -573,5 +573,6 @@ URLs are reachable from the phone.
   isolation unchanged.
 - The backend has no `HOST` setting and binds `0.0.0.0:4100`. Keep UFW enforcing that
   only 80/443 (and SSH) are reachable; port 4100 must not be exposed publicly.
-- The application still displays the TempoNest product name in the UI. No branding
-  change was made as part of this preparation.
+- WorkZen branding is applied across the portal, desktop agent, mobile app, installer,
+  and outbound e-mail. Database names, stored keys, API routes, package identifiers, and
+  the Electron/Android/iOS application IDs are intentionally unchanged for compatibility.

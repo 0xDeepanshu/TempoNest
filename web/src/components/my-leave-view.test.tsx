@@ -24,7 +24,7 @@ const SERVER_TIME = "2026-10-23T10:00:00.000Z";
 
 const organization: Organization = {
   id: "org-1",
-  name: "TempoNest",
+  name: "WorkZen",
   slug: "temponest",
   status: "ACTIVE",
   timezone: "UTC",

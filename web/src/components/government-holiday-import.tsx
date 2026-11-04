@@ -259,7 +259,7 @@ export function GovernmentHolidayImport({
               <LoadingBlock label="Loading government holiday sources" rows={3} />
             ) : years.length === 0 ? (
               <Alert tone="warning" title="No verified government data available">
-                TempoNest only imports holidays from verified official notifications. Nothing is shown for
+                WorkZen only imports holidays from verified official notifications. Nothing is shown for
                 this jurisdiction, so no dates are guessed.
               </Alert>
             ) : preview.error ? (

@@ -148,7 +148,7 @@ export class AppRuntime {
         // still present, so detach it before the tracking layer cleans up.
         this.activity.detachSession(explicitSignOut)
         this.screenshots.detachSession()
-        this.tracking.detachSession(explicitSignOut)
+        this.tracking.detachSession()
       }
       this.broadcast('auth:sessionChanged', session)
     })
@@ -191,7 +191,15 @@ export class AppRuntime {
         })
       })
     )
-    ipcMain.handle('auth:signOut', () => this.wrap<void>(() => this.auth.signOut()))
+    ipcMain.handle('auth:signOut', () =>
+      this.wrap<void>(async () => {
+        // Close the active work session at sign-out time before credentials are
+        // removed. If the server is unreachable the stop stays in this
+        // employee's durable queue and is replayed after their next sign-in.
+        await this.tracking.stopForSignOut()
+        await this.auth.signOut()
+      })
+    )
 
     ipcMain.handle('tracking:restore', () =>
       this.wrap<TrackingSnapshot | null>(() => this.tracking.restore())

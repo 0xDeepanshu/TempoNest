@@ -74,7 +74,7 @@ describe("ForgotPasswordForm", () => {
     await user.click(screen.getByRole("button", { name: "Send reset link" }));
 
     expect(
-      await screen.findByText("Enter the email address you use for TempoNest."),
+      await screen.findByText("Enter the email address you use for WorkZen."),
     ).toBeInTheDocument();
     expect(mockedApiRequest).not.toHaveBeenCalled();
   });

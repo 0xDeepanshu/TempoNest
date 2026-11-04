@@ -79,7 +79,7 @@ export class AgentManager {
         method: 'POST',
         body: {
           deviceId,
-          name: `${os.hostname()} · TempoNest`,
+          name: `${os.hostname()} · WorkZen`,
           platform: process.platform,
           osVersion: os.release(),
           appVersion: app.getVersion()

@@ -38,8 +38,8 @@ export class NetworkError extends Error {
   constructor(timedOut: boolean) {
     super(
       timedOut
-        ? 'TempoNest took too long to respond. Please try again.'
-        : "Can't reach TempoNest. Check your connection and try again.",
+        ? 'WorkZen took too long to respond. Please try again.'
+        : "Can't reach WorkZen. Check your connection and try again.",
     );
     this.name = 'NetworkError';
     this.timedOut = timedOut;

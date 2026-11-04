@@ -38,7 +38,7 @@ const mockedApiRequest = vi.mocked(apiRequest);
 
 const organization: Organization = {
   id: "org-1",
-  name: "TempoNest",
+  name: "WorkZen",
   slug: "temponest",
   status: "ACTIVE",
   timezone: "UTC",
@@ -127,6 +127,9 @@ function trackingRow(overrides: Partial<TrackingStatusRow> = {}): TrackingStatus
     employee: employeeUser,
     state: "WORKING",
     online: true,
+    agentOnline: true,
+    sessionActive: true,
+    sessionFresh: true,
     heartbeatStale: false,
     activeSession: activeSession(),
     lastHeartbeatAt: "2026-10-24T11:59:00.000Z",
@@ -277,6 +280,9 @@ describe("LiveTrackingView", () => {
     mockLiveTracking({
       row: trackingRow({
         online: false,
+        agentOnline: false,
+        sessionActive: false,
+        sessionFresh: false,
         heartbeatStale: true,
         activeSession: null,
         agent: null,
@@ -295,6 +301,47 @@ describe("LiveTrackingView", () => {
         "The employee needs an active work session in the desktop app.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("separates a stale open session from agent connectivity", async () => {
+    mockLiveTracking({
+      row: trackingRow({
+        online: true,
+        agentOnline: true,
+        sessionActive: true,
+        sessionFresh: false,
+        heartbeatStale: true,
+        state: "ONLINE",
+      }),
+      enabled: true,
+    });
+    renderView();
+
+    expect(await screen.findByText("Session stale")).toBeInTheDocument();
+    expect(screen.getByText("Agent online")).toBeInTheDocument();
+    expect(
+      screen.getByText("Awaiting sync · duration stopped at the last heartbeat"),
+    ).toBeInTheDocument();
+    const live = await screen.findByRole("button", { name: /View live screen/ });
+    await waitFor(() => expect(live).toBeDisabled());
+  });
+
+  it("shows a connected agent without inventing an attendance session", async () => {
+    mockLiveTracking({
+      row: trackingRow({
+        state: "ONLINE",
+        activeSession: null,
+        sessionActive: false,
+        sessionFresh: false,
+        heartbeatStale: null,
+      }),
+      enabled: true,
+    });
+    renderView();
+
+    expect(await screen.findByText("Agent online")).toBeInTheDocument();
+    expect(screen.getByText("No active session")).toBeInTheDocument();
+    expect(screen.queryByText("Session live")).not.toBeInTheDocument();
   });
 
   it("explains that monitoring is disabled before any request can be sent", async () => {
@@ -332,7 +379,7 @@ describe("LiveTrackingView", () => {
   });
 
   it("keeps the live action visible but explains when the agent is offline", async () => {
-    mockLiveTracking({ row: trackingRow({ online: false }), enabled: true });
+    mockLiveTracking({ row: trackingRow({ online: false, agentOnline: false }), enabled: true });
     renderView();
 
     const button = await screen.findByRole("button", { name: /View live screen/ });

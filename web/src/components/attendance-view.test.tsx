@@ -21,7 +21,7 @@ const mockedApiRequest = vi.mocked(apiRequest);
 
 const organization: Organization = {
   id: "org-1",
-  name: "TempoNest",
+  name: "WorkZen",
   slug: "temponest",
   status: "ACTIVE",
   timezone: "Asia/Kolkata",

@@ -24,6 +24,7 @@ import {
 import { toPublicUser } from '../memberships/membership.mapper';
 import { isAgentOnline, toDesktopAgentSummary } from '../desktopAgents/desktopAgent.mapper';
 import {
+  effectiveSessionEnd,
   isHeartbeatFresh,
   toTimeSessionSummary,
 } from '../timeTracking/timeSession.mapper';
@@ -109,7 +110,7 @@ export function effectiveSessionInterval(
   rangeEnd: Date,
 ): Interval | null {
   return clampInterval(
-    { start: session.startedAt, end: session.endedAt ?? now },
+    { start: session.startedAt, end: effectiveSessionEnd(session, now) },
     rangeStart,
     rangeEnd,
   );
@@ -125,9 +126,10 @@ export function breakIntervals(
   for (const session of sessions) {
     const sessionInterval = effectiveSessionInterval(session, now, rangeStart, rangeEnd);
     if (!sessionInterval) continue;
+    const sessionEnd = effectiveSessionEnd(session, now);
     for (const brk of session.breaks ?? []) {
       const clipped = intersectIntervals(
-        { start: brk.startedAt, end: brk.endedAt ?? now },
+        { start: brk.startedAt, end: brk.endedAt ?? sessionEnd },
         sessionInterval,
       );
       if (clipped) intervals.push(clipped);
@@ -147,10 +149,11 @@ export function workingIntervalsForSessions(
   for (const session of sessions) {
     const sessionInterval = effectiveSessionInterval(session, now, rangeStart, rangeEnd);
     if (!sessionInterval) continue;
+    const sessionEnd = effectiveSessionEnd(session, now);
     const cuts = (session.breaks ?? [])
       .map((brk) =>
         intersectIntervals(
-          { start: brk.startedAt, end: brk.endedAt ?? now },
+          { start: brk.startedAt, end: brk.endedAt ?? sessionEnd },
           sessionInterval!,
         ),
       )
@@ -242,6 +245,14 @@ export async function getTrackingStatus(options: {
       employee: toPublicUser(membership.user!),
       state,
       online: agentFresh,
+      /**
+       * Presence and attendance are independent. An open session can be stale
+       * (device lost or offline) while the agent is still reachable, and an
+       * agent can be offline while its recently validated session is fresh.
+       */
+      agentOnline: agentFresh,
+      sessionActive: session !== null,
+      sessionFresh,
       heartbeatStale: session ? !sessionFresh : null,
       activeSession: session ? toTimeSessionSummary(session, now) : null,
       lastHeartbeatAt: session?.lastHeartbeatAt ?? null,
@@ -296,8 +307,9 @@ export async function getSessionReport(options: {
 
   const rows = result.rows.map((session) => {
     const summary = toTimeSessionSummary(session, now);
+    const sessionEnd = effectiveSessionEnd(session, now);
     const breakSeconds = (session.breaks ?? []).reduce(
-      (sum, brk) => sum + secondsBetween(brk.startedAt, brk.endedAt ?? now),
+      (sum, brk) => sum + secondsBetween(brk.startedAt, brk.endedAt ?? sessionEnd),
       0,
     );
     return {

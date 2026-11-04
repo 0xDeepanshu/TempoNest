@@ -426,7 +426,11 @@ export interface AttendanceLocationHistoryResponse {
 export interface TrackingStatusRow {
   employee: PublicUser;
   state: TrackingState;
+  /** Agent connectivity; never inferred from the existence of an open session. */
   online: boolean;
+  agentOnline: boolean;
+  sessionActive: boolean;
+  sessionFresh: boolean;
   heartbeatStale: boolean | null;
   activeSession: TimeSession | null;
   lastHeartbeatAt: string | null;

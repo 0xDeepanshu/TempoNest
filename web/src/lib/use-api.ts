@@ -13,6 +13,13 @@ interface ApiState<T> {
 
 interface UseApiOptions {
   enabled?: boolean;
+  /** Re-runs the request on an interval while the hook is enabled. */
+  refreshIntervalMs?: number;
+  /**
+   * Keeps the last successful result visible while a refresh is in flight or
+   * after a failed poll, so live views do not blank out every interval.
+   */
+  keepPreviousData?: boolean;
 }
 
 export function useApi<T>(
@@ -20,7 +27,7 @@ export function useApi<T>(
   deps: readonly unknown[],
   options: UseApiOptions = {},
 ) {
-  const { enabled = true } = options;
+  const { enabled = true, refreshIntervalMs = 0, keepPreviousData = false } = options;
   const factoryRef = useRef(factory);
   const [reloadKey, setReloadKey] = useState(0);
   const [state, setState] = useState<ApiState<T>>({
@@ -52,28 +59,36 @@ export function useApi<T>(
       })
       .catch((error: unknown) => {
         if (!active || controller.signal.aborted) return;
-        setState({
+        setState((previous) => ({
           key,
-          data: undefined,
+          data: keepPreviousData ? previous.data : undefined,
           error: errorMessage(error),
           errorCode: isApiError(error) ? error.code : null,
-        });
+        }));
       });
 
     return () => {
       active = false;
       controller.abort();
     };
-  }, [enabled, requestKey]);
+  }, [enabled, requestKey, keepPreviousData]);
+
+  useEffect(() => {
+    if (!enabled || refreshIntervalMs <= 0) return;
+    const timer = setInterval(() => setReloadKey((key) => key + 1), refreshIntervalMs);
+    return () => clearInterval(timer);
+  }, [enabled, refreshIntervalMs, requestKey]);
 
   const settled = enabled && state.key === requestKey ? state : null;
-  const loading = enabled && state.key !== requestKey;
+  const data = settled ? settled.data : keepPreviousData ? state.data : undefined;
+  const loading = enabled && state.key !== requestKey && data === undefined;
 
   return {
-    data: settled?.data,
+    data,
     error: settled?.error ?? null,
     errorCode: settled?.errorCode ?? null,
     loading,
+    refreshing: enabled && state.key !== requestKey && data !== undefined,
     reload: () => setReloadKey((key) => key + 1),
   };
 }

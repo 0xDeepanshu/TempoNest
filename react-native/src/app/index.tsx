@@ -21,7 +21,7 @@ export default function IndexScreen() {
       <Screen scroll={false} contentStyle={styles.centered}>
         <View style={styles.brand}>
           <BrandMark size={56} />
-          <Text style={styles.brandName}>TempoNest</Text>
+          <Text style={styles.brandName}>WorkZen</Text>
         </View>
 
         <View style={styles.panel}>

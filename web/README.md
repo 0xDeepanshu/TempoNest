@@ -1,12 +1,12 @@
-# TempoNest Web Portal
+# WorkZen Web Portal
 
-The TempoNest employee and admin portal: a Next.js App Router front end for the
-TempoNest Express API. It covers authentication and sessions, personal
+The WorkZen employee and admin portal: a Next.js App Router front end for the
+WorkZen Express API. It covers authentication and sessions, personal
 attendance and corrections, team reporting, correction review, and organization
 and membership management.
 
 The portal is **read-only for time tracking**. Sessions, breaks, and heartbeats
-are started and stopped by the TempoNest desktop agent with agent credentials.
+are started and stopped by the WorkZen desktop agent with agent credentials.
 The browser never receives database access, agent credentials, or backend
 secrets.
 
@@ -19,7 +19,7 @@ secrets.
 ## Requirements
 
 - Node.js 20.9 or newer (Node 24 recommended)
-- The TempoNest backend running locally, by default at `http://localhost:4000`
+- The WorkZen backend running locally, by default at `http://localhost:4000`
 
 ## Setup
 

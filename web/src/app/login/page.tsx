@@ -5,7 +5,7 @@ import { Spinner } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "Sign in",
-  description: "Sign in to the TempoNest work portal.",
+  description: "Sign in to the WorkZen work portal.",
 };
 
 export default function LoginPage() {

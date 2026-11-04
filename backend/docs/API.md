@@ -1,4 +1,4 @@
-# TempoNest API — v1 contracts
+# WorkZen API — v1 contracts
 
 Base URL: `/api/v1`
 
@@ -2922,7 +2922,7 @@ Public liveness.
 {
   "data": {
     "status": "ok",
-    "service": "temponest-api",
+    "service": "workzen-api",
     "uptimeSeconds": 123,
     "timestamp": "2026-10-22T00:00:00.000Z"
   }

@@ -1,15 +1,15 @@
-# TempoNest
+# WorkZen
 
-TempoNest is an enterprise-grade employee time tracking, attendance management, and workplace visibility platform. It is engineered with a strict security-first mindset, server-authoritative timestamps, transparent employee monitoring disclosures, and resilient offline synchronization.
+WorkZen is an enterprise-grade employee time tracking, attendance management, and workplace visibility platform. It is engineered with a strict security-first mindset, server-authoritative timestamps, transparent employee monitoring disclosures, and resilient offline synchronization.
 
 ---
 
 ## Monorepo Architecture
 
-This repository organizes the entire TempoNest ecosystem into three focused applications:
+This repository organizes the entire WorkZen ecosystem into three focused applications:
 
 ```text
-TempoNest/
+WorkZen/
 ├── backend/          # Express.js, TypeScript, PostgreSQL REST API & WebSockets
 ├── electron/         # Electron + React desktop time tracking agent
 ├── web/              # Next.js 16 App Router employee and administrative portal

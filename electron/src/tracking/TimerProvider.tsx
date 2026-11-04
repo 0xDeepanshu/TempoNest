@@ -19,7 +19,8 @@ import type {
   TrackingConnectionState,
   TrackingOperationResult,
   TrackingRuntimeStatus,
-  TrackingSnapshot
+  TrackingSnapshot,
+  TrackingSyncState
 } from '@/types/electron'
 import type {
   TimerState,
@@ -41,6 +42,8 @@ interface TimerContextValue {
   totalsState: TotalsLoadState
   totalsError: string | null
   connection: TrackingConnectionState
+  syncState: TrackingSyncState
+  lastSyncedAt: string | null
   syncMessage: string | null
   pendingEvents: number
   /** Server policy and local collector state; null until it is available. */
@@ -58,7 +61,9 @@ const INITIAL_RUNTIME_STATUS: TrackingRuntimeStatus = {
   connection: 'unknown',
   message: null,
   pendingEvents: 0,
-  serverTime: null
+  serverTime: null,
+  syncState: 'idle',
+  lastSyncedAt: null
 }
 
 function createUuid(): string {
@@ -408,6 +413,8 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       totalsState,
       totalsError,
       connection: runtime.connection,
+      syncState: runtime.syncState,
+      lastSyncedAt: runtime.lastSyncedAt,
       syncMessage: runtime.message,
       pendingEvents: runtime.pendingEvents,
       activity,

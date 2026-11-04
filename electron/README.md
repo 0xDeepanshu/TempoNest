@@ -1,6 +1,6 @@
-# TempoNest Desktop
+# WorkZen Desktop
 
-A focused employee desktop time tracker built with Electron, React, TypeScript, Vite, and Tailwind CSS. The app is now wired to the real TempoNest backend for desktop authentication, desktop-agent registration, server-authoritative time tracking, authenticated WebSockets, heartbeat handling, and offline event synchronization.
+A focused employee desktop time tracker built with Electron, React, TypeScript, Vite, and Tailwind CSS. The app is now wired to the real WorkZen backend for desktop authentication, desktop-agent registration, server-authoritative time tracking, authenticated WebSockets, heartbeat handling, and offline event synchronization.
 
 Continuous screen recording, the admin portal, and backend changes remain out of scope. Foreground application and idle tracking follow the existing backend activity contract.
 
@@ -31,7 +31,7 @@ Continuous screen recording, the admin portal, and backend changes remain out of
 ## Requirements
 
 - Node.js 22.12 or newer.
-- The TempoNest backend running and migrated.
+- The WorkZen backend running and migrated.
 - A backend user with an active organization membership. The desktop app does not include self-registration or organization administration.
 
 ## Configuration
@@ -199,7 +199,7 @@ App activity and idle detection are employee-visible and controlled entirely by 
 | Platform | Foreground detection | Requirements and limitations |
 | --- | --- | --- |
 | Windows | Persistent PowerShell helper calling User32 `GetForegroundWindow` and `GetWindowThreadProcessId`, then the process name and file description | Uses the built-in PowerShell; the helper is restarted up to three times if it exits. No extra package is required. |
-| macOS | `osascript` against System Events | Requires Automation/Accessibility permission for the TempoNest process. Without it the collector reports the limitation instead of guessing. |
+| macOS | `osascript` against System Events | Requires Automation/Accessibility permission for the WorkZen process. Without it the collector reports the limitation instead of guessing. |
 | Linux | `xdotool` on X11 plus `/proc/<pid>/comm` | Requires `xdotool`; Wayland sessions are not supported and are reported as unavailable. |
 | Other | None | Reports that foreground detection is not implemented for the OS. Idle detection still uses `powerMonitor`. |
 
@@ -210,7 +210,7 @@ Mocks and unit tests cannot prove that real foreground detection works on a Wind
 1. Start the backend and desktop app, sign in as an employee whose organization has app tracking and idle detection enabled.
 2. Confirm the tracker's **Activity tracking** panel shows app activity and idle detection as enabled, with the server's idle threshold.
 3. Start working. Switch between at least three applications (for example a browser, an editor, and a chat app) and stay in each for several seconds.
-4. Quit the app normally, then inspect `%APPDATA%\TempoNest\activity-queue.json`. Each interval should contain only `applicationIdentifier`, `applicationName`, `platform`, `startedAt` and `endedAt` (plus `sessionId` when known); identifiers should match the process names actually used, and intervals must meet edge-to-edge without overlapping.
+4. Quit the app normally, then inspect `%APPDATA%\TempoNest\activity-queue.json`. The directory name is intentionally retained after the WorkZen rename so upgrades keep the existing queue and credentials. Each interval should contain only `applicationIdentifier`, `applicationName`, `platform`, `startedAt` and `endedAt` (plus `sessionId` when known); identifiers should match the process names actually used, and intervals must meet edge-to-edge without overlapping.
 5. Let the machine sit idle past the displayed threshold without touching the keyboard or pointer. The panel should show idle collection, and after resuming and waiting for an upload, `idle-intervals/batch` should contain an interval at least as long as the threshold. Confirm the interval does not include break time: take a break, wait, resume, and verify the idle interval ends at the break start.
 6. Lock the screen or put the machine to sleep for longer than the threshold, then resume. No interval may span the sleep gap.
 7. While working, change the organization policy with `PATCH /organizations/:organizationId/activity/settings` (requires `activity:policy`). Set `appTrackingEnabled` or `idleDetectionEnabled` to `false`; collection should stop within a few seconds and the panel should update. Re-enable it and confirm collection resumes.

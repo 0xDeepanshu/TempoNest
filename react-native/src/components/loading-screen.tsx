@@ -4,7 +4,7 @@ import { colors, spacing, typography } from '../theme/tokens';
 import { BrandMark } from './brand-mark';
 import { Screen } from './screen';
 
-export function LoadingScreen({ message = 'Loading TempoNest…' }: { message?: string }) {
+export function LoadingScreen({ message = 'Loading WorkZen…' }: { message?: string }) {
   return (
     <Screen scroll={false} contentStyle={styles.centered}>
       <BrandMark size={56} />

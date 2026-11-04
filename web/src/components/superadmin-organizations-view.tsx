@@ -146,7 +146,7 @@ export function SuperadminOrganizationsView() {
       <PageHeader
         eyebrow="Platform administration"
         title="Organizations"
-        description="Manage every organization on this TempoNest instance. Suspension blocks access immediately. Deletion is a soft delete that preserves all tenant records and audit history."
+        description="Manage every organization on this WorkZen instance. Suspension blocks access immediately. Deletion is a soft delete that preserves all tenant records and audit history."
       />
 
       {overview.error ? (

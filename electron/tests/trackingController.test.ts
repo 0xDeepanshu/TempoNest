@@ -194,7 +194,7 @@ describe('TrackingController shutdown', () => {
   it('queues a stop for an offline session that only exists in the queue', async () => {
     const path = queuePath()
     const seed = new OfflineQueue(path)
-    seed.bindUser(USER_ID)
+    seed.bindOwner(ORG_ID, USER_ID)
     seed.append({
       eventId: 'event-00000001',
       type: 'SESSION_START',
@@ -219,10 +219,10 @@ describe('TrackingController shutdown', () => {
 })
 
 describe('TrackingController.detachSession', () => {
-  it('keeps pending events for involuntary invalidation and clears them on sign-out', () => {
+  it('keeps pending events when an account detaches', () => {
     const path = queuePath()
     const seed = new OfflineQueue(path)
-    seed.bindUser(USER_ID)
+    seed.bindOwner(ORG_ID, USER_ID)
     seed.append({
       eventId: 'event-00000003',
       type: 'SESSION_STOP',
@@ -234,11 +234,14 @@ describe('TrackingController.detachSession', () => {
       throw new NetworkError()
     }, path)
 
+    controller.attachSession(session)
     controller.detachSession()
-    expect(queue.count()).toBe(1)
-
-    controller.detachSession(true)
     expect(queue.count()).toBe(0)
+    expect(new OfflineQueue(path).all()).toEqual([])
+
+    const reloaded = new OfflineQueue(path)
+    reloaded.bindOwner(ORG_ID, USER_ID)
+    expect(reloaded.count()).toBe(1)
   })
 })
 
@@ -280,7 +283,7 @@ describe('TrackingController launch reconciliation', () => {
   it('returns an idle snapshot when the queue ends in a stop but the server is offline', async () => {
     const path = queuePath()
     const queue = new OfflineQueue(path)
-    queue.bindUser(USER_ID)
+    queue.bindOwner(ORG_ID, USER_ID)
     queue.append({
       eventId: 'event-00000002',
       type: 'SESSION_STOP',
@@ -299,6 +302,199 @@ describe('TrackingController launch reconciliation', () => {
     expect(snapshot?.session).toBeNull()
     // The stop time lets the renderer close the cached session and keep its minutes.
     expect(snapshot?.pendingStopAt).toBe('2026-10-24T08:30:00.000Z')
+  })
+})
+
+describe('TrackingController offline recovery', () => {
+  it('restores an active offline session after the app is closed and reopened', async () => {
+    const path = queuePath()
+    const startedAt = localDayIso(8, 0)
+
+    const first = createHarness(async () => {
+      throw new NetworkError()
+    }, path)
+    first.controller.attachSession(session)
+    const started = await first.controller.start(SESSION_ID, startedAt)
+    expect(started.queued).toBe(true)
+    expect(first.queue.all()).toEqual([
+      expect.objectContaining({
+        type: 'SESSION_START',
+        sessionId: SESSION_ID,
+        occurredAt: startedAt
+      })
+    ])
+    first.controller.dispose()
+
+    const second = createHarness(async () => {
+      throw new NetworkError()
+    }, path)
+    second.controller.attachSession(session)
+    const snapshot = await second.controller.restore()
+
+    expect(snapshot?.status).toBe('working')
+    expect(snapshot?.session).toMatchObject({
+      id: SESSION_ID,
+      startedAt,
+      endedAt: null,
+      pendingSync: true
+    })
+    expect(snapshot?.todaySessions?.[0]?.id).toBe(SESSION_ID)
+  })
+
+  it('does not fabricate an idle snapshot when offline without durable events', async () => {
+    const { controller } = createHarness(async () => {
+      throw new NetworkError()
+    })
+
+    controller.attachSession(session)
+    const snapshot = await controller.restore()
+
+    // A cached renderer session (for example a session started online before a
+    // crash) must survive an offline relaunch. Only the server or a durable
+    // event may declare it idle.
+    expect(snapshot).toBeNull()
+    expect(controller.getStatus().connection).toBe('offline')
+  })
+
+  it('restores an offline break and stop with their recorded timestamps', async () => {
+    const path = queuePath()
+    const startedAt = localDayIso(8, 0)
+    const breakAt = localDayIso(8, 30)
+    const resumeAt = localDayIso(8, 45)
+    const stoppedAt = localDayIso(9, 15)
+
+    const first = createHarness(async () => {
+      throw new NetworkError()
+    }, path)
+    first.controller.attachSession(session)
+    await first.controller.start(SESSION_ID, startedAt)
+    await first.controller.startBreak(SESSION_ID, 'break-1', breakAt)
+    await first.controller.endBreak(SESSION_ID, 'break-1', resumeAt)
+    await first.controller.stop(SESSION_ID, stoppedAt)
+    expect(first.queue.all().map((event) => event.type)).toEqual([
+      'SESSION_START',
+      'BREAK_START',
+      'BREAK_END',
+      'SESSION_STOP'
+    ])
+    first.controller.dispose()
+
+    const second = createHarness(async () => {
+      throw new NetworkError()
+    }, path)
+    second.controller.attachSession(session)
+    const snapshot = await second.controller.restore()
+
+    expect(snapshot?.status).toBe('idle')
+    expect(snapshot?.session).toBeNull()
+    expect(snapshot?.pendingStopAt).toBe(stoppedAt)
+    expect(snapshot?.todaySessions).toHaveLength(1)
+    expect(snapshot?.todaySessions?.[0]).toMatchObject({
+      id: SESSION_ID,
+      startedAt,
+      endedAt: stoppedAt
+    })
+    expect(snapshot?.todaySessions?.[0].breaks[0]).toMatchObject({
+      startedAt: breakAt,
+      endedAt: resumeAt
+    })
+  })
+
+  it('closes the active session at sign-out time even while offline', async () => {
+    const path = queuePath()
+    const startedAt = new Date(Date.now() - 60_000).toISOString()
+
+    const first = createHarness(async () => {
+      throw new NetworkError()
+    }, path)
+    first.controller.attachSession(session)
+    await first.controller.start(SESSION_ID, startedAt)
+
+    await first.controller.stopForSignOut()
+    const events = first.queue.all()
+    expect(events.map((event) => event.type)).toEqual(['SESSION_START', 'SESSION_STOP'])
+    expect(events[1].occurredAt >= startedAt).toBe(true)
+
+    first.controller.detachSession()
+    const reloaded = new OfflineQueue(path)
+    reloaded.bindOwner(ORG_ID, USER_ID)
+    expect(reloaded.all().map((event) => event.type)).toEqual(['SESSION_START', 'SESSION_STOP'])
+  })
+
+  it('keeps unacknowledged events when a sync response is partial', async () => {
+    const path = queuePath()
+    const queue = new OfflineQueue(path)
+    queue.bindOwner(ORG_ID, USER_ID)
+    queue.append({
+      eventId: 'event-partial-01',
+      type: 'SESSION_START',
+      occurredAt: localDayIso(8, 0),
+      sessionId: SESSION_ID
+    })
+    queue.append({
+      eventId: 'event-partial-02',
+      type: 'SESSION_STOP',
+      occurredAt: localDayIso(8, 30),
+      sessionId: SESSION_ID
+    })
+
+    let syncCalls = 0
+    let allowRetry = false
+    const { controller, queue: activeQueue } = createHarness(async (requestPath, options) => {
+      if (requestPath.endsWith('/time-sessions/sync')) {
+        syncCalls += 1
+        if (syncCalls > 1 && !allowRetry) throw new NetworkError()
+        const body = options?.body as { deviceId: string; events: OfflineEvent[] }
+        const acknowledged = syncCalls === 1 ? body.events.slice(0, 1) : body.events
+        return {
+          deviceId: body.deviceId,
+          serverTime: NOW,
+          results: acknowledged.map((event) => ({
+            eventId: event.eventId,
+            type: event.type,
+            status: 'applied' as const
+          }))
+        }
+      }
+      if (requestPath.endsWith('/time-sessions/current')) {
+        return { session: null, serverTime: NOW }
+      }
+      if (requestPath.includes('/time-sessions?')) return []
+      throw new Error(`Unexpected request: ${requestPath}`)
+    }, path)
+
+    controller.attachSession(session)
+    const first = await controller.restore()
+    expect(first?.status).toBe('idle')
+    expect(activeQueue.all().map((event) => event.eventId)).toEqual(['event-partial-02'])
+
+    allowRetry = true
+    await controller.restore()
+
+    expect(activeQueue.count()).toBe(0)
+  })
+
+  it('persists sync backoff state between failure and success', async () => {
+    const path = queuePath()
+    const queue = new OfflineQueue(path)
+    queue.bindOwner(ORG_ID, USER_ID)
+    queue.append({
+      eventId: 'event-backoff-01',
+      type: 'SESSION_START',
+      occurredAt: localDayIso(8, 0),
+      sessionId: SESSION_ID
+    })
+
+    const { controller } = createHarness(async () => {
+      throw new NetworkError()
+    }, path)
+
+    controller.attachSession(session)
+    await controller.restore()
+    const failed = controller.getStatus()
+    expect(failed.syncState).toBe('failed')
+    expect(failed.connection).toBe('offline')
+    expect(failed.pendingEvents).toBe(1)
   })
 })
 

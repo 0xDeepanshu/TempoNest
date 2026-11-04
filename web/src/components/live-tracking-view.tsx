@@ -76,7 +76,7 @@ export function LiveTrackingView() {
         query: { page, limit: 20, employeeId },
       }),
     [organizationId, employeeId, page],
-    { enabled: Boolean(organizationId) },
+    { enabled: Boolean(organizationId), refreshIntervalMs: 15_000, keepPreviousData: true },
   );
 
   const policy = useApi<ScreenshotPolicyResponse>(
@@ -128,9 +128,12 @@ export function LiveTrackingView() {
     }
   }
 
-  const online = rows.filter((row) => row.online).length;
-  const working = rows.filter((row) => row.state === "WORKING").length;
-  const onBreak = rows.filter((row) => row.state === "ON_BREAK").length;
+  const online = rows.filter((row) => row.agentOnline).length;
+  const working = rows.filter((row) => row.sessionFresh && row.state === "WORKING").length;
+  const onBreak = rows.filter((row) => row.sessionFresh && row.state === "ON_BREAK").length;
+  const awaitingSync = rows.filter(
+    (row) => row.sessionActive && !row.sessionFresh,
+  ).length;
   const pendingCount = pendingByEmployee.size;
   const policyValue = policy.data?.data.policy;
   const monitoringEnabled = policyValue?.enabled === true;
@@ -152,7 +155,7 @@ export function LiveTrackingView() {
       <PageHeader
         eyebrow={`${organization.name} · ${timezone}`}
         title="Live tracking"
-        description="Durable online state, active sessions, heartbeat freshness, and pending screenshot requests. Owners and administrators can also start a live screen view for an eligible employee. Online state comes from the last agent heartbeat, not an in-memory viewer connection."
+        description="Durable online state, active sessions, heartbeat freshness, and pending screenshot requests. Agent connectivity and attendance are shown separately: an open session can be stale while the device is offline, and an online device is not necessarily tracking. Owners and administrators can also start a live screen view for an eligible employee."
         actions={
           <Button variant="secondary" size="sm" onClick={refreshAll}>
             Refresh status
@@ -169,22 +172,22 @@ export function LiveTrackingView() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Online"
+          label="Agents online"
           value={tracking.loading ? "…" : `${online} / ${rows.length}`}
-          hint="Agents seen recently"
+          hint="Fresh device connections"
           accent="emerald"
           icon={<PulseIcon className="h-4 w-4" />}
         />
         <StatCard
           label="Working"
           value={tracking.loading ? "…" : working}
-          hint="Active work sessions"
+          hint={awaitingSync > 0 ? `${awaitingSync} session${awaitingSync === 1 ? "" : "s"} awaiting sync` : "Fresh work sessions"}
           accent="indigo"
         />
         <StatCard
           label="On break"
           value={tracking.loading ? "…" : onBreak}
-          hint="Active break sessions"
+          hint="Fresh break sessions"
           accent="amber"
         />
         <StatCard
@@ -294,7 +297,7 @@ export function LiveTrackingView() {
                 const member = memberByUserId.get(row.employee.id);
                 const request = pendingByEmployee.get(row.employee.id);
                 const eligible =
-                  row.online &&
+                  row.agentOnline &&
                   row.activeSession !== null &&
                   row.heartbeatStale !== true &&
                   row.agent?.status !== "REVOKED";
@@ -302,7 +305,7 @@ export function LiveTrackingView() {
                   ? "Screen monitoring is disabled by the organization policy."
                   : !row.activeSession
                     ? "The employee needs an active work session in the desktop app."
-                    : !row.online
+                    : !row.agentOnline
                       ? "The employee's desktop agent is offline."
                       : row.heartbeatStale
                         ? "The session heartbeat is stale. Wait for the next heartbeat."
@@ -324,7 +327,7 @@ export function LiveTrackingView() {
                 } else if (!row.activeSession) {
                   liveDisabledReason =
                     "Live view requires an active work session in the desktop app.";
-                } else if (!row.online) {
+                } else if (!row.agentOnline) {
                   liveDisabledReason =
                     "Live view requires the employee's desktop agent to be online.";
                 } else if (row.heartbeatStale) {
@@ -358,12 +361,17 @@ export function LiveTrackingView() {
                     <Td>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <TrackingBadge state={row.state} />
-                        <Badge tone={row.online ? "success" : "neutral"}>
+                        {row.sessionActive ? (
+                          <Badge tone={row.sessionFresh ? "success" : "warning"}>
+                            {row.sessionFresh ? "Session live" : "Session stale"}
+                          </Badge>
+                        ) : null}
+                        <Badge tone={row.agentOnline ? "success" : "neutral"}>
                           <span
-                            className={`h-1.5 w-1.5 rounded-full ${row.online ? "bg-success" : "bg-muted"}`}
+                            className={`h-1.5 w-1.5 rounded-full ${row.agentOnline ? "bg-success" : "bg-muted"}`}
                             aria-hidden
                           />
-                          {row.online ? "Online" : "Offline"}
+                          {row.agentOnline ? "Agent online" : "Agent offline"}
                         </Badge>
                       </div>
                     </Td>
@@ -380,6 +388,11 @@ export function LiveTrackingView() {
                           <p className="mt-0.5 text-[11px] tnum text-muted">
                             {formatDuration(row.activeSession.durationSeconds)} elapsed
                           </p>
+                          {row.sessionActive && !row.sessionFresh ? (
+                            <p className="mt-0.5 text-[11px] text-warning">
+                              Awaiting sync · duration stopped at the last heartbeat
+                            </p>
+                          ) : null}
                         </div>
                       ) : (
                         <span className="text-xs text-muted">No active session</span>

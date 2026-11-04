@@ -488,7 +488,7 @@ function HolidaySettingsForm({
                 </p>
               ) : (
                 <p className="text-xs leading-5 text-muted">
-                  No verified government notification is attached to the selected year yet. TempoNest
+                  No verified government notification is attached to the selected year yet. WorkZen
                   does not invent holiday dates.
                 </p>
               )}

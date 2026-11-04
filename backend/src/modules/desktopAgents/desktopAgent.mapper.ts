@@ -4,6 +4,12 @@ import type { DesktopAgent } from './desktopAgent.model';
 export function isAgentOnline(agent: DesktopAgent, now = new Date()): boolean {
   if (agent.revokedAt) return false;
   if (!agent.lastSeenAt) return false;
+  // A graceful socket close (sign-out, account switch, app quit) records the
+  // disconnect immediately; do not keep the employee online until the stale
+  // window elapses. A later heartbeat or reconnect proves presence again.
+  if (agent.lastDisconnectedAt && agent.lastSeenAt.getTime() <= agent.lastDisconnectedAt.getTime()) {
+    return false;
+  }
   return now.getTime() - agent.lastSeenAt.getTime() <= config.timeTracking.heartbeatStaleSeconds * 1000;
 }
 

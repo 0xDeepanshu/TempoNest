@@ -145,7 +145,7 @@ const PHASE_PRESENTATION: Record<OnSiteTrackingPhase, TrackingPhasePresentation>
   starting: {
     label: 'Starting',
     tone: 'primary',
-    detail: 'Confirming this session with TempoNest before collecting location.',
+    detail: 'Confirming this session with WorkZen before collecting location.',
   },
   'active-background': {
     label: 'On',
@@ -156,7 +156,7 @@ const PHASE_PRESENTATION: Record<OnSiteTrackingPhase, TrackingPhasePresentation>
     label: 'App open only',
     tone: 'warning',
     detail:
-      'Location is recorded only while TempoNest is open. Allow background location in device settings for continuous tracking.',
+      'Location is recorded only while WorkZen is open. Allow background location in device settings for continuous tracking.',
   },
   paused: {
     label: 'Paused',
@@ -173,7 +173,7 @@ const PHASE_PRESENTATION: Record<OnSiteTrackingPhase, TrackingPhasePresentation>
     label: 'No recent fix',
     tone: 'warning',
     detail:
-      'TempoNest has not received a location recently. Keep the app open or check device location settings.',
+      'WorkZen has not received a location recently. Keep the app open or check device location settings.',
   },
   stopped: {
     label: 'Stopped',

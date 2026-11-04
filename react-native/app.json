@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "TempoNest",
+    "name": "WorkZen",
     "slug": "temponest",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "temponest",
@@ -10,10 +10,12 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.temponest.mobile",
+      "buildNumber": "2",
       "supportsTablet": false
     },
     "android": {
       "package": "com.temponest.mobile",
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#E0E7FF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -24,7 +26,10 @@
     },
     "web": {
       "output": "server",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "WorkZen",
+      "shortName": "WorkZen",
+      "description": "Attendance, time tracking, and team reporting for organizations and their employees."
     },
     "plugins": [
       "expo-router",
@@ -40,15 +45,15 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "TempoNest uses the camera only when you choose to take a check-in selfie.",
+          "cameraPermission": "WorkZen uses the camera only when you choose to take a check-in selfie.",
           "recordAudioAndroid": false
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "TempoNest uses your location during on-site check-in and while an on-site work session is active so your attendance can be verified.",
-          "locationAlwaysAndWhenInUsePermission": "TempoNest records your location only during an active on-site work session, including while the app is in the background. Tracking pauses on breaks and stops when you check out.",
+          "locationWhenInUsePermission": "WorkZen uses your location during on-site check-in and while an on-site work session is active so your attendance can be verified.",
+          "locationAlwaysAndWhenInUsePermission": "WorkZen records your location only during an active on-site work session, including while the app is in the background. Tracking pauses on breaks and stops when you check out.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true

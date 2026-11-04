@@ -78,7 +78,7 @@ async function main(): Promise<void> {
 
   const app = createApp();
   const server = app.listen(config.port, () => {
-    logger.info({ port: config.port, env: config.env }, 'TempoNest API listening');
+    logger.info({ port: config.port, env: config.env }, 'WorkZen API listening');
   });
   const wss = attachAgentWebSocketServer(server);
   const relay = attachScreenLiveRelay(server);
@@ -145,6 +145,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  logger.fatal({ err: error }, 'failed to start TempoNest API');
+  logger.fatal({ err: error }, 'failed to start WorkZen API');
   process.exit(1);
 });

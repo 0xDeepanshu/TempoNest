@@ -171,10 +171,10 @@ export function RegisterPanel() {
       <div className="w-full max-w-md">
         <div className="mb-8 flex items-center gap-2.5">
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-base font-semibold text-on-strong">
-            T
+            W
           </span>
           <div>
-            <p className="text-lg font-semibold tracking-tight text-ink">TempoNest</p>
+            <p className="text-lg font-semibold tracking-tight text-ink">WorkZen</p>
             <p className="text-[10px] font-medium uppercase tracking-widest text-muted">
               Work portal
             </p>

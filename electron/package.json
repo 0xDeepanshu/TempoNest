@@ -1,10 +1,10 @@
 {
   "name": "temponest",
-  "productName": "TempoNest",
-  "version": "0.1.0",
+  "productName": "WorkZen",
+  "version": "0.2.0",
   "private": true,
-  "description": "TempoNest — a focused employee desktop time tracker.",
-  "author": "TempoNest",
+  "description": "WorkZen — a focused employee desktop time tracker.",
+  "author": "WorkZen",
   "license": "MIT",
   "main": "out/main/index.js",
   "scripts": {

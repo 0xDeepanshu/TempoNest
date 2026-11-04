@@ -3,7 +3,9 @@ import {
   createIdleTimerState,
   getOpenBreak,
   getTodayTotals,
-  timerReducer
+  ongoingBreakMs,
+  timerReducer,
+  workElapsedMs
 } from '../src/tracking/timerMachine'
 import type { WorkSession } from '../src/types/tracking'
 
@@ -118,6 +120,41 @@ describe('timerReducer', () => {
     const totals = getTodayTotals(onBreak, now)
     expect(totals.workMs).toBeGreaterThanOrEqual(29 * 60_000)
     expect(totals.breakMs).toBeGreaterThanOrEqual(29 * 60_000)
+  })
+
+  it('keeps elapsed time anchored to timestamps through offline gaps and device sleep', () => {
+    const started = 1_000_000
+    const working = timerReducer(createIdleTimerState(), {
+      type: 'start',
+      now: started,
+      sessionId: 'resilient'
+    })
+
+    // No ticks are needed while disconnected: the duration is derived from the
+    // persisted start timestamp on every render.
+    expect(workElapsedMs(working.activeSession!, started + 30 * MINUTE)).toBe(30 * MINUTE)
+
+    // Suspend/resume or a clock jump of several hours must not drift or reset.
+    expect(workElapsedMs(working.activeSession!, started + 8 * 60 * MINUTE)).toBe(
+      8 * 60 * MINUTE
+    )
+
+    const breakAt = started + 60 * MINUTE
+    const onBreak = timerReducer(working, { type: 'start_break', now: breakAt, breakId: 'break' })
+    const afterSleep = started + 6 * 60 * MINUTE
+    expect(ongoingBreakMs(onBreak.activeSession, afterSleep)).toBe(5 * 60 * MINUTE)
+    expect(workElapsedMs(onBreak.activeSession!, afterSleep)).toBe(60 * MINUTE)
+
+    const resumed = timerReducer(onBreak, { type: 'resume', now: afterSleep })
+    expect(workElapsedMs(resumed.activeSession!, afterSleep)).toBe(60 * MINUTE)
+
+    const stopped = timerReducer(resumed, { type: 'stop', now: afterSleep + 30 * MINUTE })
+    expect(stopped.completedSessions[0].endedAt).toBe(afterSleep + 30 * MINUTE)
+    expect(stopped.completedSessions[0].breaks[0]).toMatchObject({
+      startedAt: breakAt,
+      endedAt: afterSleep
+    })
+    expect(timerReducer(stopped, { type: 'stop', now: afterSleep + 60 * MINUTE })).toBe(stopped)
   })
 })
 

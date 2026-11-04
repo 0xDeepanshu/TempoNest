@@ -29,7 +29,7 @@ const mockedApiRequest = vi.mocked(apiRequest);
 
 const organization: Organization = {
   id: "org-1",
-  name: "TempoNest",
+  name: "WorkZen",
   slug: "temponest",
   status: "ACTIVE",
   timezone: "UTC",
@@ -160,6 +160,9 @@ const tracking: TrackingStatusResponse = {
       employee: ada.user as TrackingStatusResponse["data"][0]["employee"],
       state: "OFFLINE",
       online: false,
+      agentOnline: false,
+      sessionActive: false,
+      sessionFresh: false,
       heartbeatStale: null,
       activeSession: null,
       lastHeartbeatAt: null,

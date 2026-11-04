@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { BRANDING } from '../shared/branding'
 import type { AppInfo } from '../src/types/electron'
@@ -24,6 +25,15 @@ const developmentCsp = [
 ].join('; ')
 
 app.setName(BRANDING.name)
+
+// The product is now WorkZen, but the existing data directory must keep the
+// TempoNest name. It contains the encrypted refresh token, agent credentials,
+// timer cache, activity state, and the pending offline queue. Pinning the path
+// upgrades existing installs in place without deleting or re-registering them.
+const legacyUserDataDirectory = join(app.getPath('appData'), 'TempoNest')
+mkdirSync(legacyUserDataDirectory, { recursive: true })
+app.setPath('userData', legacyUserDataDirectory)
+
 app.setAppUserModelId(BRANDING.appId)
 
 // A second process would race the first one through the rotating refresh token

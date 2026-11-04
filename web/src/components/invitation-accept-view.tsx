@@ -217,7 +217,7 @@ export function InvitationAcceptView() {
   return (
     <PublicAuthShell
       title="Accept your invitation"
-      description="Review the details below, then activate your TempoNest account."
+      description="Review the details below, then activate your WorkZen account."
     >
       <Card>
         <CardBody className="space-y-5 p-5 sm:p-6">
@@ -260,7 +260,7 @@ export function InvitationAcceptView() {
 
           {invitation.existingAccount && !invitation.signedInEmail ? (
             <div className="space-y-4">
-              <Alert tone="info" title="You already have a TempoNest account">
+              <Alert tone="info" title="You already have a WorkZen account">
                 Sign in with <strong>{invitation.email}</strong> to accept this invitation. Your
                 existing password stays the same.
               </Alert>

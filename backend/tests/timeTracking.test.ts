@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { DateTime } from 'luxon';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ApplicationActivity, Break, Organization, TimeSession } from '../src/database';
+import { ApplicationActivity, Break, DesktopAgent, Organization, TimeSession } from '../src/database';
 import {
   API,
   app,
@@ -635,7 +635,6 @@ describe('time tracking', () => {
     expect(employeeStatus(status).state).toBe('ONLINE');
 
     await Organization.update({ timezone: 'UTC' }, { where: { id: orgId } });
-    const { DesktopAgent } = await import('../src/database');
     await DesktopAgent.update(
       { lastSeenAt: DateTime.utc().minus({ minutes: 10 }).toJSDate() },
       { where: { id: agent.id } },
@@ -644,5 +643,222 @@ describe('time tracking', () => {
       .get(`${API}/organizations/${orgId}/reports/tracking-status`)
       .set(ownerAuth.headers);
     expect(employeeStatus(status).state).toBe('OFFLINE');
+  });
+
+  it('adopts a replayed offline start and rejects a second active session', async () => {
+    const { orgId, agent } = await createTeam();
+    const started = await startSession(orgId, agent);
+    const sessionId = started.body.data.session.id as string;
+
+    const competing = await request(app)
+      .post(`${API}/organizations/${orgId}/time-sessions/sync`)
+      .set(agent.headers)
+      .send({
+        deviceId: agent.deviceId,
+        events: [
+          {
+            eventId: randomUUID(),
+            type: 'SESSION_START',
+            occurredAt: new Date(Date.now() - 60_000).toISOString(),
+            sessionId: randomUUID(),
+          },
+        ],
+      });
+    expect(competing.body.data.results[0].status).toBe('conflict');
+    expect(competing.body.data.results[0].code).toBe('ACTIVE_SESSION_EXISTS');
+
+    // A retry of the same start carries a fresh eventId but the same sessionId.
+    // It must adopt the existing session rather than open a second one.
+    const adopted = await request(app)
+      .post(`${API}/organizations/${orgId}/time-sessions/sync`)
+      .set(agent.headers)
+      .send({
+        deviceId: agent.deviceId,
+        events: [
+          {
+            eventId: randomUUID(),
+            type: 'SESSION_START',
+            occurredAt: started.body.data.session.startedAt,
+            sessionId,
+          },
+        ],
+      });
+    expect(adopted.body.data.results[0].status).toBe('applied');
+    expect(adopted.body.data.results[0].result).toMatchObject({ sessionId, adopted: true });
+
+    const history = await request(app)
+      .get(`${API}/organizations/${orgId}/time-sessions`)
+      .set(agent.headers);
+    expect(history.body.meta.total).toBe(1);
+    const current = await request(app)
+      .get(`${API}/organizations/${orgId}/time-sessions/current`)
+      .set(agent.headers);
+    expect(current.body.data.session.id).toBe(sessionId);
+  });
+
+  it('closes a stale open session at its last heartbeat before an offline start', async () => {
+    const { orgId, agent } = await createTeam();
+    const started = await startSession(orgId, agent);
+    const staleId = started.body.data.session.id as string;
+    const staleStart = new Date(Date.now() - 4 * 60 * 60_000);
+    const lastHeartbeat = new Date(Date.now() - 3 * 60 * 60_000);
+    await TimeSession.update(
+      { startedAt: staleStart, lastHeartbeatAt: lastHeartbeat },
+      { where: { id: staleId } },
+    );
+
+    const offlineId = randomUUID();
+    const offlineStart = new Date(Date.now() - 30 * 60_000);
+    const synced = await request(app)
+      .post(`${API}/organizations/${orgId}/time-sessions/sync`)
+      .set(agent.headers)
+      .send({
+        deviceId: agent.deviceId,
+        events: [
+          {
+            eventId: randomUUID(),
+            type: 'SESSION_START',
+            occurredAt: offlineStart.toISOString(),
+            sessionId: offlineId,
+          },
+        ],
+      });
+    expect(synced.body.data.results[0].status).toBe('applied');
+
+    const stale = await TimeSession.findByPk(staleId);
+    expect(stale!.status).toBe('STOPPED');
+    expect(stale!.endedAt?.getTime()).toBe(lastHeartbeat.getTime());
+
+    const fresh = await TimeSession.findByPk(offlineId);
+    expect(fresh!.status).toBe('ACTIVE');
+    expect(fresh!.source).toBe('OFFLINE');
+    expect(fresh!.startedAt.getTime()).toBe(offlineStart.getTime());
+
+    const history = await request(app)
+      .get(`${API}/organizations/${orgId}/time-sessions`)
+      .set(agent.headers);
+    const staleSummary = (history.body.data as Array<{ id: string; durationSeconds: number }>).find(
+      (session) => session.id === staleId,
+    )!;
+    expect(staleSummary.durationSeconds).toBe(3600);
+  });
+
+  it('accepts a late break end that arrives after the session stop', async () => {
+    const { orgId, agent } = await createTeam();
+    const sessionId = randomUUID();
+    const now = Date.now();
+
+    const first = await request(app)
+      .post(`${API}/organizations/${orgId}/time-sessions/sync`)
+      .set(agent.headers)
+      .send({
+        deviceId: agent.deviceId,
+        events: [
+          {
+            eventId: randomUUID(),
+            type: 'SESSION_START',
+            occurredAt: new Date(now - 3 * 60 * 60_000).toISOString(),
+            sessionId,
+          },
+          {
+            eventId: randomUUID(),
+            type: 'BREAK_START',
+            occurredAt: new Date(now - 2 * 60 * 60_000).toISOString(),
+            sessionId,
+          },
+          {
+            eventId: randomUUID(),
+            type: 'SESSION_STOP',
+            occurredAt: new Date(now - 60 * 60_000).toISOString(),
+            sessionId,
+          },
+        ],
+      });
+    expect(first.body.data.results.map((result: { status: string }) => result.status)).toEqual([
+      'applied',
+      'applied',
+      'applied',
+    ]);
+
+    const lateBreakEnd = await request(app)
+      .post(`${API}/organizations/${orgId}/time-sessions/sync`)
+      .set(agent.headers)
+      .send({
+        deviceId: agent.deviceId,
+        events: [
+          {
+            eventId: randomUUID(),
+            type: 'BREAK_END',
+            occurredAt: new Date(now - 30 * 60_000).toISOString(),
+            sessionId,
+          },
+        ],
+      });
+    expect(lateBreakEnd.body.data.results[0].status).toBe('applied');
+    expect(lateBreakEnd.body.data.results[0].result).toMatchObject({ replayed: true });
+
+    const history = await request(app)
+      .get(`${API}/organizations/${orgId}/time-sessions`)
+      .set(agent.headers);
+    expect(history.body.data[0].breaks[0].durationSeconds).toBe(3600);
+    expect(history.body.data[0].durationSeconds).toBe(7200);
+  });
+
+  it('separates presence from stale attendance and clamps abandoned durations', async () => {
+    const { orgId, ownerAuth, agent, auth } = await createTeam();
+    const started = await startSession(orgId, agent);
+    const sessionId = started.body.data.session.id as string;
+
+    await TimeSession.update(
+      {
+        startedAt: new Date(Date.now() - 6 * 60 * 60_000),
+        lastHeartbeatAt: new Date(Date.now() - 3 * 60 * 60_000),
+      },
+      { where: { id: sessionId } },
+    );
+    await DesktopAgent.update(
+      { lastSeenAt: new Date(Date.now() - 10 * 60_000) },
+      { where: { id: agent.id } },
+    );
+
+    const status = await request(app)
+      .get(`${API}/organizations/${orgId}/reports/tracking-status`)
+      .set(ownerAuth.headers);
+    const row = (
+      status.body.data as Array<{
+        employee: { id: string };
+        state: string;
+        agentOnline: boolean;
+        sessionActive: boolean;
+        sessionFresh: boolean;
+        heartbeatStale: boolean;
+        activeSession: { durationSeconds: number } | null;
+      }>
+    ).find((entry) => entry.employee.id === auth.user.id)!;
+
+    // An abandoned open session must not make the employee look online, and
+    // its duration stops at the last validated heartbeat.
+    expect(row.state).toBe('OFFLINE');
+    expect(row.agentOnline).toBe(false);
+    expect(row.sessionActive).toBe(true);
+    expect(row.sessionFresh).toBe(false);
+    expect(row.heartbeatStale).toBe(true);
+    expect(row.activeSession?.durationSeconds).toBe(3 * 3600);
+
+    // A recent lastSeenAt is not presence once the device disconnected.
+    await DesktopAgent.update(
+      {
+        lastSeenAt: new Date(),
+        lastDisconnectedAt: new Date(),
+      },
+      { where: { id: agent.id } },
+    );
+    const disconnected = await request(app)
+      .get(`${API}/organizations/${orgId}/reports/tracking-status`)
+      .set(ownerAuth.headers);
+    const disconnectedRow = (
+      disconnected.body.data as Array<{ employee: { id: string }; agentOnline: boolean }>
+    ).find((entry) => entry.employee.id === auth.user.id)!;
+    expect(disconnectedRow.agentOnline).toBe(false);
   });
 });

@@ -3,14 +3,24 @@
  * Keep this module free of Node.js and browser-only APIs.
  */
 export const BRANDING = {
-  name: 'TempoNest',
+  name: 'WorkZen',
   productLabel: 'Employee time tracker',
   tagline: 'A calmer way to track your workday.',
   shortDescription:
     'A focused desktop time tracker for employees, with separate work and break time.',
-  supportEmail: 'support@temponest.app',
-  copyright: 'Copyright © 2026 TempoNest',
+  supportEmail: 'support@workzen.cloud',
+  copyright: 'Copyright © 2026 WorkZen',
+  /**
+   * Intentionally unchanged. This identifier groups existing Windows
+   * installations for upgrades and Windows notifications. Renaming it would
+   * create a second installation instead of upgrading the current one.
+   */
   appId: 'app.temponest.desktop',
+  /**
+   * Storage keys are intentionally unchanged. They point at persisted timer and
+   * session data created by earlier releases and must keep resolving after the
+   * product rename.
+   */
   storageKeys: {
     /** Current timestamp-based timer state. */
     timerState: 'temponest.timer.v2',
@@ -30,7 +40,7 @@ export const BRANDING = {
       'Capture runs once per authorized request, is visible in the app, and is uploaded only to private storage under your organization policy.'
   },
   adminPortalNote:
-    'Organization admins manage people, monitoring policies, screenshots, and reports in the TempoNest web portal.'
+    'Organization admins manage people, monitoring policies, screenshots, and reports in the WorkZen web portal.'
 } as const
 
 export type Branding = typeof BRANDING

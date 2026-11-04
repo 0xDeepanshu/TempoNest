@@ -49,8 +49,8 @@ export async function verifyAgentCredentials(agentId: string, agentKey: string):
 export function describeDevice(): { name: string; platform: string; osVersion: string | null; appVersion: string | null } {
   const model = Device.modelName?.trim();
   const platformLabel = Platform.OS === 'ios' ? 'iPhone/iPad' : Platform.OS === 'android' ? 'Android' : 'Web';
-  const fallbackName = `TempoNest on ${platformLabel}`;
-  const name = (model ? `${model} · TempoNest` : fallbackName).slice(0, 120);
+  const fallbackName = `WorkZen on ${platformLabel}`;
+  const name = (model ? `${model} · WorkZen` : fallbackName).slice(0, 120);
   const appVersion = Constants.expoConfig?.version ?? null;
 
   return {

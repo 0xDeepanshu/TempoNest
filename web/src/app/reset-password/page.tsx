@@ -6,7 +6,7 @@ import { Card, CardBody, Spinner } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "Choose a new password",
-  description: "Set a new password for your TempoNest account.",
+  description: "Set a new password for your WorkZen account.",
 };
 
 export default function ResetPasswordPage() {

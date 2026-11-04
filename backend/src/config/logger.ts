@@ -4,7 +4,7 @@ import { config } from './env';
 export const logger = pino({
   level: config.logLevel,
   base: {
-    service: 'temponest-api',
+    service: 'workzen-api',
     env: config.env,
   },
   timestamp: pino.stdTimeFunctions.isoTime,

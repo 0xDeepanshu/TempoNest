@@ -173,7 +173,7 @@ function trackingOptions(): Location.LocationTaskOptions {
     pausesUpdatesAutomatically: false,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
-      notificationTitle: 'TempoNest location tracking',
+      notificationTitle: 'WorkZen location tracking',
       notificationBody: 'Recording location during your active on-site work session.',
       notificationColor: '#4F46E5',
       killServiceOnDestroy: false,
@@ -549,7 +549,7 @@ export function reconcileOnSiteTracking(identity: OnSiteTrackingIdentity): Promi
           backgroundAllowed: false,
           message: ended
             ? null
-            : 'Location tracking could not be confirmed with TempoNest.',
+            : 'Location tracking could not be confirmed with WorkZen.',
         });
         return;
       }
@@ -558,7 +558,7 @@ export function reconcileOnSiteTracking(identity: OnSiteTrackingIdentity): Promi
         publish({
           phase: 'error',
           message:
-            'TempoNest could not confirm this session. Tracking will start after the next successful refresh.',
+            'WorkZen could not confirm this session. Tracking will start after the next successful refresh.',
         });
       }
       return;

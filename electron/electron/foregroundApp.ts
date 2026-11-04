@@ -163,7 +163,7 @@ function createWindowsSource(spawnImpl: typeof spawn): ForegroundAppSource {
         restartTimer.unref()
       } else {
         reportFailure(
-          'Windows foreground application detection stopped unexpectedly. Restart TempoNest to resume app tracking.'
+          'Windows foreground application detection stopped unexpectedly. Restart WorkZen to resume app tracking.'
         )
       }
     })

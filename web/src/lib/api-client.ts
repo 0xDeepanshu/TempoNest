@@ -69,7 +69,7 @@ export async function apiRequest<T>(
       status: 0,
       code: "NETWORK_ERROR",
       message:
-        "Could not reach the TempoNest API. Check that the backend is running and try again.",
+        "Could not reach the WorkZen API. Check that the backend is running and try again.",
     });
   }
 

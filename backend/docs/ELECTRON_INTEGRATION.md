@@ -2,7 +2,7 @@
 
 This document explains how the existing Electron renderer contracts (`AuthService`,
 `TimeTrackingService`, `TimerProvider`, activity/sync services) should be backed by the
-TempoNest API, including the admin-initiated screenshot contract. Backend Step 2/3 lives in this
+WorkZen API, including the admin-initiated screenshot contract. Backend Step 2/3 lives in this
 repository; the desktop capture/upload flow described in section 7 is implemented in the sibling
 `teamselectron` repository. Treat live end-to-end behavior as unverified until it is exercised
 against a real backend and private storage driver.
@@ -59,8 +59,8 @@ Suggested main-process configuration:
 
 | Setting | Value |
 | --- | --- |
-| `TEMPO_API_BASE_URL` | e.g. `https://api.temponest.example/api/v1` |
-| `TEMPO_WS_URL` | e.g. `wss://api.temponest.example/api/v1/ws/agent` |
+| `TEMPO_API_BASE_URL` | e.g. `https://api.workzen.example/api/v1` |
+| `TEMPO_WS_URL` | e.g. `wss://api.workzen.example/api/v1/ws/agent` |
 | Agent storage key | `tempo.agent.v1` (agent ID, key, device ID, org ID) |
 | Auth storage key | `tempo.auth.v1` (refresh token only; access stays in memory) |
 | Sync queue key | `tempo.sync.v1` (durable offline records, never tokens) |

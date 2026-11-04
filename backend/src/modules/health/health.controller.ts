@@ -6,7 +6,7 @@ export const health = asyncHandler(async (_req: Request, res: Response) => {
   res.status(200).json({
     data: {
       status: 'ok',
-      service: 'temponest-api',
+      service: 'workzen-api',
       uptimeSeconds: Math.round(process.uptime()),
       timestamp: new Date().toISOString(),
     },

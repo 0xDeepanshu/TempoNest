@@ -5,7 +5,7 @@ import { Spinner } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "Create account",
-  description: "Create a TempoNest account to accept an organization invitation.",
+  description: "Create a WorkZen account to accept an organization invitation.",
 };
 
 export default function RegisterPage() {

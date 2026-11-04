@@ -304,7 +304,7 @@ export class AgentSocket {
 
   private async handleUpgradeFailure(status: number): Promise<void> {
     if (status === 403) {
-      this.options.onBlocked('ACCESS_BLOCKED', 'Access to TempoNest was blocked by the server.')
+      this.options.onBlocked('ACCESS_BLOCKED', 'Access to WorkZen was blocked by the server.')
       return
     }
 

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   AlertTriangle,
+  Cloud,
   CloudOff,
   Coffee,
   Loader2,
@@ -16,27 +17,64 @@ import { Logo } from '@/components/Logo'
 import { cn } from '@/lib/cn'
 import { formatClock, formatDuration, formatTime } from '@/lib/time'
 import { useTimer } from '@/tracking/TimerProvider'
-import type { ActivityTrackingStatus } from '@/types/electron'
+import type { ActivityTrackingStatus, TrackingConnectionState } from '@/types/electron'
 import type { TrackingStatus } from '@/types/tracking'
 
-const STATUS_META: Record<
-  TrackingStatus,
-  { label: string; pill: string; dot: string; pulse: boolean }
-> = {
-  idle: {
-    label: 'Not tracking',
-    pill: 'border-slate-200 bg-slate-50 text-slate-600',
-    dot: 'bg-slate-400',
-    pulse: false
-  },
-  working: {
-    label: 'Tracking',
-    pill: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    dot: 'bg-emerald-500',
-    pulse: true
-  },
-  on_break: {
-    label: 'On break',
+interface StatusPresentation {
+  label: string
+  pill: string
+  dot: string
+  pulse: boolean
+}
+
+const IDLE_META: StatusPresentation = {
+  label: 'Not tracking',
+  pill: 'border-slate-200 bg-slate-50 text-slate-600',
+  dot: 'bg-slate-400',
+  pulse: false
+}
+
+/**
+ * Attendance phase and connectivity are separate facts: work keeps recording
+ * offline, so the pill has to say both what the employee is doing and whether
+ * the server can be reached.
+ */
+function statusPresentation(
+  status: TrackingStatus,
+  connection: TrackingConnectionState
+): StatusPresentation {
+  if (status === 'idle') return IDLE_META
+
+  const offline = connection === 'offline' || connection === 'blocked'
+  const connecting = connection === 'unknown'
+
+  if (status === 'working') {
+    if (offline) {
+      return {
+        label: 'Working · Offline',
+        pill: 'border-slate-300 bg-slate-100 text-slate-700',
+        dot: 'bg-slate-500',
+        pulse: true
+      }
+    }
+    return {
+      label: connecting ? 'Working · Connecting' : 'Working · Online',
+      pill: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      dot: 'bg-emerald-500',
+      pulse: true
+    }
+  }
+
+  if (offline) {
+    return {
+      label: 'On break · Offline',
+      pill: 'border-slate-300 bg-slate-100 text-slate-700',
+      dot: 'bg-slate-500',
+      pulse: false
+    }
+  }
+  return {
+    label: connecting ? 'On break · Connecting' : 'On break · Online',
     pill: 'border-amber-200 bg-amber-50 text-amber-700',
     dot: 'bg-amber-500',
     pulse: false
@@ -153,6 +191,7 @@ export function TrackerScreen() {
     retryTotals,
     connection,
     syncMessage,
+    syncState,
     pendingEvents,
     activity,
     startWork,
@@ -167,7 +206,7 @@ export function TrackerScreen() {
 
   if (!employee || !organization) return null
 
-  const statusMeta = STATUS_META[status]
+  const statusMeta = statusPresentation(status, connection)
   const isOnBreak = status === 'on_break'
   const totalsVerified = totalsState === 'ready'
   const totalsPlaceholder = '—'
@@ -233,7 +272,7 @@ export function TrackerScreen() {
             className="animate-rise rounded-[22px] border border-line/90 bg-white px-6 py-8 shadow-raised sm:px-10 sm:py-9"
             aria-label="Work timer"
           >
-            <div className="flex justify-center">
+            <div className="flex flex-wrap items-center justify-center gap-2">
               <span
                 className={cn(
                   'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold',
@@ -251,6 +290,36 @@ export function TrackerScreen() {
                 </span>
                 {statusMeta.label}
               </span>
+
+              {syncState === 'syncing' ||
+              syncState === 'failed' ||
+              (syncState === 'synced' && status !== 'idle') ? (
+                <span
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-semibold',
+                    syncState === 'failed'
+                      ? 'border-rose-200 bg-rose-50 text-rose-700'
+                      : syncState === 'syncing'
+                        ? 'border-sky-200 bg-sky-50 text-sky-700'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  )}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {syncState === 'syncing' ? (
+                    <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                  ) : syncState === 'failed' ? (
+                    <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                  ) : (
+                    <Cloud className="h-3 w-3" aria-hidden="true" />
+                  )}
+                  {syncState === 'syncing'
+                    ? 'Syncing'
+                    : syncState === 'failed'
+                      ? 'Sync failed'
+                      : 'Synced'}
+                </span>
+              ) : null}
             </div>
 
             <div className="mt-7 text-center">

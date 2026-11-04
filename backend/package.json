@@ -1,8 +1,8 @@
 {
   "name": "temponest-backend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "TempoNest backend API - authentication, desktop time tracking, and reporting",
+  "description": "WorkZen backend API - authentication, desktop time tracking, and reporting",
   "main": "dist/server.js",
   "engines": {
     "node": ">=20.0.0"

@@ -59,9 +59,9 @@ function layout(options: {
               <td style="padding:24px 28px;border-bottom:1px solid #e7e5e4;background:#ffffff;">
                 <table role="presentation" cellpadding="0" cellspacing="0">
                   <tr>
-                    <td style="width:36px;height:36px;background:#1c1917;border-radius:8px;color:#ffffff;font-size:16px;font-weight:600;text-align:center;vertical-align:middle;">T</td>
+                    <td style="width:36px;height:36px;background:#1c1917;border-radius:8px;color:#ffffff;font-size:16px;font-weight:600;text-align:center;vertical-align:middle;">W</td>
                     <td style="padding-left:12px;">
-                      <div style="font-size:15px;font-weight:600;letter-spacing:-0.01em;">TempoNest</div>
+                      <div style="font-size:15px;font-weight:600;letter-spacing:-0.01em;">WorkZen</div>
                       <div style="font-size:10px;letter-spacing:0.16em;text-transform:uppercase;color:#78716c;">Work portal</div>
                     </td>
                   </tr>
@@ -94,7 +94,7 @@ function layout(options: {
               </td>
             </tr>
           </table>
-          <p style="margin:16px 0 0;font-size:11px;color:#a8a29e;">TempoNest · Attendance and team time</p>
+          <p style="margin:16px 0 0;font-size:11px;color:#a8a29e;">WorkZen · Attendance and team time</p>
         </td>
       </tr>
     </table>
@@ -109,7 +109,7 @@ export function invitationEmail(input: InvitationEmailInput): EmailTemplate {
   const expiry = formatExpiry(input.expiresAt);
 
   const bodyHtml = `
-    <p style="margin:0 0 12px;">${inviter} invited you to join <strong>${organization}</strong> on TempoNest.</p>
+    <p style="margin:0 0 12px;">${inviter} invited you to join <strong>${organization}</strong> on WorkZen.</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;border:1px solid #e7e5e4;border-radius:8px;background:#fafaf9;">
       <tr>
         <td style="padding:12px 16px;font-size:13px;color:#78716c;width:42%;">Organization</td>
@@ -128,7 +128,7 @@ export function invitationEmail(input: InvitationEmailInput): EmailTemplate {
   `;
 
   const text = [
-    `${inviter} invited you to join ${input.organizationName} on TempoNest.`,
+    `${inviter} invited you to join ${input.organizationName} on WorkZen.`,
     '',
     `Organization: ${input.organizationName}`,
     `Invited email: ${input.invitedEmail}`,
@@ -141,9 +141,9 @@ export function invitationEmail(input: InvitationEmailInput): EmailTemplate {
   ].join('\n');
 
   return {
-    subject: `You're invited to join ${input.organizationName} on TempoNest`,
+    subject: `You're invited to join ${input.organizationName} on WorkZen`,
     html: layout({
-      preheader: `Join ${input.organizationName} on TempoNest`,
+      preheader: `Join ${input.organizationName} on WorkZen`,
       heading: `Join ${input.organizationName}`,
       bodyHtml,
       actionLabel: 'Accept invitation',
@@ -162,14 +162,14 @@ export function passwordResetEmail(input: PasswordResetEmailInput): EmailTemplat
 
   const bodyHtml = `
     <p style="margin:0 0 12px;">Hi ${name},</p>
-    <p style="margin:0 0 12px;">We received a request to reset the password for your TempoNest account. Choose a new password to continue using your account.</p>
+    <p style="margin:0 0 12px;">We received a request to reset the password for your WorkZen account. Choose a new password to continue using your account.</p>
     <p style="margin:0;">This single-use link expires on <strong>${escapeHtml(expiry)}</strong>. Existing sign-ins are revoked once the password changes.</p>
   `;
 
   const text = [
     `Hi ${input.name || 'there'},`,
     '',
-    'We received a request to reset the password for your TempoNest account.',
+    'We received a request to reset the password for your WorkZen account.',
     '',
     `Reset your password: ${input.resetUrl}`,
     `This single-use link expires on ${expiry}.`,
@@ -179,16 +179,16 @@ export function passwordResetEmail(input: PasswordResetEmailInput): EmailTemplat
   ].join('\n');
 
   return {
-    subject: 'Reset your TempoNest password',
+    subject: 'Reset your WorkZen password',
     html: layout({
-      preheader: 'Reset your TempoNest password',
+      preheader: 'Reset your WorkZen password',
       heading: 'Reset your password',
       bodyHtml,
       actionLabel: 'Reset password',
       actionUrl: input.resetUrl,
       expiryText: expiry,
       footerHtml:
-        'Security notice: TempoNest will never ask for your password by e-mail. If you did not request this reset, ignore this message and consider telling your administrator.',
+        'Security notice: WorkZen will never ask for your password by e-mail. If you did not request this reset, ignore this message and consider telling your administrator.',
     }),
     text,
   };

@@ -1,6 +1,8 @@
+# Keep appId stable so NSIS upgrades the existing WorkZen/TempoNest install
+# instead of creating a second application entry.
 appId: app.temponest.desktop
-productName: TempoNest
-copyright: Copyright © 2026 TempoNest
+productName: WorkZen
+copyright: Copyright © 2026 WorkZen
 
 directories:
   buildResources: build
@@ -27,7 +29,10 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: TempoNest
+  shortcutName: WorkZen
+  # Local timer, queue, and credential data is stored outside the install
+  # directory. Never remove it during an upgrade or uninstall.
+  deleteAppDataOnUninstall: false
 
 mac:
   target:

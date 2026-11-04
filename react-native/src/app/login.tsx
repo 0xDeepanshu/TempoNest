@@ -77,7 +77,7 @@ export default function LoginScreen() {
       <Screen>
         <View style={styles.hero}>
           <BrandMark size={52} />
-          <Text style={styles.brandName}>TempoNest</Text>
+          <Text style={styles.brandName}>WorkZen</Text>
           <Text style={styles.tagline}>Your workday, tracked in one place.</Text>
         </View>
 
@@ -142,7 +142,7 @@ export default function LoginScreen() {
         </Card>
 
         <Text style={styles.footer}>
-          TempoNest accounts are created by your organization. There is no
+          WorkZen accounts are created by your organization. There is no
           self-signup in the mobile app.
         </Text>
         {__DEV__ ? <Text style={styles.host}>API: {API_HOST_LABEL}</Text> : null}

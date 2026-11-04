@@ -566,49 +566,82 @@ async function applyOfflineEvent(options: {
       if (event.type === 'SESSION_START') {
         const idCollision = await TimeSession.findByPk(event.sessionId, { transaction });
         if (idCollision) {
-          throw AppError.conflict('sessionId is already in use', 'SESSION_ID_EXISTS');
-        }
+          const sameOwner =
+            idCollision.organizationId === organizationId &&
+            idCollision.employeeId === employeeId &&
+            idCollision.desktopAgentId === agent.id;
+          if (!sameOwner) {
+            throw AppError.conflict('sessionId is already in use', 'SESSION_ID_EXISTS');
+          }
 
-        const active = await TimeSession.findOne({
-          where: { employeeId, endedAt: null },
-          transaction,
-          lock: Transaction.LOCK.UPDATE,
-        });
-        if (active) {
-          throw AppError.conflict(
-            'An active session already exists for this employee',
-            'ACTIVE_SESSION_EXISTS',
+          // A replay with a fresh eventId for a session this agent already
+          // created is a retry, not a second session.
+          result = {
+            sessionId: idCollision.id,
+            startedAt: idCollision.startedAt,
+            status: idCollision.status,
+            adopted: true,
+          };
+        } else {
+          const active = await TimeSession.findOne({
+            where: { employeeId, endedAt: null },
+            transaction,
+            lock: Transaction.LOCK.UPDATE,
+          });
+          if (active) {
+            const heartbeatAge = Date.now() - active.lastHeartbeatAt.getTime();
+            if (heartbeatAge <= config.timeTracking.sessionStaleSeconds * 1000) {
+              throw AppError.conflict(
+                'An active session already exists for this employee',
+                'ACTIVE_SESSION_EXISTS',
+              );
+            }
+
+            // A crashed or offline device can leave a stale open session. The
+            // same recovery policy as the online start path applies: close it
+            // at its last heartbeat, never at the new offline start time.
+            const cutoff = new Date(
+              Math.max(active.startedAt.getTime(), active.lastHeartbeatAt.getTime()),
+            );
+            await closeActiveBreak(transaction, active.id, cutoff, true);
+            await active.update(
+              { endedAt: cutoff, status: 'STOPPED', lastHeartbeatAt: cutoff },
+              { transaction },
+            );
+          }
+
+          const agentActive = await TimeSession.findOne({
+            where: { desktopAgentId: agent.id, endedAt: null },
+            transaction,
+            lock: Transaction.LOCK.UPDATE,
+          });
+          if (agentActive) {
+            throw AppError.conflict(
+              'This agent already has an active session',
+              'AGENT_SESSION_EXISTS',
+            );
+          }
+
+          const session = await TimeSession.create(
+            {
+              id: event.sessionId,
+              organizationId,
+              employeeId,
+              desktopAgentId: agent.id,
+              startedAt: occurredAt,
+              endedAt: null,
+              status: 'ACTIVE',
+              source: 'OFFLINE',
+              lastHeartbeatAt: occurredAt,
+            },
+            { transaction },
           );
+          result = {
+            sessionId: session.id,
+            startedAt: session.startedAt,
+            status: session.status,
+          };
         }
-
-        const agentActive = await TimeSession.findOne({
-          where: { desktopAgentId: agent.id, endedAt: null },
-          transaction,
-          lock: Transaction.LOCK.UPDATE,
-        });
-        if (agentActive) {
-          throw AppError.conflict('This agent already has an active session', 'AGENT_SESSION_EXISTS');
-        }
-
-        const session = await TimeSession.create(
-          {
-            id: event.sessionId,
-            organizationId,
-            employeeId,
-            desktopAgentId: agent.id,
-            startedAt: occurredAt,
-            endedAt: null,
-            status: 'ACTIVE',
-            source: 'OFFLINE',
-            lastHeartbeatAt: occurredAt,
-          },
-          { transaction },
-        );
-        result = {
-          sessionId: session.id,
-          startedAt: session.startedAt,
-          status: session.status,
-        };
       } else {
         const session = await TimeSession.findOne({
           where: {
@@ -624,10 +657,29 @@ async function applyOfflineEvent(options: {
           throw AppError.conflict('Unknown session for this agent', 'SESSION_NOT_FOUND');
         }
 
-        if (event.type === 'SESSION_STOP') {
-          if (session.endedAt || session.status === 'STOPPED') {
+        const stoppedAt = session.endedAt ?? session.lastHeartbeatAt ?? session.startedAt;
+        const alreadyStopped = session.endedAt !== null || session.status === 'STOPPED';
+
+        if (alreadyStopped) {
+          // Events can arrive in a later batch than the stop that closed the
+          // session. A stop at the recorded end time and a break end that
+          // happened at or after it are safe no-ops; anything earlier would
+          // rewrite history and stays a conflict.
+          const sameStop =
+            event.type === 'SESSION_STOP' &&
+            Math.abs(occurredAt.getTime() - stoppedAt.getTime()) <= 2_000;
+          const lateBreakEnd =
+            event.type === 'BREAK_END' && occurredAt.getTime() >= stoppedAt.getTime();
+          if (!sameStop && !lateBreakEnd) {
             throw AppError.conflict('Session is already stopped', 'SESSION_ALREADY_STOPPED');
           }
+          result = {
+            sessionId: session.id,
+            endedAt: session.endedAt,
+            status: session.status,
+            replayed: true,
+          };
+        } else if (event.type === 'SESSION_STOP') {
           if (occurredAt.getTime() <= session.startedAt.getTime()) {
             throw AppError.conflict('Session stop precedes its start', 'INVALID_SESSION_INTERVAL');
           }

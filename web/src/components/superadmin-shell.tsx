@@ -133,10 +133,10 @@ export function SuperadminShell({
       >
         <div className="flex h-14 items-center gap-2 border-b border-line px-3">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink text-xs font-semibold text-on-strong">
-            T
+            W
           </span>
           <div className="min-w-0">
-            <p className="text-[13px] font-semibold tracking-tight text-ink">TempoNest</p>
+            <p className="text-[13px] font-semibold tracking-tight text-ink">WorkZen</p>
             <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted">
               Platform console
             </p>
@@ -169,10 +169,10 @@ export function SuperadminShell({
           <div className="flex h-14 items-center justify-between gap-3 px-4">
             <div className="flex items-center gap-2">
               <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink text-[11px] font-semibold text-on-strong">
-                T
+                W
               </span>
               <div>
-                <p className="text-[13px] font-semibold leading-4 text-ink">TempoNest</p>
+                <p className="text-[13px] font-semibold leading-4 text-ink">WorkZen</p>
                 <p className="text-[9px] font-medium uppercase tracking-[0.12em] text-muted">
                   Platform console
                 </p>

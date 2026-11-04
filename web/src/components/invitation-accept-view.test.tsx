@@ -38,7 +38,7 @@ const mockedApiRequest = vi.mocked(apiRequest);
 
 const organization: Organization = {
   id: "org-1",
-  name: "TempoNest Labs",
+  name: "WorkZen Labs",
   slug: "temponest-labs",
   status: "ACTIVE",
   timezone: "UTC",
@@ -122,7 +122,7 @@ describe("InvitationAcceptView", () => {
     mockPreview(preview());
     render(<InvitationAcceptView />);
 
-    expect(await screen.findByText("TempoNest Labs")).toBeInTheDocument();
+    expect(await screen.findByText("WorkZen Labs")).toBeInTheDocument();
     expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
     expect(screen.getByText("Employee")).toBeInTheDocument();
     expect(screen.getByLabelText("Invited email")).toHaveValue("ada@example.com");
@@ -166,7 +166,7 @@ describe("InvitationAcceptView", () => {
     mockPreview(preview({ existingAccount: true }));
     render(<InvitationAcceptView />);
 
-    expect(await screen.findByText("You already have a TempoNest account")).toBeInTheDocument();
+    expect(await screen.findByText("You already have a WorkZen account")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sign in to accept" })).toHaveAttribute(
       "href",
       `/login?next=${encodeURIComponent(`/invitations/accept?token=${token}`)}`,

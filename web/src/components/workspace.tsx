@@ -193,7 +193,7 @@ function SuspendedOrganization({ name }: { name: string }) {
             blocked until the organization is reactivated.
           </p>
           <p className="text-xs text-muted">
-            No organization data has been deleted. Contact your TempoNest platform
+            No organization data has been deleted. Contact your WorkZen platform
             administrator to reactivate the organization.
           </p>
         </div>

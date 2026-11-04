@@ -65,7 +65,7 @@ export async function httpJson<T>(
         throw new ApiError({
           status: response.status,
           code: 'INVALID_RESPONSE',
-          message: 'TempoNest returned an unexpected response. Please try again.',
+          message: 'WorkZen returned an unexpected response. Please try again.',
         });
       }
     }

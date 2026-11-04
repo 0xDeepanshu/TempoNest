@@ -21,7 +21,7 @@ function resolveBaseUrl(): string {
   if (configuredBaseUrl) return normalizeBaseUrl(configuredBaseUrl);
   if (__DEV__) return defaultDevelopmentBaseUrl;
   throw new Error(
-    'EXPO_PUBLIC_API_BASE_URL is required for production builds. Point it at the verified TempoNest API origin.',
+    'EXPO_PUBLIC_API_BASE_URL is required for production builds. Point it at the verified WorkZen API origin.',
   );
 }
 

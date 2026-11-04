@@ -17,10 +17,10 @@ export function PublicAuthShell({
       <div className="mx-auto w-full max-w-xl space-y-6">
         <Link href="/" className="inline-flex items-center gap-2.5">
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-lg font-semibold text-on-strong">
-            T
+            W
           </span>
           <span>
-            <span className="block text-base font-semibold tracking-tight text-ink">TempoNest</span>
+            <span className="block text-base font-semibold tracking-tight text-ink">WorkZen</span>
             <span className="block text-[9px] font-medium uppercase tracking-[0.18em] text-muted">
               Work portal
             </span>

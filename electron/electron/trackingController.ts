@@ -32,7 +32,37 @@ const DEFAULTS: TrackingRuntimeStatus = {
   connection: 'unknown',
   message: null,
   pendingEvents: 0,
-  serverTime: null
+  serverTime: null,
+  syncState: 'idle',
+  lastSyncedAt: null
+}
+
+const SYNC_RETRY_BASE_MS = 5_000
+const SYNC_RETRY_MAX_MS = 5 * 60_000
+const SYNC_SWEEP_MS = 5_000
+
+interface QueuedSessionState {
+  id: string
+  startedAt: number
+  endedAt: number | null
+  hasStart: boolean
+  breaks: Array<{ id: string; startedAt: number; endedAt: number | null }>
+}
+
+function queueEventTime(event: OfflineEvent): number | null {
+  const parsed = Date.parse(event.occurredAt)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function toIso(timestamp: number): string {
+  return new Date(timestamp).toISOString()
+}
+
+function openQueuedBreak(session: QueuedSessionState) {
+  for (let index = session.breaks.length - 1; index >= 0; index -= 1) {
+    if (session.breaks[index].endedAt === null) return session.breaks[index]
+  }
+  return null
 }
 
 const UUID_PATTERN =
@@ -152,6 +182,8 @@ export class TrackingController {
   private readonly sessionAliases = new Map<string, string>()
   private readonly fallbackHeartbeat: NodeJS.Timeout
   private readonly reconnectSweep: NodeJS.Timeout
+  private syncFailures = 0
+  private syncRetryAt = 0
 
   constructor(options: TrackingControllerOptions) {
     this.auth = options.auth
@@ -198,18 +230,20 @@ export class TrackingController {
 
     this.reconnectSweep = setInterval(() => {
       if (!this.session || this.blocked) return
-      if (this.status.connection !== 'offline' && this.socket.isOpen) return
+      const hasPending = this.queue.count() > 0
+      if (!hasPending && this.status.connection === 'online' && this.socket.isOpen) return
+      if (Date.now() < this.syncRetryAt) return
       void this.enqueue(async () => {
         try {
           await this.ensureAgentCredentials()
           if (!this.socket.isOpen) this.socket.connect()
           const flushed = await this.flushQueue()
-          if (flushed) await this.fetchCurrent()
+          if (flushed && hasPending) await this.fetchCurrent()
         } catch {
           // The next sweep retries; the durable queue is already saved.
         }
       })
-    }, 30_000)
+    }, SYNC_SWEEP_MS)
     this.reconnectSweep.unref()
   }
 
@@ -234,7 +268,9 @@ export class TrackingController {
   attachSession(session: AuthSession): void {
     this.session = session
     this.blocked = false
-    this.queue.bindUser(session.employee.id)
+    this.queue.bindOwner(session.membership.organization.id, session.employee.id)
+    this.syncFailures = 0
+    this.syncRetryAt = 0
     this.updateStatus({
       connection: 'unknown',
       message: null,
@@ -248,19 +284,22 @@ export class TrackingController {
   }
 
   /**
-   * Explicit sign-out clears queued events. Involuntary invalidation keeps them
-   * so a pending quit-time stop can still be applied after the same employee
-   * signs in again; `bindUser` discards them if a different employee signs in.
+   * Detaches the current account without touching persisted timer events.
+   * Pending starts, breaks and stops stay associated with the employee they
+   * were recorded for until that employee signs in and the server confirms
+   * them. Switching accounts only changes which owner bucket is active.
    */
-  detachSession(clearQueuedEvents = false): void {
+  detachSession(): void {
     this.session = null
     this.blocked = false
     this.liveScreen?.detachSession()
     this.socket.disconnect(true)
-    if (clearQueuedEvents) this.queue.clear()
+    this.queue.detachOwner()
     this.agents.forgetAgent()
     this.sessionAliases.clear()
     this.snapshot = emptySnapshot()
+    this.syncFailures = 0
+    this.syncRetryAt = 0
     this.updateStatus({ ...DEFAULTS })
     this.emitSnapshot()
   }
@@ -288,7 +327,7 @@ export class TrackingController {
     clearInterval(this.reconnectSweep)
     this.liveScreen?.detachSession()
 
-    this.shutdownPromise = this.enqueue(() => this.stopActiveSessionForShutdown())
+    this.shutdownPromise = this.enqueue(() => this.finalizeActiveSession(true))
       .catch(() => undefined)
       .finally(() => {
         this.socket.disconnect()
@@ -296,14 +335,27 @@ export class TrackingController {
     return this.shutdownPromise
   }
 
+  /**
+   * Explicit sign-out path. The active session is closed at the sign-out time
+   * and the stop is written to the owner's durable queue before credentials
+   * are torn down, so logging out while offline cannot lose worked minutes or
+   * leave the session running while another account uses the machine.
+   */
+  stopForSignOut(): Promise<void> {
+    return this.enqueue(() => this.finalizeActiveSession(false)).catch(() => undefined)
+  }
+
   restore(): Promise<TrackingSnapshot | null> {
     return this.enqueue(async () => {
       if (!this.session) return null
       await this.ensureReady()
       const flushed = await this.flushQueue()
-      if (!flushed && this.queue.count() > 0) return this.pendingQueueSnapshot()
+      if (!flushed) return this.queueSnapshot()
       const current = await this.fetchCurrent()
-      return this.status.connection === 'offline' ? this.pendingQueueSnapshot() : current
+      // With no durable events the main process has no authoritative state for
+      // an offline relaunch. Returning null keeps the renderer's cached active
+      // session instead of fabricating an idle snapshot that erases it.
+      return this.status.connection === 'offline' ? this.queueSnapshot() : current
     })
   }
 
@@ -312,38 +364,44 @@ export class TrackingController {
       if (!this.session) return null
       await this.ensureReady()
       const flushed = await this.flushQueue()
-      if (!flushed && this.queue.count() > 0) return this.pendingQueueSnapshot()
+      if (!flushed) return this.queueSnapshot()
       const current = await this.fetchCurrent()
-      return this.status.connection === 'offline' ? this.pendingQueueSnapshot() : current
+      return this.status.connection === 'offline' ? this.queueSnapshot() : current
     })
   }
 
-  private async stopActiveSessionForShutdown(): Promise<void> {
+  private async finalizeActiveSession(initialize: boolean): Promise<void> {
     if (!this.session || this.blocked) return
 
-    try {
-      await this.ensureReady()
-    } catch {
-      // Fall back to whatever local state is known.
+    if (initialize) {
+      try {
+        await this.ensureReady()
+      } catch {
+        // Fall back to whatever local state is known.
+      }
     }
 
     let active =
       this.snapshot.session && !this.snapshot.session.endedAt ? this.snapshot.session : null
 
     if (!active) {
-      const pendingSessionId = this.pendingQueueSessionId()
-      if (pendingSessionId) {
+      const queued = this.activeQueuedSession()
+      if (queued) {
         active = {
-          id: pendingSessionId,
-          startedAt: new Date().toISOString(),
+          id: queued.id,
+          startedAt: toIso(queued.startedAt),
           endedAt: null,
-          breaks: [],
+          breaks: queued.breaks.map((interval) => ({
+            id: interval.id,
+            startedAt: toIso(interval.startedAt),
+            endedAt: interval.endedAt === null ? null : toIso(interval.endedAt)
+          })),
           pendingSync: true
         }
       }
     }
 
-    if (!active) {
+    if (!active && initialize) {
       const current = await this.fetchCurrent()
       active = current.session && !current.session.endedAt ? current.session : null
     }
@@ -390,35 +448,135 @@ export class TrackingController {
     return event
   }
 
-  /** The latest queued session that started and has not been stopped. */
-  private pendingQueueSessionId(): string | null {
-    const active = new Map<string, boolean>()
-    for (const event of this.queue.all()) {
-      if (event.type === 'SESSION_START') active.set(event.sessionId, true)
-      if (event.type === 'SESSION_STOP') active.set(event.sessionId, false)
-    }
-
-    let candidate: string | null = null
-    for (const [sessionId, isActive] of active) {
-      if (isActive) candidate = sessionId
-    }
-    return candidate
-  }
-
   /**
-   * If the durable queue ends in a stop, the local timer must not reappear as
-   * running when the server cannot be reached on the next launch.
+   * Replays the durable queue into timestamp state. This is the launch-time
+   * authority when the server cannot be reached: an offline start, break or
+   * stop survives app close, crash and account switching, and elapsed time is
+   * always derived from the recorded event timestamps rather than uptime.
    */
-  private pendingQueueSnapshot(): TrackingSnapshot | null {
-    const last = this.queue.all().at(-1)
-    if (last?.type !== 'SESSION_STOP') return null
-    return { ...emptySnapshot(), pendingStopAt: last.occurredAt }
+  private queuedSessions(): QueuedSessionState[] {
+    const sessions = new Map<string, QueuedSessionState>()
+
+    const ensure = (sessionId: string, startedAt: number, hasStart: boolean) => {
+      let session = sessions.get(sessionId)
+      if (!session) {
+        session = { id: sessionId, startedAt, endedAt: null, hasStart, breaks: [] }
+        sessions.set(sessionId, session)
+        return session
+      }
+      if (hasStart && !session.hasStart) {
+        session.startedAt = startedAt
+        session.hasStart = true
+      }
+      return session
+    }
+
+    for (const event of this.queue.all()) {
+      const occurredAt = queueEventTime(event)
+      if (occurredAt === null) continue
+
+      switch (event.type) {
+        case 'SESSION_START': {
+          ensure(event.sessionId, occurredAt, true)
+          break
+        }
+        case 'SESSION_STOP': {
+          const session = ensure(event.sessionId, occurredAt, false)
+          const endedAt = Math.max(session.startedAt, occurredAt)
+          session.endedAt = endedAt
+          const openBreak = openQueuedBreak(session)
+          if (openBreak) openBreak.endedAt = Math.max(openBreak.startedAt, endedAt)
+          break
+        }
+        case 'BREAK_START': {
+          const session = ensure(event.sessionId, occurredAt, false)
+          session.breaks.push({
+            id: `queued-${event.eventId}`,
+            startedAt: occurredAt,
+            endedAt: null
+          })
+          break
+        }
+        case 'BREAK_END': {
+          const session = sessions.get(event.sessionId)
+          if (!session) break
+          const openBreak = openQueuedBreak(session)
+          if (openBreak && occurredAt >= openBreak.startedAt) {
+            openBreak.endedAt = occurredAt
+          }
+          break
+        }
+      }
+    }
+
+    return [...sessions.values()]
   }
 
-  start(clientSessionId: string, _startedAt: string): Promise<TrackingOperationResult> {
+  private activeQueuedSession(): QueuedSessionState | null {
+    let active: QueuedSessionState | null = null
+    for (const session of this.queuedSessions()) {
+      if (!session.hasStart || session.endedAt !== null) continue
+      if (!active || session.startedAt > active.startedAt) active = session
+    }
+    return active
+  }
+
+  private queuedSessionSnapshot(session: QueuedSessionState): ServerSessionSnapshot {
+    return {
+      id: session.id,
+      startedAt: toIso(session.startedAt),
+      endedAt: session.endedAt === null ? null : toIso(session.endedAt),
+      breaks: [...session.breaks]
+        .sort((left, right) => left.startedAt - right.startedAt)
+        .map((interval) => ({
+          id: interval.id,
+          startedAt: toIso(interval.startedAt),
+          endedAt: interval.endedAt === null ? null : toIso(interval.endedAt)
+        })),
+      pendingSync: true
+    }
+  }
+
+  private queueSnapshot(): TrackingSnapshot | null {
+    const events = this.queue.all()
+    if (events.length === 0) return null
+
+    const sessions = this.queuedSessions()
+    const now = Date.now()
+    const { start, end } = localDayBounds(now)
+    const known = sessions.filter((session) => session.hasStart)
+    const active = this.activeQueuedSession()
+
+    const todaySessions = known
+      .filter((session) => session.startedAt < end && (session.endedAt ?? now) > start)
+      .sort((left, right) => left.startedAt - right.startedAt)
+      .map((session) => this.queuedSessionSnapshot(session))
+
+    if (active) {
+      return {
+        status: openQueuedBreak(active) ? 'on_break' : 'working',
+        session: this.queuedSessionSnapshot(active),
+        serverTime: null,
+        ...(todaySessions.length > 0 ? { todaySessions } : {})
+      }
+    }
+
+    const lastStop = [...events].reverse().find((event) => event.type === 'SESSION_STOP')
+    return {
+      status: 'idle',
+      session: null,
+      serverTime: null,
+      ...(lastStop ? { pendingStopAt: lastStop.occurredAt } : {}),
+      ...(todaySessions.length > 0 ? { todaySessions } : {})
+    }
+  }
+
+  start(clientSessionId: string, startedAt: string): Promise<TrackingOperationResult> {
     return this.enqueue(async () => {
       if (!this.session || this.blocked) return this.errorResult('ACCESS_BLOCKED')
       const sessionId = isUuid(clientSessionId) ? clientSessionId : randomUUID()
+      const startedAtDate = new Date(startedAt)
+      const occurredAt = Number.isFinite(startedAtDate.getTime()) ? startedAtDate : new Date()
 
       await this.ensureReady()
       await this.flushQueue()
@@ -448,7 +606,7 @@ export class TrackingController {
           await this.fetchCurrent()
           return this.result(this.snapshot)
         }
-        return this.handleMutationFailure('SESSION_START', sessionId, new Date(), error, true)
+        return this.handleMutationFailure('SESSION_START', sessionId, occurredAt, error, true)
       }
     })
   }
@@ -614,8 +772,13 @@ export class TrackingController {
     try {
       await this.ensureAgentCredentials()
       const flushed = await this.flushQueue()
-      if (flushed) await this.fetchCurrent()
-      else this.updateStatus({ connection: 'offline' })
+      if (flushed) {
+        await this.fetchCurrent()
+      } else {
+        this.updateStatus({ connection: 'offline' })
+        const local = this.queueSnapshot()
+        if (local) this.applySnapshot(local)
+      }
     } catch (error) {
       if (error instanceof NetworkError) {
         this.updateStatus({
@@ -686,6 +849,8 @@ export class TrackingController {
   }
 
   private handleConnected(payload: ConnectedPayload): void {
+    this.syncFailures = 0
+    this.syncRetryAt = 0
     this.updateStatus({ connection: 'online', message: null, pendingEvents: this.queue.count() })
     this.screenshots?.handleConnected(payload.serverTime)
     this.liveScreen?.handleConnected(payload.serverTime)
@@ -725,6 +890,8 @@ export class TrackingController {
   private handleConnectionChanged(online: boolean): void {
     if (this.blocked) return
     if (online) {
+      this.syncFailures = 0
+      this.syncRetryAt = 0
       this.updateStatus({ connection: 'online', message: null })
       return
     }
@@ -775,6 +942,9 @@ export class TrackingController {
       return true
     }
 
+    this.updateStatus({ syncState: 'syncing', pendingEvents: this.queue.count() })
+
+    let lastServerTime: string | null = null
     try {
       const credentials = await this.ensureAgentCredentials()
       while (this.queue.count() > 0) {
@@ -790,7 +960,10 @@ export class TrackingController {
             }
           }
         )
+        lastServerTime = response.serverTime
 
+        // Only event IDs the server explicitly acknowledged are removed. A
+        // partial response or a failed request keeps the remaining events.
         const acknowledged = new Set<string>()
         let conflictMessage: string | null = null
         for (const result of response.results) {
@@ -811,13 +984,24 @@ export class TrackingController {
         })
       }
 
+      this.syncFailures = 0
+      this.syncRetryAt = 0
+      this.updateStatus({
+        connection: 'online',
+        syncState: 'synced',
+        pendingEvents: 0,
+        serverTime: lastServerTime,
+        lastSyncedAt: lastServerTime ?? new Date().toISOString()
+      })
       return true
     } catch (error) {
+      this.noteSyncFailure()
       if (error instanceof NetworkError) {
         this.updateStatus({
           connection: 'offline',
           message: 'Sync is paused until the server can be reached.',
-          pendingEvents: this.queue.count()
+          pendingEvents: this.queue.count(),
+          syncState: 'failed'
         })
         return false
       }
@@ -830,10 +1014,20 @@ export class TrackingController {
       this.updateStatus({
         connection: 'online',
         message: safe.message,
-        pendingEvents: this.queue.count()
+        pendingEvents: this.queue.count(),
+        syncState: 'failed'
       })
       return false
     }
+  }
+
+  private noteSyncFailure(): void {
+    this.syncFailures += 1
+    const delay = Math.min(
+      SYNC_RETRY_BASE_MS * 2 ** Math.min(this.syncFailures - 1, 10),
+      SYNC_RETRY_MAX_MS
+    )
+    this.syncRetryAt = Date.now() + delay
   }
 
   private async fetchCurrent(): Promise<TrackingSnapshot> {
@@ -1043,7 +1237,9 @@ export class TrackingController {
       next.connection === this.status.connection &&
       next.message === this.status.message &&
       next.pendingEvents === this.status.pendingEvents &&
-      next.serverTime === this.status.serverTime
+      next.serverTime === this.status.serverTime &&
+      next.syncState === this.status.syncState &&
+      next.lastSyncedAt === this.status.lastSyncedAt
     ) {
       return
     }

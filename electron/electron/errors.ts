@@ -23,7 +23,7 @@ export class ApiError extends Error {
 }
 
 export class NetworkError extends Error {
-  constructor(message = 'The TempoNest service could not be reached.', cause?: unknown) {
+  constructor(message = 'The WorkZen service could not be reached.', cause?: unknown) {
     super(message, { cause })
     this.name = 'NetworkError'
   }

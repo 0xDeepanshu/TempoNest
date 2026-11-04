@@ -66,7 +66,7 @@ export class ScreenshotPolicy
 
 export const DEFAULT_SCREENSHOT_DISCLOSURE_TEXT =
   'Authorized administrators may request individual screenshots of your desktop while a work ' +
-  'session is active. Screenshots are captured by your TempoNest desktop agent in the ' +
+  'session is active. Screenshots are captured by your WorkZen desktop agent in the ' +
   'background, stored privately, and retained only for the period described by your organization.';
 
 export function initScreenshotPolicy(sequelize: Sequelize): typeof ScreenshotPolicy {

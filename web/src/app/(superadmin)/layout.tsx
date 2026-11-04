@@ -6,7 +6,7 @@ import { requirePlatformAdmin } from "@/lib/server-session";
 export const metadata: Metadata = {
   title: {
     default: "Platform console",
-    template: "%s · TempoNest Platform",
+    template: "%s · WorkZen Platform",
   },
 };
 

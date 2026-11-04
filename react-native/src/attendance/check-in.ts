@@ -208,7 +208,7 @@ export function classifyCheckInFailure(error: unknown): CheckInFailure {
     return {
       action: 'retry',
       message:
-        'The check-in did not reach TempoNest. Your progress is saved; reconnect and try again.',
+        'The check-in did not reach WorkZen. Your progress is saved; reconnect and try again.',
     };
   }
 
@@ -238,7 +238,7 @@ export function classifyCheckInFailure(error: unknown): CheckInFailure {
     if (error.status >= 500) {
       return {
         action: 'retry',
-        message: 'TempoNest could not finish the check-in. Please retry.',
+        message: 'WorkZen could not finish the check-in. Please retry.',
       };
     }
     return { action: 'restart', message: error.message };

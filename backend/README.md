@@ -1,6 +1,6 @@
-# TempoNest Backend — Step 3: Admin-Initiated Screenshots
+# WorkZen Backend — Step 3: Admin-Initiated Screenshots
 
-Production-oriented foundation for TempoNest: a modular monolith REST API used by the Next.js admin portal and Electron employee application.
+Production-oriented foundation for WorkZen: a modular monolith REST API used by the Next.js admin portal and Electron employee application.
 
 Step 1 implements organizations, users, memberships, invitations, browser and desktop authentication, authorization, and supporting security/reliability infrastructure. Step 2 adds server-authoritative time tracking, registered desktop agents, authenticated agent WebSockets, offline reconciliation, foreground application metadata, and reporting. Step 3 adds **explicit, administrator-initiated individual screenshot requests**, a per-organization monitoring policy/disclosure, private local or S3-compatible object storage, short-lived upload/download authorization, lifecycle recovery over HTTP/WebSocket, an audit trail, and retention cleanup. Step 4 adds **organization-level desktop tracking policy, OS idle intervals, application classification, and productivity analytics**, with server-authoritative calculations and privacy boundaries.
 

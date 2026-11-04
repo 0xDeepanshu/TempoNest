@@ -66,7 +66,7 @@ async function register(
     if (payload.agent.clientType !== 'MOBILE') {
       throw new MobileAgentError(
         'CLIENT_TYPE_MISMATCH',
-        'This device registration is not a mobile device. Contact your TempoNest administrator.',
+        'This device registration is not a mobile device. Contact your WorkZen administrator.',
       );
     }
 
@@ -94,13 +94,13 @@ async function register(
     if (isApiErrorCode(error, 'AGENT_REVOKED')) {
       throw new MobileAgentError(
         'REVOKED',
-        'This device was revoked by an administrator. Contact your TempoNest administrator to restore access.',
+        'This device was revoked by an administrator. Contact your WorkZen administrator to restore access.',
       );
     }
     if (isApiErrorCode(error, 'AGENT_CLIENT_TYPE_MISMATCH')) {
       throw new MobileAgentError(
         'CLIENT_TYPE_MISMATCH',
-        'This device is already registered with a different client type. Contact your TempoNest administrator.',
+        'This device is already registered with a different client type. Contact your WorkZen administrator.',
       );
     }
     if (error instanceof ApiError || error instanceof NetworkError) {
@@ -139,7 +139,7 @@ export async function ensureMobileAgent(
       if (isApiErrorCode(error, 'AGENT_REVOKED')) {
         throw new MobileAgentError(
           'REVOKED',
-          'This device was revoked by an administrator. Contact your TempoNest administrator to restore access.',
+          'This device was revoked by an administrator. Contact your WorkZen administrator to restore access.',
         );
       }
       if (isApiErrorCode(error, 'AGENT_CREDENTIALS_INVALID')) {

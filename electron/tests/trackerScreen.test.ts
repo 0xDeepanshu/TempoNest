@@ -55,6 +55,8 @@ function timer(overrides: Record<string, unknown> = {}): Record<string, unknown>
     totalsError: null,
     connection: 'online',
     syncMessage: null,
+    syncState: 'idle',
+    lastSyncedAt: null,
     pendingEvents: 0,
     startWork: () => undefined,
     stopWork: () => undefined,
@@ -120,6 +122,76 @@ describe('TrackerScreen content', () => {
 
     expect(html).toContain('Take a break')
     expect(html).toContain('Stop')
+  })
+
+  it('distinguishes online and offline work and break states', () => {
+    mocks.timer.current = timer({ status: 'working', activeSessionStartedAt: Date.now() })
+    expect(render()).toContain('Working · Online')
+
+    mocks.timer.current = timer({
+      status: 'working',
+      connection: 'offline',
+      activeSessionStartedAt: Date.now(),
+      workElapsedMs: 30 * 60_000
+    })
+    let html = render()
+    expect(html).toContain('Working · Offline')
+    // The offline timer keeps counting instead of freezing or resetting.
+    expect(html).toContain('00:30:00')
+    expect(html).toContain('Stop')
+
+    mocks.timer.current = timer({
+      status: 'on_break',
+      activeBreakStartedAt: Date.now(),
+      breakElapsedMs: 5 * 60_000
+    })
+    expect(render()).toContain('On break · Online')
+
+    mocks.timer.current = timer({
+      status: 'on_break',
+      connection: 'offline',
+      activeBreakStartedAt: Date.now(),
+      breakElapsedMs: 5 * 60_000
+    })
+    html = render()
+    expect(html).toContain('On break · Offline')
+    expect(html).toContain('00:05:00')
+  })
+
+  it('shows syncing, synced and sync failed states separately from attendance', () => {
+    mocks.timer.current = timer({
+      status: 'working',
+      connection: 'offline',
+      activeSessionStartedAt: Date.now(),
+      pendingEvents: 3,
+      syncState: 'syncing'
+    })
+    let html = render()
+    expect(html).toContain('Working · Offline')
+    expect(html).toContain('Syncing')
+    expect(html).toContain('3 pending events')
+
+    mocks.timer.current = timer({
+      status: 'working',
+      activeSessionStartedAt: Date.now(),
+      pendingEvents: 2,
+      syncState: 'failed',
+      syncMessage: 'Sync is paused until the server can be reached.'
+    })
+    html = render()
+    expect(html).toContain('Sync failed')
+    expect(html).toContain('2 pending events')
+
+    mocks.timer.current = timer({
+      status: 'working',
+      activeSessionStartedAt: Date.now(),
+      syncState: 'synced'
+    })
+    expect(render()).toContain('Synced')
+
+    // A completed past sync is not presented while no session is running.
+    mocks.timer.current = timer({ syncState: 'synced' })
+    expect(render()).not.toContain('Synced')
   })
 
   it('shows the organization activity policy and what is collected', () => {
@@ -188,6 +260,6 @@ describe('LoginScreen content', () => {
     expect(html).toContain('Work email')
     expect(html.toLowerCase()).not.toContain('screenshot')
     expect(html).not.toContain('Nothing hidden')
-    expect(html).not.toContain('TempoNest · Employee desktop')
+    expect(html).not.toContain('WorkZen · Employee desktop')
   })
 })

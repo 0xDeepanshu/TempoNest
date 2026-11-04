@@ -81,6 +81,31 @@ export async function registerDesktopAgent(
     deviceIdentifier: input.deviceId,
     ...metadata,
   });
+
+  // This signed installation now belongs to a different employee. End the
+  // previous employee's live presence immediately instead of letting their
+  // last heartbeat keep them online while someone else uses the same machine.
+  const displaced = await DesktopAgent.findAll({
+    where: {
+      organizationId,
+      deviceIdentifier: input.deviceId,
+      clientType: metadata.clientType,
+      userId: { [Op.ne]: userId },
+      revokedAt: null,
+    },
+    attributes: ['id'],
+  });
+  if (displaced.length > 0) {
+    const disconnectedAt = new Date();
+    await DesktopAgent.update(
+      { lastDisconnectedAt: disconnectedAt },
+      { where: { id: { [Op.in]: displaced.map((item) => item.id) } } },
+    );
+    for (const item of displaced) {
+      agentHub.closeAgent(item.id, 4001, 'DEVICE_ACCOUNT_SWITCHED');
+    }
+  }
+
   return { agent, agentKey: key, rotated: false };
 }
 

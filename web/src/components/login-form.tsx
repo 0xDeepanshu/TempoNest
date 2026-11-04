@@ -128,10 +128,10 @@ export function LoginPanel() {
       <div className="relative hidden flex-col justify-between bg-brand p-12 text-brand-foreground lg:flex">
         <div className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-foreground text-lg font-semibold text-brand-ink">
-            T
+            W
           </span>
           <div>
-            <p className="text-lg font-semibold tracking-tight">TempoNest</p>
+            <p className="text-lg font-semibold tracking-tight">WorkZen</p>
             <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-brand-muted">
               Work portal
             </p>
@@ -178,7 +178,7 @@ export function LoginPanel() {
         </div>
 
         <p className="text-xs text-brand-muted">
-          Time tracking is server-authoritative and controlled by the TempoNest desktop agent.
+          Time tracking is server-authoritative and controlled by the WorkZen desktop agent.
         </p>
       </div>
 
@@ -186,10 +186,10 @@ export function LoginPanel() {
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink text-sm font-semibold text-on-strong">
-              T
+              W
             </span>
             <div>
-              <p className="text-base font-semibold tracking-tight text-ink">TempoNest</p>
+              <p className="text-base font-semibold tracking-tight text-ink">WorkZen</p>
               <p className="text-[9px] font-medium uppercase tracking-widest text-muted">
                 Work portal
               </p>
@@ -202,7 +202,7 @@ export function LoginPanel() {
           <LoginForm />
           <p className="mt-8 text-center text-[11px] text-muted">
             <Link href="/" className="font-medium text-ink-secondary hover:text-ink">
-              TempoNest
+              WorkZen
             </Link>{" "}
             · Secure cookie session · CSRF protected
           </p>

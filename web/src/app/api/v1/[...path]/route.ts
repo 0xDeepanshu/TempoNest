@@ -120,7 +120,7 @@ async function handle(request: NextRequest, context: RouteContext): Promise<Resp
         error: {
           code: "BACKEND_UNAVAILABLE",
           message:
-            "The TempoNest API is unavailable. Check that the backend is running and reachable.",
+            "The WorkZen API is unavailable. Check that the backend is running and reachable.",
         },
       },
       { status: 502, headers: { "cache-control": "no-store" } },
@@ -153,7 +153,7 @@ async function handle(request: NextRequest, context: RouteContext): Promise<Resp
             error: {
               code: "BACKEND_UNAVAILABLE",
               message:
-                "The TempoNest API is unavailable. Check that the backend is running and reachable.",
+                "The WorkZen API is unavailable. Check that the backend is running and reachable.",
             },
           },
           { status: 502, headers: { "cache-control": "no-store" } },

@@ -6,7 +6,7 @@ import { Card, CardBody, Spinner } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "Accept invitation",
-  description: "Activate your TempoNest account from an organization invitation.",
+  description: "Activate your WorkZen account from an organization invitation.",
 };
 
 export default function AcceptInvitationPage() {

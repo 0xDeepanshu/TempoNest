@@ -7,13 +7,13 @@ export function BrandMark({ size = 44 }: { size?: number }) {
     <View
       accessible
       accessibilityRole="image"
-      accessibilityLabel="TempoNest"
+      accessibilityLabel="WorkZen"
       style={[
         styles.mark,
         { width: size, height: size, borderRadius: Math.round(size * 0.28) },
       ]}
     >
-      <Text style={[styles.letter, { fontSize: Math.round(size * 0.52) }]}>T</Text>
+      <Text style={[styles.letter, { fontSize: Math.round(size * 0.52) }]}>W</Text>
     </View>
   );
 }
@@ -24,7 +24,7 @@ export function BrandLockup({ subtitle }: { subtitle?: string }) {
       <BrandMark />
       <View style={styles.lockupText}>
         <Text style={styles.name} numberOfLines={1}>
-          TempoNest
+          WorkZen
         </Text>
         {subtitle ? (
           <Text style={styles.subtitle} numberOfLines={1}>

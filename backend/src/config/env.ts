@@ -54,7 +54,7 @@ const envSchema = z
     // Outbound e-mail. `smtp` is required in production; development defaults
     // to a file outbox so invitation/reset links stay inspectable locally.
     MAIL_TRANSPORT: z.enum(['smtp', 'file', 'memory', 'log']).optional(),
-    MAIL_FROM: z.string().min(3).default('TempoNest <no-reply@temponest.local>'),
+    MAIL_FROM: z.string().min(3).default('WorkZen <no-reply@workzen.local>'),
     MAIL_OUTBOX_DIR: z.string().min(1).default('storage/mail-outbox'),
     WEB_APP_URL: z.string().url().default('http://localhost:3000'),
     SMTP_HOST: optionalString,

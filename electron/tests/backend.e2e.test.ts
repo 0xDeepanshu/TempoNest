@@ -93,7 +93,7 @@ function waitForClose(socket: WebSocket): Promise<{ code: number; reason: string
   })
 }
 
-describeE2E('real TempoNest backend integration', () => {
+describeE2E('real WorkZen backend integration', () => {
   it('authenticates, tracks, syncs offline events, rotates tokens and handles revocation', async () => {
     const health = await api<{ status: string }>('/health')
     expect(health.status).toBe(200)

@@ -21,7 +21,7 @@ export function ForgotPasswordForm() {
     setApiError(null);
 
     if (!email.trim()) {
-      setError("Enter the email address you use for TempoNest.");
+      setError("Enter the email address you use for WorkZen.");
       return;
     }
 

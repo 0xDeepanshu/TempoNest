@@ -101,14 +101,14 @@ export default function HomeScreen() {
     return (
       <Screen>
         <View style={styles.header}>
-          <BrandLockup subtitle="TempoNest" />
+          <BrandLockup subtitle="WorkZen" />
           <SignOutButton onPress={() => void signOut()} />
         </View>
         <Card>
           <Text style={styles.cardTitle}>No active organization</Text>
           <Text style={styles.body}>
             You’re signed in as {user.email}, but your account has no active
-            TempoNest organization. Ask your administrator to activate your
+            WorkZen organization. Ask your administrator to activate your
             membership.
           </Text>
           <Button
@@ -238,7 +238,7 @@ function HomeContent({
         <Text style={styles.greetingTitle}>Hi, {firstName}</Text>
         <Text style={styles.greetingSubtitle}>
           {session
-            ? 'Keep TempoNest open while you work so your session stays in sync.'
+            ? 'Keep WorkZen open while you work so your session stays in sync.'
             : 'Ready when you are.'}
         </Text>
       </View>
@@ -270,7 +270,7 @@ function HomeContent({
             <Text style={styles.loadingText}>Preparing this device…</Text>
           </View>
           <Text style={styles.helper}>
-            Registering a secure mobile identity for your TempoNest account.
+            Registering a secure mobile identity for your WorkZen account.
           </Text>
         </Card>
       ) : null}

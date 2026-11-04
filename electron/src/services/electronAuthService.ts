@@ -4,7 +4,7 @@ import type { AuthSession, SignInCredentials } from '@/types/auth'
 
 function getBridge(): AppBridge {
   if (!window.temponest) {
-    throw new Error('The TempoNest desktop bridge is unavailable. Start the Electron app.')
+    throw new Error('The WorkZen desktop bridge is unavailable. Start the Electron app.')
   }
   return window.temponest
 }

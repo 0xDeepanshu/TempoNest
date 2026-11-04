@@ -1,7 +1,7 @@
-# TempoNest Mobile
+# WorkZen Mobile
 
-Employee time tracking for TempoNest, built with Expo, React Native, TypeScript,
-and Expo Router. The app talks to the existing TempoNest Express/PostgreSQL API
+Employee time tracking for WorkZen, built with Expo, React Native, TypeScript,
+and Expo Router. The app talks to the existing WorkZen Express/PostgreSQL API
 and does not run its own backend or database.
 
 ## Current scope
@@ -43,7 +43,7 @@ Implemented (Stages A–E):
 Still outstanding:
 
 - Final launcher/adaptive/splash artwork. The current image assets are still the
-  Expo template placeholders; the in-app screens use the TempoNest indigo "T"
+  Expo template placeholders; the in-app screens use the WorkZen indigo "W"
   lockup.
 - Native Android/iOS device testing (camera, GPS, SecureStore) and a native
   development/production build.
@@ -149,7 +149,7 @@ track.
   foreground flows, but the app's background-location entries in `app.json` are
   applied only to your own native build, so verify continuous background
   tracking with `npx expo run:android` or an EAS development build.
-- The TempoNest backend running and reachable from the device.
+- The WorkZen backend running and reachable from the device.
 
 ## Setup
 
@@ -199,7 +199,7 @@ Production builds have **no default**: the app throws at startup if
   inbound. Confirm from the phone's browser before opening the app:
   `http://<computer-lan-ip>:4000/api/v1/health`.
   If `.env.local` is missing or stale, Android falls back to the emulator-only
-  `10.0.2.2` and requests fail with "TempoNest took too long to respond".
+  `10.0.2.2` and requests fail with "WorkZen took too long to respond".
 - **Physical Android over USB**: run
   `adb reverse tcp:4000 tcp:4000` and set
   `EXPO_PUBLIC_API_BASE_URL=http://localhost:4000/api/v1`.
@@ -268,7 +268,7 @@ Additional behavior:
 - Heartbeats run every 60 seconds only while the app is in the foreground.
   Returning to the foreground refreshes attendance and heartbeats immediately.
 - A failed attendance refresh does not clear an on-screen session.
-- Check-in photos are uploaded only to the private TempoNest evidence endpoint
+- Check-in photos are uploaded only to the private WorkZen evidence endpoint
   and are not posted to public image hosting.
 - Selfies are attendance evidence, not proof of a live capture or identity
   verification. No facial recognition, face enrollment, or biometric templates

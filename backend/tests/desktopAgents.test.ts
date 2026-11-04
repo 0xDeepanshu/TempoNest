@@ -202,6 +202,48 @@ describe('desktop agents', () => {
     expect((await DesktopAgent.findByPk(agent.id))!.clientType).toBe('ELECTRON');
   });
 
+  it('clears the previous employee presence when another account claims the device', async () => {
+    const { owner, orgId, ownerAuth, agent } = await createTeam();
+    await DesktopAgent.update({ lastSeenAt: new Date() }, { where: { id: agent.id } });
+
+    const before = await request(app)
+      .get(`${API}/organizations/${orgId}/desktop-agents`)
+      .set(ownerAuth.headers);
+    expect(
+      (before.body.data as Array<{ id: string; online: boolean }>).find((row) => row.id === agent.id)!
+        .online,
+    ).toBe(true);
+
+    const secondEmployee = await inviteAndAccept(owner, {
+      role: 'EMPLOYEE',
+      name: 'Second Employee',
+      email: uniqueEmail('employee2'),
+    });
+    const secondAuth = await desktopAuth(secondEmployee.email);
+    const secondAgent = await registerAgent(secondAuth, orgId, { deviceId: agent.deviceId });
+    expect(secondAgent.id).not.toBe(agent.id);
+
+    const displaced = await DesktopAgent.findByPk(agent.id);
+    expect(displaced!.lastDisconnectedAt).toBeTruthy();
+    // Re-registering the device for another employee must win over the old
+    // heartbeat instead of letting the previous account stay online.
+    expect(displaced!.lastDisconnectedAt!.getTime()).toBeGreaterThanOrEqual(
+      displaced!.lastSeenAt!.getTime(),
+    );
+
+    await request(app)
+      .post(`${API}/desktop-agents/authenticate`)
+      .send({ agentId: secondAgent.id, agentKey: secondAgent.key });
+
+    const after = await request(app)
+      .get(`${API}/organizations/${orgId}/desktop-agents`)
+      .set(ownerAuth.headers);
+    const rows = after.body.data as Array<{ id: string; userId: string; online: boolean }>;
+    expect(rows.find((row) => row.id === agent.id)!.online).toBe(false);
+    expect(rows.find((row) => row.id === secondAgent.id)!.userId).toBe(secondEmployee.user.id);
+    expect(rows.find((row) => row.id === secondAgent.id)!.online).toBe(true);
+  });
+
   it('requires authentication and organization membership to register a device', async () => {
     const { orgId, auth } = await createTeam();
     const otherOwner = await createOwner(uniqueEmail('owner'), 'Other Device Org');

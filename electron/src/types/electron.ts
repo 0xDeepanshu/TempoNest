@@ -54,11 +54,16 @@ export interface TrackingSnapshot {
 
 export type TrackingConnectionState = 'online' | 'offline' | 'blocked' | 'unknown'
 
+export type TrackingSyncState = 'idle' | 'syncing' | 'synced' | 'failed'
+
 export interface TrackingRuntimeStatus {
   connection: TrackingConnectionState
   message: string | null
   pendingEvents: number
   serverTime: string | null
+  /** Progress of the durable offline-event queue. */
+  syncState: TrackingSyncState
+  lastSyncedAt: string | null
 }
 
 export type MonitoringPhase =

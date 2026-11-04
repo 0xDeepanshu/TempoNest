@@ -601,11 +601,11 @@ export default function CheckInScreen() {
   if (!activeOrganization) {
     return (
       <Screen>
-        <BrandLockup subtitle="TempoNest" />
+        <BrandLockup subtitle="WorkZen" />
         <Card>
           <Text style={styles.cardTitle}>No active organization</Text>
           <Text style={styles.body}>
-            Ask your administrator to activate your TempoNest membership before
+            Ask your administrator to activate your WorkZen membership before
             checking in.
           </Text>
           <Button label="Back to home" variant="secondary" onPress={goHome} />
@@ -702,7 +702,7 @@ export default function CheckInScreen() {
 
           {action === 'refresh' ? (
             <Text style={styles.helper}>
-              TempoNest has already recorded something different for your day.
+              WorkZen has already recorded something different for your day.
               Return home to see the current server state.
             </Text>
           ) : null}
@@ -710,7 +710,7 @@ export default function CheckInScreen() {
           {action === 'fatal' ? (
             <Text style={styles.helper}>
               Return home and try again. If this keeps happening, contact your
-              TempoNest administrator.
+              WorkZen administrator.
             </Text>
           ) : null}
 
@@ -937,7 +937,7 @@ export default function CheckInScreen() {
               </View>
 
               <Text style={styles.helper}>
-                This fix starts your on-site check-in. TempoNest then records
+                This fix starts your on-site check-in. WorkZen then records
                 location during the session, pauses on breaks, and stops at
                 checkout.
               </Text>

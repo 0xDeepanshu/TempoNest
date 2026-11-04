@@ -64,7 +64,7 @@ export function useSessionActions(options: Options) {
           await refresh();
           setMessage({
             tone: 'info',
-            text: 'The request did not reach TempoNest, so the latest server state was reloaded.',
+            text: 'The request did not reach WorkZen, so the latest server state was reloaded.',
           });
         } else if (
           isApiErrorCode(

@@ -64,7 +64,7 @@ function currentStateText(
     return {
       label: "Not tracking",
       tone: "neutral",
-      detail: "No open time session. Start tracking from the TempoNest desktop agent.",
+      detail: "No open time session. Start tracking from the WorkZen desktop agent.",
     };
   }
   if (session.status === "ON_BREAK") {
@@ -347,7 +347,7 @@ export function PersonalDashboard() {
                   </dl>
                 ) : (
                   <p className="mt-4 rounded-lg border border-line bg-surface-muted px-3 py-2 text-xs leading-5 text-muted">
-                    Open the TempoNest desktop app and press start. The web portal deliberately
+                    Open the WorkZen desktop app and press start. The web portal deliberately
                     cannot create agent-authenticated sessions.
                   </p>
                 )}
