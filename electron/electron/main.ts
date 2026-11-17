@@ -5,9 +5,11 @@ import { BRANDING } from '../shared/branding'
 import type { AppInfo } from '../src/types/electron'
 import { AppRuntime } from './appRuntime'
 import { ShutdownCoordinator } from './shutdownCoordinator'
+import { UpdateRuntime } from './updateRuntime'
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL
 let runtime: AppRuntime | null = null
+let updateRuntime: UpdateRuntime | null = null
 
 // Fast Refresh needs inline scripts in development. The production policy is
 // injected into index.html at build time and is intentionally stricter.
@@ -131,6 +133,13 @@ app.whenReady().then(() => {
 
   createWindow()
 
+  updateRuntime = new UpdateRuntime(async () => {
+    await shutdown.run()
+    shutdownComplete = true
+  })
+  updateRuntime.registerIpc()
+  updateRuntime.start()
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
@@ -141,6 +150,8 @@ app.whenReady().then(() => {
 const shutdown = new ShutdownCoordinator(async () => {
   const activeRuntime = runtime
   runtime = null
+  updateRuntime?.dispose()
+  updateRuntime = null
   await activeRuntime?.shutdown()
 })
 let shutdownComplete = false

@@ -15,6 +15,15 @@ files:
 asar: true
 compression: normal
 
+# electron-updater reads the generated app-update.yml and downloads releases
+# from GitHub Releases. No token is embedded in the application; publishing
+# credentials only exist in the release workflow environment.
+publish:
+  provider: github
+  owner: 0xDeepanshu
+  repo: TempoNest
+  releaseType: release
+
 win:
   target:
     - target: nsis

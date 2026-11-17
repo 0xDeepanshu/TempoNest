@@ -194,7 +194,7 @@ describe('TrackerScreen content', () => {
     expect(render()).not.toContain('Synced')
   })
 
-  it('shows the organization activity policy and what is collected', () => {
+  it('keeps the activity panel out of the employee screen while collection stays active', () => {
     mocks.timer.current = timer({
       activity: {
         policyKnown: true,
@@ -206,7 +206,7 @@ describe('TrackerScreen content', () => {
         foregroundDetection: 'supported',
         foregroundDetectionMessage: null,
         appCollectionActive: true,
-        idleCollectionActive: false,
+        idleCollectionActive: true,
         pendingAppEvents: 2,
         pendingIdleIntervals: 1,
         lastUploadAt: null,
@@ -215,40 +215,14 @@ describe('TrackerScreen content', () => {
     })
     const html = render()
 
-    expect(html).toContain('Activity tracking')
-    expect(html).toContain('App activity')
-    expect(html).toContain('Recording while you work')
-    expect(html).toContain('Idle detection')
-    expect(html).toContain('Idle after 5 min without input')
-    expect(html).toContain('Policy v12')
-    expect(html).toContain('3 activity records waiting to upload')
-    expect(html).toContain('Window titles')
-    expect(html.toLowerCase()).not.toContain('screenshot')
-  })
-
-  it('shows when the organization has disabled activity collection', () => {
-    mocks.timer.current = timer({
-      activity: {
-        policyKnown: true,
-        appTrackingEnabled: false,
-        idleDetectionEnabled: false,
-        productivityClassificationEnabled: false,
-        idleThresholdMinutes: 5,
-        policyVersion: 3,
-        foregroundDetection: 'unavailable',
-        foregroundDetectionMessage: null,
-        appCollectionActive: false,
-        idleCollectionActive: false,
-        pendingAppEvents: 0,
-        pendingIdleIntervals: 0,
-        lastUploadAt: null,
-        message: null
-      }
-    })
-    const html = render()
-
-    expect(html).toContain('Turned off by your organization')
-    expect(html).not.toContain('Recording while you work')
+    expect(html).toContain('Worked today')
+    expect(html).toContain('Start working')
+    expect(html).not.toContain('Activity tracking')
+    expect(html).not.toContain('App activity')
+    expect(html).not.toContain('Idle detection')
+    expect(html).not.toContain('Policy v12')
+    expect(html).not.toContain('Window titles')
+    expect(html).not.toContain('activity records waiting to upload')
   })
 })
 

@@ -11,6 +11,8 @@ import type {
   TrackingOperationResult,
   TrackingRuntimeStatus,
   TrackingSnapshot,
+  UpdateBridge,
+  UpdateStatus,
   UserFacingError
 } from '../src/types/electron'
 import type { AuthSession, SignInCredentials } from '../src/types/auth'
@@ -69,6 +71,14 @@ const activity: ActivityBridge = {
   onStatusChanged: (listener) => subscribe('activity:statusChanged', listener)
 }
 
+const updates: UpdateBridge = {
+  getStatus: () => invoke<UpdateStatus>('updates:status'),
+  check: () => invoke<UpdateStatus>('updates:check'),
+  download: () => invoke<UpdateStatus>('updates:download'),
+  install: () => invoke<void>('updates:install'),
+  onStatusChanged: (listener) => subscribe('updates:statusChanged', listener)
+}
+
 const bridge: AppBridge = {
   platform: process.platform,
   versions: {
@@ -80,7 +90,8 @@ const bridge: AppBridge = {
   auth,
   tracking,
   monitoring,
-  activity
+  activity,
+  updates
 }
 
 contextBridge.exposeInMainWorld('temponest', bridge)

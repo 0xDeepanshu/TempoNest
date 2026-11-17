@@ -3,7 +3,8 @@ import type {
   ActivityTrackingStatus,
   TrackingOperationResult,
   TrackingRuntimeStatus,
-  TrackingSnapshot
+  TrackingSnapshot,
+  UpdateStatus
 } from '@/types/electron'
 import type {
   ActivityEvent,
@@ -59,6 +60,19 @@ export interface DesktopTrackingService {
 export interface DesktopActivityService {
   getStatus(): Promise<ActivityTrackingStatus>
   onStatusChanged(listener: (status: ActivityTrackingStatus) => void): () => void
+}
+
+/**
+ * Update actions stay in the main process. The renderer can only read status,
+ * ask for a check/download, and request the restart that installs a build the
+ * user already downloaded.
+ */
+export interface DesktopUpdateService {
+  getStatus(): Promise<UpdateStatus>
+  check(): Promise<UpdateStatus>
+  download(): Promise<UpdateStatus>
+  install(): Promise<void>
+  onStatusChanged(listener: (status: UpdateStatus) => void): () => void
 }
 
 /**

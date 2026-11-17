@@ -1,6 +1,7 @@
 import { electronActivityService } from '@/services/electronActivityService'
 import { electronAuthService } from '@/services/electronAuthService'
 import { electronTrackingService } from '@/services/electronTrackingService'
+import { electronUpdateService } from '@/services/electronUpdateService'
 
 /**
  * Production composition point. Network calls and credentials stay in the
@@ -9,4 +10,5 @@ import { electronTrackingService } from '@/services/electronTrackingService'
 export const authService = electronAuthService
 export const trackingService = electronTrackingService
 export const activityService = electronActivityService
+export const updateService = electronUpdateService
 export const authMode = 'backend' as const

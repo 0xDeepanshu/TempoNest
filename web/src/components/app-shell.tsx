@@ -384,14 +384,6 @@ function Shell({ children }: { children: ReactNode }) {
               <ArrowRightIcon className="ml-auto h-3.5 w-3.5" />
             </Link>
           ) : null}
-          <Link
-            href="/attendance"
-            onClick={onNavigate}
-            className="mb-2 flex items-start gap-2 rounded-lg border border-line bg-surface-muted px-2.5 py-2 text-[11px] leading-4 text-muted transition-colors hover:text-ink"
-          >
-            <ClockIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Online tracking is controlled by the desktop agent.
-          </Link>
           <div className="flex items-center gap-2.5 px-1 py-1.5">
             <Avatar name={user.name} size="sm" />
             <div className="min-w-0 flex-1">

@@ -1,7 +1,7 @@
 {
   "name": "temponest",
   "productName": "WorkZen",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "WorkZen — a focused employee desktop time tracker.",
   "author": "WorkZen",
@@ -19,9 +19,11 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "package": "npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --dir",
-    "package:mac": "npm run build && electron-builder --mac"
+    "package:mac": "npm run build && electron-builder --mac",
+    "release": "npm run build && electron-builder --win --publish always"
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

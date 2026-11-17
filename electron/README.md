@@ -26,7 +26,7 @@ Continuous screen recording, the admin portal, and backend changes remain out of
 - Collects foreground-application intervals (process identifier, display name, platform, timestamps only) while the local timer is working and the policy enables app tracking.
 - Collects idle intervals from `powerMonitor.getSystemIdleTime()` using the server's `idleThresholdMinutes`. Breaks, stopped sessions, and sleep are excluded.
 - Uploads raw intervals through `POST /organizations/:organizationId/application-activities/batch` and `POST /organizations/:organizationId/activity/idle-intervals/batch`; the Electron app never computes productivity scores.
-- Shows a compact activity status panel so employees can see whether app activity and idle detection are enabled, the idle threshold, pending uploads, and the metadata-only disclosure.
+- Collects activity and idle intervals without adding panels to the employee screen. The tracker UI intentionally shows only the work timer card.
 
 ## Requirements
 
@@ -100,6 +100,7 @@ npm run dev
 | `npm run test:backend` | Run the real backend integration test against `TEMPO_API_BASE_URL` |
 | `npm run preview` | Run the production build in Electron |
 | `npm run package` | Build and create a Windows NSIS installer |
+| `npm run release` | Build and publish the Windows installer, blockmap, and `latest.yml` to GitHub Releases (requires `GH_TOKEN`) |
 | `npm run package:dir` | Build an unpacked Windows app |
 | `npm run package:mac` | Build a macOS DMG on macOS |
 
@@ -192,7 +193,7 @@ App activity and idle detection are employee-visible and controlled entirely by 
 - Raw intervals are uploaded to `POST /organizations/:organizationId/application-activities/batch` and `POST /organizations/:organizationId/activity/idle-intervals/batch`. The desktop app does not calculate productivity scores, and unknown applications are never assumed unproductive.
 - Intervals are queued in `activity-queue.json` under Electron's user-data directory with stable idempotency keys (`app-<deviceId>-<startMs>`, `idle-<deviceId>-<startMs>`). Transient network errors retry with bounded exponential backoff; accepted, duplicate, and permanently rejected results leave the queue; a policy `403` disables that collector locally while keeping unsent data for when the policy is re-enabled.
 - Open intervals are persisted in `activity-state.json` approximately every five seconds. On relaunch they are closed at their last observed timestamp, never at launch time, so a crash or restart cannot fabricate activity.
-- The tracker shows an **Activity tracking** panel with the policy version, whether each collector is enabled and currently recording, the idle threshold, pending upload counts, detector limitations, and the metadata-only disclosure.
+- The employee tracker deliberately does not render an activity panel. Collection, uploads, policy refresh and offline queuing are unchanged; administrators review the resulting data in the WorkZen web portal.
 
 ### Platform support
 
@@ -208,7 +209,7 @@ App activity and idle detection are employee-visible and controlled entirely by 
 Mocks and unit tests cannot prove that real foreground detection works on a Windows desktop. Verify manually before claiming Windows tracking works:
 
 1. Start the backend and desktop app, sign in as an employee whose organization has app tracking and idle detection enabled.
-2. Confirm the tracker's **Activity tracking** panel shows app activity and idle detection as enabled, with the server's idle threshold.
+2. Confirm the organization policy enables app tracking and idle detection with the expected idle threshold (for example through `GET /organizations/:organizationId/activity/settings`). The employee screen intentionally does not display these values.
 3. Start working. Switch between at least three applications (for example a browser, an editor, and a chat app) and stay in each for several seconds.
 4. Quit the app normally, then inspect `%APPDATA%\TempoNest\activity-queue.json`. The directory name is intentionally retained after the WorkZen rename so upgrades keep the existing queue and credentials. Each interval should contain only `applicationIdentifier`, `applicationName`, `platform`, `startedAt` and `endedAt` (plus `sessionId` when known); identifiers should match the process names actually used, and intervals must meet edge-to-edge without overlapping.
 5. Let the machine sit idle past the displayed threshold without touching the keyboard or pointer. The panel should show idle collection, and after resuming and waiting for an upload, `idle-intervals/batch` should contain an interval at least as long as the threshold. Confirm the interval does not include break time: take a break, wait, resume, and verify the idle interval ends at the break start.
@@ -231,6 +232,60 @@ Mocks and unit tests cannot prove that real foreground detection works on a Wind
 - Quitting stops the active server session at close time. A durable `SESSION_STOP` is written before the request, so an offline quit or a lost response is applied through `/time-sessions/sync` at the next authenticated launch, before `/time-sessions/current` is fetched.
 - Explicit sign-out clears local refresh/agent credentials and the offline queue, but it does not stop an active server session. Reopening the same account reconciles that session.
 
+## Automatic updates
+
+Installed Windows builds use `electron-updater` with GitHub Releases as the provider. Updates replace only the installed program files; the data directory at `%APPDATA%\TempoNest` is never touched, so the encrypted refresh token, agent credentials, timer cache, activity state, and offline queue survive every update.
+
+- Provider configuration lives in `electron-builder.yml` (`publish`: GitHub `0xDeepanshu/TempoNest`). electron-builder writes `app-update.yml` into the packaged `resources` directory. No GitHub token, feed URL, or installer path is bundled into the renderer.
+- A packaged Windows app checks 10 seconds after launch and every 4 hours. Development builds (`app.isPackaged === false`) and non-Windows platforms report `supported: false` and never contact GitHub.
+- The main process owns `checkForUpdates`, `downloadUpdate`, and `quitAndInstall`. The preload bridge exposes only `getStatus`, `check`, `download`, `install`, and a status subscription; the renderer cannot supply URLs, paths, or credentials.
+- `autoDownload` and `autoInstallOnAppQuit` are disabled. An available update shows a compact notice with **Download update**; progress is shown while downloading; when the download finishes the employee chooses **Restart & install**. A normal quit never installs an update.
+- Choosing **Restart & install** first runs the existing shutdown coordinator, which stops the active server session and persists the durable stop, activity intervals, and offline queue, then starts the installer and relaunches the app.
+- Checks are deduplicated, skipped while a download is in progress or before an explicit restart, and downgrades/prereleases are not accepted.
+- Failures (offline, missing release metadata, download errors) produce a retryable notice. They never block sign-in, timer startup, timers, or tracking sync.
+
+### Releasing a desktop update
+
+1. Make the code changes and bump `version` in `electron/package.json` (for example `npm version patch --no-git-tag-version`).
+2. Run `cd electron && npm test && npm run build`.
+3. Commit and push the code.
+4. Push a matching tag: `git tag v0.2.1`, then `git push origin v0.2.1`.
+5. The `Release WorkZen Desktop` workflow (`.github/workflows/release-workzen-desktop.yml`) runs on the tag, verifies the tag matches the package version, installs with `npm ci`, runs the tests, builds, and publishes `WorkZen-<version>-setup.exe`, its blockmap, and `latest.yml` to GitHub Releases.
+
+An ordinary push to `main` does not build or publish anything. Releases are published only when a `v*.*.*` tag is pushed.
+
+Local installer build without publishing:
+
+```powershell
+cd D:\Code\Personal\TempoNest\electron
+npm ci
+npm run package
+```
+
+Manual publish from a trusted machine (token in the environment only):
+
+```powershell
+cd D:\Code\Personal\TempoNest\electron
+$env:GH_TOKEN = '<token with contents: write>'
+npm run release
+```
+
+### Repository settings and secrets
+
+- GitHub Actions must be enabled for the repository.
+- The repository and its releases must be publicly readable. Installed apps check GitHub anonymously (no user token is stored in the app), so a private repository would require a token that this design intentionally does not embed.
+- The workflow requests `contents: write` with the built-in `GITHUB_TOKEN`; no repository secret is needed to publish. If organization policy forces read-only workflow tokens, create a `GH_TOKEN` secret with release permission and pass it to the publish step instead.
+- Optional code signing: `CSC_LINK` (base64-encoded `.pfx` or a secure URL) and `CSC_KEY_PASSWORD`. Signed builds reduce SmartScreen warnings, but SmartScreen reputation is earned over time. The app does not change Windows security settings to bypass SmartScreen.
+- Do not commit tokens, certificates, or passwords. They are only environment variables during the workflow run.
+
+### Verifying a real update
+
+Unit tests cover the update state machine, but the end-to-end flow requires a published release:
+
+1. Install an older packaged build (for example `WorkZen-0.2.0-setup.exe`), sign in, and start a session.
+2. Publish a newer version through the tag workflow.
+3. Launch the installed older build (or wait for its periodic check), confirm the update notice, download it, choose **Restart & install**, and verify the new version opens still signed in with its timer and queue state intact.
+
 ## Project structure
 
 ```text
@@ -251,11 +306,14 @@ electron/
   foregroundApp.ts         Windows/macOS/Linux foreground process readers
   systemActivity.ts        powerMonitor idle, suspend and resume adapter
   shutdownCoordinator.ts   One-shot, time-bounded quit cleanup
+  updateController.ts      Testable update state machine (check/download/install)
+  updateRuntime.ts         electron-updater wiring, IPC handlers and status broadcast
   backendTypes.ts          Exact backend response shapes
   errors.ts                Safe error mapping
 src/
   auth/                    AuthProvider and session gate
   screens/                 Login and single employee tracker screen
+  components/UpdateNotice.tsx  Minimal in-app update notice
   services/                Renderer IPC adapters and contracts
   tracking/                Reducer, persistence, server mapping, TimerProvider
   types/                   Auth, tracking, API, and Electron bridge types
@@ -271,6 +329,7 @@ tests/
   activityState.test.ts    Open-interval persistence and validation
   foregroundApp.test.ts    Metadata parsing, Windows helper shape, platform limitations
   shutdownCoordinator.test.ts Idempotent, time-bounded quit cleanup
+  updateController.test.ts Update lifecycle, dedupe, error mapping, quit safety
   backend.e2e.test.ts      Real auth/tracking/sync/WebSocket/revocation flow
 shared/
   branding.ts              Product name, app ID, local storage keys
@@ -285,7 +344,7 @@ shared/
 - WebSocket transport requires network access; HTTP heartbeat fallback covers a missing socket while requests still succeed.
 - The offline start-after-lost-response edge case can lose later queued break events if the server created a different session ID. The current state is still adopted after sync.
 - There is no continuous screen monitoring or keystroke capture. Screenshot handling remains the existing administrator-requested flow.
-- The employee tracker renders an activity status panel and metadata-only disclosure, but no screenshot monitoring disclosure or workspace footer. Screenshot capture, policy enforcement, and required acknowledgements are unchanged and remain controlled by the existing backend and main-process services.
+- The employee tracker renders only the work timer card. It has no activity panel, screenshot monitoring disclosure, or workspace footer; collection, screenshot capture, policy enforcement, and required acknowledgements are unchanged.
 - Foreground detection is platform-specific: Windows uses the built-in PowerShell helper, macOS requires Accessibility/Automation permission for System Events, and Linux requires `xdotool` on X11 (Wayland is unsupported). Unsupported platforms report the limitation and collect no app activity rather than guessing.
 - Foreground intervals are identified by process name (lowercased) and display name from the OS. Two unrelated programs that share a process name share an identifier.
 - The activity policy is fetched at runtime but not cached to disk, so a launch without network collects nothing until `GET /activity/settings` succeeds.
@@ -294,5 +353,5 @@ shared/
 - Local-day totals use the device timezone, not the organization's configured timezone, so a user traveling across timezones can see a day boundary that differs from the web portal.
 - Today's list is bounded to 20 pages of 100 sessions. A day with more than 2,000 overlapping sessions would be truncated.
 - No admin portal, employee reports, charts, or settings UI are part of this app.
-- Startup updates, code signing, notarization, and auto-update are not configured.
+- Auto-update is configured for installed Windows NSIS builds. macOS notarization and Linux update packaging are not configured; those builds report updates as unsupported.
 - Real backend tests create durable test accounts because no cleanup endpoint exists.

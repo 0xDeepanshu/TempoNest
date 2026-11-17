@@ -137,6 +137,39 @@ export interface UserFacingError {
   message: string
 }
 
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'not-available'
+  | 'error'
+
+/**
+ * Display-safe update state. It contains only version strings and progress;
+ * feed URLs, tokens and installer paths stay in the main process.
+ */
+export interface UpdateStatus {
+  phase: UpdatePhase
+  /** False in development builds and on platforms without update artifacts. */
+  supported: boolean
+  currentVersion: string
+  availableVersion: string | null
+  /** Whole percentage while downloading, otherwise null. */
+  progressPercent: number | null
+  message: string | null
+  lastCheckedAt: string | null
+}
+
+export interface UpdateBridge {
+  getStatus: () => Promise<UpdateStatus>
+  check: () => Promise<UpdateStatus>
+  download: () => Promise<UpdateStatus>
+  install: () => Promise<void>
+  onStatusChanged: (listener: (status: UpdateStatus) => void) => () => void
+}
+
 export interface TrackingOperationResult {
   /** The latest server snapshot, when one is known. */
   snapshot: TrackingSnapshot | null
@@ -187,4 +220,5 @@ export interface AppBridge {
   tracking: TrackingBridge
   monitoring: MonitoringBridge
   activity: ActivityBridge
+  updates: UpdateBridge
 }

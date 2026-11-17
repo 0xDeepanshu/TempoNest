@@ -31,7 +31,6 @@ import {
   ClockIcon,
   UsersIcon,
 } from "./icons";
-import { MonitoringDisclosure } from "./monitoring-disclosure";
 import {
   Alert,
   Avatar,
@@ -238,8 +237,6 @@ export function PersonalDashboard() {
           </>
         }
       />
-
-      <MonitoringDisclosure />
 
       {!canViewTime ? (
         <Alert tone="info" title="Attendance summaries restricted">
