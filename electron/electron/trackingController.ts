@@ -118,6 +118,7 @@ function cloneSnapshot(snapshot: TrackingSnapshot): TrackingSnapshot {
         }
       : null,
     serverTime: snapshot.serverTime,
+    ...(typeof snapshot.revision === 'number' ? { revision: snapshot.revision } : {}),
     ...(snapshot.pendingStopAt ? { pendingStopAt: snapshot.pendingStopAt } : {}),
     ...(snapshot.todaySessions
       ? {
@@ -132,7 +133,7 @@ function cloneSnapshot(snapshot: TrackingSnapshot): TrackingSnapshot {
 }
 
 function emptySnapshot(): TrackingSnapshot {
-  return { status: 'idle', session: null, serverTime: null }
+  return { status: 'idle', session: null, serverTime: null, revision: 0 }
 }
 
 function isConflictAdoption(error: unknown): boolean {
@@ -171,6 +172,8 @@ export class TrackingController {
   private readonly liveScreen?: LiveScreenSocketHandler
   private session: AuthSession | null = null
   private snapshot: TrackingSnapshot = emptySnapshot()
+  /** Monotonic per-process; every emitted snapshot is newer than the last. */
+  private revision = 0
   private status: TrackingRuntimeStatus = { ...DEFAULTS }
   private listeners = new Set<(snapshot: TrackingSnapshot) => void>()
   private statusListeners = new Set<(status: TrackingRuntimeStatus) => void>()
@@ -198,7 +201,7 @@ export class TrackingController {
       refreshAccessToken: () => this.auth.refreshAccessToken(),
       recoverCredentials: () => this.recoverCredentials(),
       onConnected: (payload) => this.handleConnected(payload),
-      onSession: (session) => this.handleSocketSession(session),
+      onSession: (session, serverTime) => this.handleSocketSession(session, serverTime),
       onConnectionChanged: (online) => this.handleConnectionChanged(online),
       onBlocked: (code, reason) => {
         void this.blockAccess(code, reason)
@@ -350,12 +353,12 @@ export class TrackingController {
       if (!this.session) return null
       await this.ensureReady()
       const flushed = await this.flushQueue()
-      if (!flushed) return this.queueSnapshot()
+      if (!flushed) return this.applyLocalSnapshot()
       const current = await this.fetchCurrent()
       // With no durable events the main process has no authoritative state for
       // an offline relaunch. Returning null keeps the renderer's cached active
       // session instead of fabricating an idle snapshot that erases it.
-      return this.status.connection === 'offline' ? this.queueSnapshot() : current
+      return this.status.connection === 'offline' ? this.applyLocalSnapshot() : current
     })
   }
 
@@ -364,10 +367,22 @@ export class TrackingController {
       if (!this.session) return null
       await this.ensureReady()
       const flushed = await this.flushQueue()
-      if (!flushed) return this.queueSnapshot()
+      if (!flushed) return this.applyLocalSnapshot()
       const current = await this.fetchCurrent()
-      return this.status.connection === 'offline' ? this.queueSnapshot() : current
+      return this.status.connection === 'offline' ? this.applyLocalSnapshot() : current
     })
+  }
+
+  /**
+   * Queued state is a real snapshot too, so it gets a fresh revision. Without
+   * that the renderer would reject the offline launch snapshot as older than
+   * the last one it saw.
+   */
+  private applyLocalSnapshot(): TrackingSnapshot | null {
+    const local = this.queueSnapshot()
+    if (!local) return null
+    this.applySnapshot(local)
+    return this.getSnapshot()
   }
 
   private async finalizeActiveSession(initialize: boolean): Promise<void> {
@@ -557,6 +572,7 @@ export class TrackingController {
         status: openQueuedBreak(active) ? 'on_break' : 'working',
         session: this.queuedSessionSnapshot(active),
         serverTime: null,
+        revision: this.revision,
         ...(todaySessions.length > 0 ? { todaySessions } : {})
       }
     }
@@ -566,6 +582,7 @@ export class TrackingController {
       status: 'idle',
       session: null,
       serverTime: null,
+      revision: this.revision,
       ...(lastStop ? { pendingStopAt: lastStop.occurredAt } : {}),
       ...(todaySessions.length > 0 ? { todaySessions } : {})
     }
@@ -862,7 +879,10 @@ export class TrackingController {
     }
   }
 
-  private handleSocketSession(session: BackendTimeSession | null): void {
+  private handleSocketSession(
+    session: BackendTimeSession | null,
+    serverTime: string | null
+  ): void {
     // While any offline event is pending, the server snapshot predates the
     // durable queue. The batch flush followed by /current is authoritative.
     if (this.queue.count() > 0) return
@@ -876,14 +896,44 @@ export class TrackingController {
         void this.enqueue(() => this.fetchCurrent()).catch(() => undefined)
         return
       }
-      this.applySnapshot({ status: 'idle', session: null, serverTime: null })
+      this.applySnapshot({ status: 'idle', session: null, serverTime })
       return
     }
+
     const mapped = mapSession(session)
+    const current = this.snapshot.session
+    if (current && !current.endedAt) {
+      const incomingStart = Date.parse(mapped.startedAt)
+      const currentStart = Date.parse(current.startedAt)
+      if (mapped.endedAt !== null) {
+        // A stopped event for an older session cannot close a newer one.
+        const endedAt = Date.parse(mapped.endedAt)
+        if (
+          mapped.id !== current.id &&
+          Number.isFinite(endedAt) &&
+          Number.isFinite(currentStart) &&
+          endedAt <= currentStart
+        ) {
+          return
+        }
+      } else if (
+        mapped.id !== current.id &&
+        Number.isFinite(incomingStart) &&
+        Number.isFinite(currentStart) &&
+        incomingStart < currentStart
+      ) {
+        // A stale status/heartbeat response for a previous session must not
+        // replace the session the employee just started.
+        return
+      }
+    }
+
     this.applySnapshot({
       status: statusForSession(mapped),
       session: mapped,
-      serverTime: new Date().toISOString()
+      // Socket messages carry the server clock. Never substitute the local
+      // clock here: it is exactly the value the renderer needs to correct.
+      serverTime
     })
   }
 
@@ -1057,16 +1107,16 @@ export class TrackingController {
         ...(totalsError ? { totalsError } : {})
       })
       this.updateStatus({ connection: 'online', pendingEvents: this.queue.count() })
-      return this.snapshot
+      return this.getSnapshot()
     } catch (error) {
       if (error instanceof NetworkError) {
         this.updateStatus({ connection: 'offline' })
-        return this.snapshot
+        return this.getSnapshot()
       }
       if (error instanceof ApiError && error.code === 'AGENT_REVOKED') {
         await this.blockAccess('AGENT_REVOKED', 'This device was revoked by an administrator.')
       }
-      return this.snapshot
+      return this.getSnapshot()
     }
   }
 
@@ -1213,7 +1263,8 @@ export class TrackingController {
   }
 
   private applySnapshot(snapshot: TrackingSnapshot): void {
-    this.snapshot = cloneSnapshot(snapshot)
+    this.revision += 1
+    this.snapshot = cloneSnapshot({ ...snapshot, revision: this.revision })
     this.emitSnapshot()
   }
 

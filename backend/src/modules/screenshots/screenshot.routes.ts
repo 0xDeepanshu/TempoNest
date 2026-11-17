@@ -20,6 +20,7 @@ import {
   createRequest,
   downloadFile,
   getMyPolicy,
+  getEmployeeMonitoringPolicy,
   getPolicy,
   getRequest,
   getScreenshot,
@@ -27,6 +28,7 @@ import {
   listEmployeeRequests,
   listRequests,
   listScreenshots,
+  updateEmployeeMonitoringPolicyHandler,
   updatePolicy,
 } from './screenshot.controller';
 import {
@@ -35,6 +37,7 @@ import {
   screenshotAuditQuerySchema,
   screenshotClaimSchema,
   screenshotCompleteSchema,
+  screenshotEmployeeMonitoringPolicySchema,
   screenshotFailSchema,
   screenshotFileTokenParamsSchema,
   screenshotIdParamsSchema,
@@ -131,6 +134,25 @@ export function createAdminScreenshotRouter(): Router {
     requirePermission('screenshot:read'),
     validate({ params: screenshotIdParamsSchema }),
     accessScreenshot,
+  );
+
+  router.get(
+    '/employees/:employeeId/monitoring-policy',
+    requireAuth,
+    resolveCurrentOrganization,
+    requirePermission('screenshot:policy'),
+    validate({ params: employeeIdParamsSchema }),
+    getEmployeeMonitoringPolicy,
+  );
+
+  router.patch(
+    '/employees/:employeeId/monitoring-policy',
+    requireAuth,
+    resolveCurrentOrganization,
+    requirePermission('screenshot:policy'),
+    validate({ params: employeeIdParamsSchema }),
+    validate({ body: screenshotEmployeeMonitoringPolicySchema }),
+    updateEmployeeMonitoringPolicyHandler,
   );
 
   router.get(

@@ -14,6 +14,7 @@ import {
   app,
   createOwner,
   desktopAuth,
+  enableEmployeeMonitoring,
   inviteAndAccept,
   registerAgent,
   resetDatabase,
@@ -129,6 +130,11 @@ async function createTeam(options: { clientType?: 'ELECTRON' | 'MOBILE' } = {}) 
     .set(agent.headers)
     .send({});
   if (started.status !== 201) throw new Error(JSON.stringify(started.body));
+  await enableEmployeeMonitoring(
+    owner.organization.id,
+    employee.user.id,
+    owner.user.id,
+  );
   return {
     owner,
     ownerAuth,
@@ -563,6 +569,45 @@ describe('admin live screen viewing', () => {
     const record = await ScreenLiveSession.findByPk(liveSessionId);
     expect(record?.status).toBe('ENDED');
     expect(record?.terminationReason).toBe('POLICY_DISABLED');
+  });
+
+  it('stops capture when the employee monitoring policy is disabled', async () => {
+    const team = await createTeam();
+    await enablePolicy(team.ownerAuth, team.orgId);
+    const started = await startLive(team.ownerAuth, team.orgId, team.employee.user.id);
+    const liveSessionId = started.body.data.session.id as string;
+    const issued = await ticket(team.ownerAuth, team.orgId, liveSessionId);
+    const viewer = await connectViewer(issued.body.data.ticket as string);
+    await viewer.nextJson((message) => message.type === 'live.ready');
+
+    const disabled = await request(app)
+      .patch(`${API}/admin/employees/${team.employee.user.id}/monitoring-policy`)
+      .set({ ...team.ownerAuth.headers, 'x-organization-id': team.orgId })
+      .send({ enabled: false });
+    expect(disabled.status).toBe(200);
+
+    const ended = await viewer.nextJson((message) => message.type === 'live.ended');
+    expect(ended.reason).toBe('POLICY_DISABLED');
+    expect((await viewer.closed()).code).toBe(4000);
+
+    const record = await ScreenLiveSession.findByPk(liveSessionId);
+    expect(record?.status).toBe('ENDED');
+    expect(record?.terminationReason).toBe('POLICY_DISABLED');
+  });
+
+  it('refuses to start live capture for an employee whose monitoring is disabled', async () => {
+    const team = await createTeam();
+    await enablePolicy(team.ownerAuth, team.orgId);
+
+    const disabled = await request(app)
+      .patch(`${API}/admin/employees/${team.employee.user.id}/monitoring-policy`)
+      .set({ ...team.ownerAuth.headers, 'x-organization-id': team.orgId })
+      .send({ enabled: false });
+    expect(disabled.status).toBe(200);
+
+    const denied = await startLive(team.ownerAuth, team.orgId, team.employee.user.id);
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe('EMPLOYEE_MONITORING_POLICY_DISABLED');
   });
 
   it('stops capture when the desktop agent is revoked', async () => {

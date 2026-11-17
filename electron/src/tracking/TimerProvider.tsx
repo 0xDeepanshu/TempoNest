@@ -10,6 +10,11 @@ import {
   type ReactNode
 } from 'react'
 import { authService, activityService, trackingService } from '@/services'
+import {
+  acceptsSnapshotRevision,
+  serverAdjustedNow,
+  serverClockOffset
+} from '@/tracking/clock'
 import { getOpenBreak, getTodayTotals, ongoingBreakMs, timerReducer, workElapsedMs } from '@/tracking/timerMachine'
 import { loadTimerState, saveTimerState, timerOwnerKey } from '@/tracking/timerStorage'
 import { toWorkSession } from '@/tracking/serverMapping'
@@ -83,6 +88,7 @@ function createUuid(): string {
 export function TimerProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(timerReducer, null, () => loadTimerState(null))
   const [now, setNow] = useState(() => Date.now())
+  const [serverOffsetMs, setServerOffsetMs] = useState(0)
   const [runtime, setRuntime] = useState<TrackingRuntimeStatus>(INITIAL_RUNTIME_STATUS)
   const [activity, setActivity] = useState<ActivityTrackingStatus | null>(null)
   const [ready, setReady] = useState(false)
@@ -90,9 +96,30 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const [totalsError, setTotalsError] = useState<string | null>(null)
   const ownerKey = useRef<string | null>(null)
   const operationSequence = useRef(0)
+  const lastSnapshotRevision = useRef(-1)
+  // Callbacks read the offset through a ref so a click always uses the latest
+  // measured value without depending on a render that may already be stale.
+  const serverOffsetRef = useRef(0)
   const isActive = state.status !== 'idle'
 
   const applySnapshot = useCallback((snapshot: TrackingSnapshot | null) => {
+    if (snapshot && !acceptsSnapshotRevision(snapshot.revision, lastSnapshotRevision.current)) {
+      // Produced before a state that has already been applied. Applying it now
+      // would move the timer backwards or clear a newer session.
+      return
+    }
+    if (snapshot && typeof snapshot.revision === 'number') {
+      lastSnapshotRevision.current = snapshot.revision
+    }
+
+    if (snapshot) {
+      const offset = serverClockOffset(snapshot.serverTime, Date.now())
+      if (offset !== null && offset !== serverOffsetRef.current) {
+        serverOffsetRef.current = offset
+        setServerOffsetMs(offset)
+      }
+    }
+
     const todaySessions = snapshot?.todaySessions
       ? snapshot.todaySessions
           .map(toWorkSession)
@@ -101,8 +128,14 @@ export function TimerProvider({ children }: { children: ReactNode }) {
 
     if (todaySessions) {
       // The list was fetched after `/current`, so it is the newest authority for
-      // both the active session and today's completed intervals.
-      dispatch({ type: 'server_day', sessions: todaySessions, now: Date.now() })
+      // both the active session and today's completed intervals. The day
+      // boundaries must use server time because every timestamp in the list is
+      // server-authored.
+      dispatch({
+        type: 'server_day',
+        sessions: todaySessions,
+        now: serverAdjustedNow(Date.now(), serverOffsetRef.current)
+      })
       return
     }
 
@@ -131,14 +164,17 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const applyResult = useCallback(
-    (result: TrackingOperationResult) => {
+    (result: TrackingOperationResult, replacesSessionId?: string) => {
       // A queued mutation has no fresh server snapshot. Keep the renderer's
       // optimistic timestamp state until reconnect sync becomes authoritative.
       if (!result.queued) applySnapshot(result.snapshot)
       if (result.completedSession) {
         const completed = toWorkSession(result.completedSession)
         if (completed?.endedAt !== null && completed?.endedAt !== undefined) {
-          dispatch({ type: 'server_session', session: completed })
+          // The server generates its own ID for an online start. Passing the
+          // optimistic ID lets the reducer replace it instead of counting the
+          // same interval twice.
+          dispatch({ type: 'server_session', session: completed, replacesSessionId })
         }
       }
       if (result.error) {
@@ -180,12 +216,12 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   }, [refreshFromServer])
 
   const runAction = useCallback(
-    (operation: () => Promise<TrackingOperationResult>) => {
+    (operation: () => Promise<TrackingOperationResult>, replacesSessionId?: string) => {
       const sequence = ++operationSequence.current
       void operation()
         .then((result) => {
           if (sequence !== operationSequence.current) return
-          applyResult(result)
+          applyResult(result, replacesSessionId)
         })
         .catch((cause: unknown) => {
           if (sequence !== operationSequence.current) return
@@ -294,6 +330,9 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       ownerKey.current = null
       sequence += 1
       operationSequence.current += 1
+      lastSnapshotRevision.current = -1
+      serverOffsetRef.current = 0
+      setServerOffsetMs(0)
       setRuntime(INITIAL_RUNTIME_STATUS)
       setActivity(null)
       setTotalsState('loading')
@@ -355,9 +394,10 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   }, [applySnapshot])
 
   const startWork = useCallback(() => {
-    const startedAt = Date.now()
+    const localNow = Date.now()
+    const startedAt = serverAdjustedNow(localNow, serverOffsetRef.current)
     const sessionId = createUuid()
-    setNow(startedAt)
+    setNow(localNow)
     dispatch({ type: 'start', now: startedAt, sessionId })
     runAction(() => trackingService.start(sessionId, new Date(startedAt).toISOString()))
   }, [runAction])
@@ -366,19 +406,24 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     const sessionId = state.activeSession?.id
     if (!sessionId) return
 
-    const stoppedAt = Date.now()
-    setNow(stoppedAt)
+    const localNow = Date.now()
+    const stoppedAt = serverAdjustedNow(localNow, serverOffsetRef.current)
+    setNow(localNow)
     dispatch({ type: 'stop', now: stoppedAt })
-    runAction(() => trackingService.stop(sessionId, new Date(stoppedAt).toISOString()))
+    runAction(
+      () => trackingService.stop(sessionId, new Date(stoppedAt).toISOString()),
+      sessionId
+    )
   }, [runAction, state.activeSession?.id])
 
   const startBreak = useCallback(() => {
     const sessionId = state.activeSession?.id
     if (!sessionId) return
 
-    const startedAt = Date.now()
+    const localNow = Date.now()
+    const startedAt = serverAdjustedNow(localNow, serverOffsetRef.current)
     const breakId = createUuid()
-    setNow(startedAt)
+    setNow(localNow)
     dispatch({ type: 'start_break', now: startedAt, breakId })
     runAction(() =>
       trackingService.startBreak(sessionId, breakId, new Date(startedAt).toISOString())
@@ -390,8 +435,9 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     const openBreak = getOpenBreak(state.activeSession)
     if (!sessionId || !openBreak) return
 
-    const resumedAt = Date.now()
-    setNow(resumedAt)
+    const localNow = Date.now()
+    const resumedAt = serverAdjustedNow(localNow, serverOffsetRef.current)
+    setNow(localNow)
     dispatch({ type: 'resume', now: resumedAt })
     runAction(() =>
       trackingService.endBreak(sessionId, openBreak.id, new Date(resumedAt).toISOString())
@@ -401,15 +447,18 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const value = useMemo<TimerContextValue>(() => {
     const activeSession = state.activeSession
     const openBreak = getOpenBreak(activeSession)
+    // Timestamps are server-authored. Compare them with server time, not the
+    // raw device clock, or a lagging device shows 00:00:00 for the whole skew.
+    const effectiveNow = serverAdjustedNow(now, serverOffsetMs)
 
     return {
       ready,
       status: state.status,
       activeSessionStartedAt: activeSession?.startedAt ?? null,
       activeBreakStartedAt: openBreak?.startedAt ?? null,
-      workElapsedMs: activeSession ? workElapsedMs(activeSession, now) : 0,
-      breakElapsedMs: ongoingBreakMs(activeSession, now),
-      todayTotals: getTodayTotals(state, now),
+      workElapsedMs: activeSession ? workElapsedMs(activeSession, effectiveNow) : 0,
+      breakElapsedMs: ongoingBreakMs(activeSession, effectiveNow),
+      todayTotals: getTodayTotals(state, effectiveNow),
       totalsState,
       totalsError,
       connection: runtime.connection,
@@ -431,6 +480,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     resumeWork,
     retryTotals,
     runtime,
+    serverOffsetMs,
     startBreak,
     startWork,
     state,

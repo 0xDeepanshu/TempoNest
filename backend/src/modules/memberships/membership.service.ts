@@ -193,6 +193,25 @@ export async function changeMembershipRole(
         },
         { transaction, context },
       );
+    } else if (previousRole !== nextRole) {
+      // Built-in role changes, including the per-user administration toggle,
+      // use the existing audit trail. The action column is a free-form string,
+      // so this needs no schema change.
+      await recordAuditEvent(
+        {
+          organizationId,
+          actorUserId: actor.userId,
+          targetEmployeeId: target.userId,
+          action: 'MEMBERSHIP_ROLE_CHANGED',
+          entityType: 'MEMBERSHIP',
+          entityId: target.id,
+          metadata: {
+            previousRole,
+            role: nextRole,
+          },
+        },
+        { transaction, context },
+      );
     }
 
     return summarize(organizationId, target);

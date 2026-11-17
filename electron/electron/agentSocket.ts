@@ -32,7 +32,12 @@ interface AgentSocketOptions {
   /** Used when an HTTP upgrade returns 401, which may mean the agent key rotated. */
   recoverCredentials: () => Promise<boolean>
   onConnected: (payload: ConnectedPayload) => void
-  onSession: (session: BackendTimeSession | null) => void
+  /**
+   * `serverTime` is the server-authored clock carried by the message. The
+   * renderer needs it to correct device clock skew; passing the local clock
+   * here would hide the very skew that froze the timer.
+   */
+  onSession: (session: BackendTimeSession | null, serverTime: string | null) => void
   onConnectionChanged: (online: boolean) => void
   onBlocked: (code: string, reason: string) => void
   onFatalAuth: () => void
@@ -219,7 +224,10 @@ export class AgentSocket {
       const connected = payload as unknown as ConnectedPayload
       this.scheduleHeartbeat(connected.heartbeatIntervalSeconds)
       this.options.onConnected(connected)
-      this.options.onSession(connected.session ?? null)
+      this.options.onSession(
+        connected.session ?? null,
+        typeof connected.serverTime === 'string' ? connected.serverTime : null
+      )
       if (connected.pendingScreenshotRequests?.length) {
         this.options.onScreenshotPending?.(connected.pendingScreenshotRequests)
       }
@@ -275,7 +283,10 @@ export class AgentSocket {
 
     if (type === 'heartbeat.ack' || type === 'session.status' || type === 'session.updated') {
       const session = (payload.session ?? null) as BackendTimeSession | null
-      this.options.onSession(session)
+      this.options.onSession(
+        session,
+        typeof payload.serverTime === 'string' ? payload.serverTime : null
+      )
       return
     }
 

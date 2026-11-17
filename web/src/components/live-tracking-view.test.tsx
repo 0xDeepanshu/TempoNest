@@ -134,6 +134,7 @@ function trackingRow(overrides: Partial<TrackingStatusRow> = {}): TrackingStatus
     activeSession: activeSession(),
     lastHeartbeatAt: "2026-10-24T11:59:00.000Z",
     lastSeenAt: "2026-10-24T11:59:00.000Z",
+    monitoringEnabled: true,
     agent: {
       id: "agent-1",
       userId: "employee-1",
@@ -368,6 +369,25 @@ describe("LiveTrackingView", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Live screen viewer" });
     expect(within(dialog).getByText("Ada Lovelace · auto")).toBeInTheDocument();
+  });
+
+  it("shows per-employee monitoring status and blocks capture actions when disabled", async () => {
+    mockLiveTracking({ row: trackingRow({ monitoringEnabled: false }), enabled: true });
+    renderView();
+
+    expect(await screen.findByText("Employee monitoring off")).toBeInTheDocument();
+    expect(
+      screen.getByText("Review unavailable while monitoring is disabled"),
+    ).toBeInTheDocument();
+    const request = await screen.findByRole("button", { name: /Request screenshot/ });
+    await waitFor(() => expect(request).toBeDisabled());
+    const live = await screen.findByRole("button", { name: /View live screen/ });
+    await waitFor(() => expect(live).toBeDisabled());
+    expect(
+      screen.getAllByText(
+        "Screen monitoring is disabled for this employee by the organization owner.",
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("does not offer live viewing to roles without screenshot:live", async () => {

@@ -10,6 +10,7 @@ import {
   type ScreenshotPolicy as ScreenshotPolicyModel,
 } from './screenshotPolicy.model';
 import { recordAuditEvent, type AuditContext } from './audit.service';
+import { isEmployeeMonitoringEnabled } from './employeeMonitoringPolicy.service';
 import {
   toScreenshotPolicyDisclosure,
   toScreenshotPolicySummary,
@@ -270,14 +271,21 @@ export async function getEmployeeScreenshotPolicyDisclosure(
   employeeId: string,
 ) {
   const policy = await getOrCreateScreenshotPolicy(organizationId);
-  const acknowledgement = await ScreenshotPolicyAcknowledgement.findOne({
-    where: {
-      organizationId,
-      employeeId,
-      policyVersion: policy.disclosureVersion,
-    },
-  });
-  return toScreenshotPolicyDisclosure(policy, acknowledgement?.acknowledgedAt ?? null);
+  const [acknowledgement, employeeMonitoringEnabled] = await Promise.all([
+    ScreenshotPolicyAcknowledgement.findOne({
+      where: {
+        organizationId,
+        employeeId,
+        policyVersion: policy.disclosureVersion,
+      },
+    }),
+    isEmployeeMonitoringEnabled(organizationId, employeeId),
+  ]);
+  return toScreenshotPolicyDisclosure(
+    policy,
+    acknowledgement?.acknowledgedAt ?? null,
+    employeeMonitoringEnabled,
+  );
 }
 
 export async function acknowledgeScreenshotPolicy(options: {
@@ -315,5 +323,9 @@ export async function acknowledgeScreenshotPolicy(options: {
     );
   }
 
-  return toScreenshotPolicyDisclosure(policy, acknowledgement.acknowledgedAt);
+  return toScreenshotPolicyDisclosure(
+    policy,
+    acknowledgement.acknowledgedAt,
+    await isEmployeeMonitoringEnabled(options.organizationId, options.employeeId),
+  );
 }

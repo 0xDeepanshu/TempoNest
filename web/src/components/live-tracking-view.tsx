@@ -301,17 +301,20 @@ export function LiveTrackingView() {
                   row.activeSession !== null &&
                   row.heartbeatStale !== true &&
                   row.agent?.status !== "REVOKED";
-                const disabledReason = !monitoringEnabled
-                  ? "Screen monitoring is disabled by the organization policy."
-                  : !row.activeSession
-                    ? "The employee needs an active work session in the desktop app."
-                    : !row.agentOnline
-                      ? "The employee's desktop agent is offline."
-                      : row.heartbeatStale
-                        ? "The session heartbeat is stale. Wait for the next heartbeat."
-                        : row.agent?.status === "REVOKED"
-                          ? "The employee's desktop agent was revoked."
-                          : undefined;
+                const rowMonitoringEnabled = monitoringEnabled && row.monitoringEnabled;
+                const disabledReason = !row.monitoringEnabled
+                  ? "Screen monitoring is disabled for this employee by the organization owner."
+                  : !monitoringEnabled
+                    ? "Screen monitoring is disabled by the organization policy."
+                    : !row.activeSession
+                      ? "The employee needs an active work session in the desktop app."
+                      : !row.agentOnline
+                        ? "The employee's desktop agent is offline."
+                        : row.heartbeatStale
+                          ? "The session heartbeat is stale. Wait for the next heartbeat."
+                          : row.agent?.status === "REVOKED"
+                            ? "The employee's desktop agent was revoked."
+                            : undefined;
 
                 let liveDisabledReason: string | undefined;
                 if (policy.loading && !policyValue) {
@@ -319,6 +322,9 @@ export function LiveTrackingView() {
                 } else if (!policyValue) {
                   liveDisabledReason =
                     "The monitoring policy could not be loaded, so live viewing cannot be authorized right now.";
+                } else if (!row.monitoringEnabled) {
+                  liveDisabledReason =
+                    "Screen monitoring is disabled for this employee by the organization owner.";
                 } else if (!monitoringEnabled) {
                   liveDisabledReason = "Live screen viewing is disabled by the organization policy.";
                 } else if (!liveRoleAllowed) {
@@ -373,6 +379,13 @@ export function LiveTrackingView() {
                           />
                           {row.agentOnline ? "Agent online" : "Agent offline"}
                         </Badge>
+                        {canViewScreenshots || canLive ? (
+                          row.monitoringEnabled ? (
+                            <Badge tone="outline">Employee monitoring on</Badge>
+                          ) : (
+                            <Badge tone="warning">Employee monitoring off</Badge>
+                          )
+                        ) : null}
                       </div>
                     </Td>
                     <Td>
@@ -477,7 +490,7 @@ export function LiveTrackingView() {
                           <ScreenshotRequestButton
                             employeeId={row.employee.id}
                             employeeName={row.employee.name}
-                            disabled={!eligible || Boolean(request) || !monitoringEnabled}
+                            disabled={!eligible || Boolean(request) || !rowMonitoringEnabled}
                             disabledReason={
                               request
                                 ? "A screenshot request is already pending. Review it before requesting another."
@@ -487,12 +500,18 @@ export function LiveTrackingView() {
                           />
                         ) : null}
                         {canViewScreenshots ? (
-                          <Link
-                            href={`/admin/screenshots?employeeId=${encodeURIComponent(row.employee.id)}`}
-                            className="text-xs font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
-                          >
-                            Open review
-                          </Link>
+                          row.monitoringEnabled ? (
+                            <Link
+                              href={`/admin/screenshots?employeeId=${encodeURIComponent(row.employee.id)}`}
+                              className="text-xs font-medium text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
+                            >
+                              Open review
+                            </Link>
+                          ) : (
+                            <span className="text-[11px] text-muted">
+                              Review unavailable while monitoring is disabled
+                            </span>
+                          )
                         ) : null}
                       </div>
                     </Td>

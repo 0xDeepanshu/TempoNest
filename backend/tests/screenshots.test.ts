@@ -22,6 +22,7 @@ import {
   app,
   createOwner,
   desktopAuth,
+  enableEmployeeMonitoring,
   inviteAndAccept,
   registerAgent,
   resetDatabase,
@@ -87,6 +88,12 @@ async function createTeam(
     }
     sessionId = started.body.data.session.id as string;
   }
+
+  await enableEmployeeMonitoring(
+    owner.organization.id as string,
+    employee.user.id as string,
+    owner.user.id as string,
+  );
 
   return {
     owner,

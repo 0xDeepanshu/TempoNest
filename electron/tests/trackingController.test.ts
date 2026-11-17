@@ -15,9 +15,18 @@ import { TrackingController } from '../electron/trackingController'
 import type { AgentManager } from '../electron/agentManager'
 import type { AuthManager } from '../electron/authManager'
 
+const socketHarness = vi.hoisted(() => ({
+  instances: [] as Array<{ options: Record<string, (...args: unknown[]) => unknown> }>
+}))
+
 vi.mock('../electron/agentSocket', () => ({
   AgentSocket: class {
     isOpen = false
+    options: Record<string, (...args: unknown[]) => unknown>
+    constructor(options: Record<string, (...args: unknown[]) => unknown>) {
+      this.options = options
+      socketHarness.instances.push(this)
+    }
     connect(): void {}
     disconnect(): void {}
   }
@@ -26,6 +35,7 @@ vi.mock('../electron/agentSocket', () => ({
 const USER_ID = 'user-1'
 const ORG_ID = 'org-1'
 const SESSION_ID = '9e743d59-3e42-4e3e-8e0d-8a4d6f8b1c11'
+const SECOND_SESSION_ID = '1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed'
 const NOW = '2026-10-24T09:00:00.000Z'
 
 const session: AuthSession = {
@@ -135,8 +145,15 @@ function syncApplied(): (path: string, options?: { body?: unknown }) => Promise<
   }
 }
 
+function latestSocket() {
+  const socket = socketHarness.instances.at(-1)
+  if (!socket) throw new Error('The controller did not create a socket')
+  return socket
+}
+
 afterEach(() => {
   for (const controller of opened.splice(0)) controller.dispose()
+  socketHarness.instances.splice(0)
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true })
   }
@@ -666,5 +683,153 @@ describe('TrackingController today sessions', () => {
     expect(snapshot?.session?.id).toBe(SESSION_ID)
     expect(snapshot?.todaySessions).toBeUndefined()
     expect(snapshot?.totalsError?.code).toBe('TOTALS_UNAVAILABLE')
+  })
+})
+
+describe('TrackingController timer lifecycle', () => {
+  it('keeps Start → Stop → Start working and emits increasing revisions', async () => {
+    let active: BackendTimeSession | null = null
+    const stoppedSessions: BackendTimeSession[] = []
+    let starts = 0
+
+    const { controller } = createHarness(async (requestPath) => {
+      if (listRequest(requestPath)) {
+        return active ? [active] : stoppedSessions.slice(-1)
+      }
+      if (requestPath.endsWith('/time-sessions/current')) {
+        return { session: active, serverTime: NOW }
+      }
+      if (requestPath.endsWith('/time-sessions/start')) {
+        starts += 1
+        active = backendSession({
+          id: starts === 1 ? SESSION_ID : SECOND_SESSION_ID,
+          startedAt: NOW
+        })
+        return { session: active, autoClosedSessionId: null, serverTime: NOW }
+      }
+      if (requestPath.endsWith('/stop')) {
+        if (!active) throw new Error('No active session to stop')
+        const stopped = backendSession({
+          id: active.id,
+          startedAt: active.startedAt,
+          endedAt: NOW,
+          status: 'STOPPED'
+        })
+        stoppedSessions.push(stopped)
+        active = null
+        return { session: stopped, serverTime: NOW }
+      }
+      throw new Error(`Unexpected request: ${requestPath}`)
+    })
+
+    controller.attachSession(session)
+    const restored = await controller.restore()
+    expect(restored?.status).toBe('idle')
+
+    const first = await controller.start(SESSION_ID, '2026-10-24T08:00:00.000Z')
+    expect(first.snapshot?.status).toBe('working')
+    expect(first.snapshot?.session?.id).toBe(SESSION_ID)
+
+    const stopped = await controller.stop(SESSION_ID, '2026-10-24T08:10:00.000Z')
+    expect(stopped.snapshot?.status).toBe('idle')
+    expect(stopped.completedSession?.id).toBe(SESSION_ID)
+
+    const second = await controller.start(SECOND_SESSION_ID, '2026-10-24T08:20:00.000Z')
+    expect(second.snapshot?.status).toBe('working')
+    expect(second.snapshot?.session?.id).toBe(SECOND_SESSION_ID)
+    expect(second.snapshot?.session?.id).not.toBe(first.snapshot?.session?.id)
+
+    expect(second.snapshot?.revision).toBeGreaterThan(stopped.snapshot?.revision ?? 0)
+    expect(stopped.snapshot?.revision).toBeGreaterThan(first.snapshot?.revision ?? 0)
+  })
+
+  it('ignores a stale socket update and records the server-provided clock', async () => {
+    const active = backendSession({ startedAt: NOW })
+    const { controller } = createHarness(async (requestPath) => {
+      if (listRequest(requestPath)) return [active]
+      if (requestPath.endsWith('/time-sessions/current')) {
+        return { session: active, serverTime: NOW }
+      }
+      throw new Error(`Unexpected request: ${requestPath}`)
+    })
+
+    controller.attachSession(session)
+    await controller.restore()
+    expect(controller.getSnapshot().session?.id).toBe(SESSION_ID)
+
+    const socket = latestSocket()
+
+    // An older completed session must not clear the active one.
+    socket.options.onSession(
+      backendSession({
+        id: 'older-ended',
+        startedAt: '2026-10-24T07:00:00.000Z',
+        endedAt: '2026-10-24T07:30:00.000Z',
+        status: 'STOPPED'
+      }),
+      NOW
+    )
+    expect(controller.getSnapshot().session?.id).toBe(SESSION_ID)
+
+    // Nor may an older still-active session replace it.
+    socket.options.onSession(
+      backendSession({
+        id: 'older-active',
+        startedAt: '2026-10-24T07:00:00.000Z'
+      }),
+      NOW
+    )
+    expect(controller.getSnapshot().session?.id).toBe(SESSION_ID)
+
+    // The real socket payload carries the server clock. Substituting the local
+    // clock here used to hide the device skew that froze the timer.
+    socket.options.onSession(active, '2026-10-24T09:05:00.000Z')
+    expect(controller.getSnapshot().serverTime).toBe('2026-10-24T09:05:00.000Z')
+  })
+
+  it('replays an offline start and stop through sync and keeps the session in today totals', async () => {
+    const path = queuePath()
+    const startedAt = localDayIso(8, 0)
+    const stoppedAt = localDayIso(8, 30)
+
+    const first = createHarness(async () => {
+      throw new NetworkError()
+    }, path)
+    first.controller.attachSession(session)
+    await first.controller.start(SESSION_ID, startedAt)
+    await first.controller.stop(SESSION_ID, stoppedAt)
+    expect(first.queue.all().map((event) => event.type)).toEqual([
+      'SESSION_START',
+      'SESSION_STOP'
+    ])
+    first.controller.dispose()
+
+    const synced = backendSession({
+      id: SESSION_ID,
+      startedAt,
+      endedAt: stoppedAt,
+      status: 'STOPPED',
+      source: 'OFFLINE'
+    })
+
+    const second = createHarness(async (requestPath, options) => {
+      if (requestPath.endsWith('/time-sessions/sync')) {
+        return syncApplied()(requestPath, options)
+      }
+      if (requestPath.endsWith('/time-sessions/current')) {
+        return { session: null, serverTime: NOW }
+      }
+      if (listRequest(requestPath)) return [synced]
+      throw new Error(`Unexpected request: ${requestPath}`)
+    }, path)
+
+    second.controller.attachSession(session)
+    const snapshot = await second.controller.restore()
+
+    expect(second.queue.count()).toBe(0)
+    expect(snapshot?.status).toBe('idle')
+    expect(typeof snapshot?.revision).toBe('number')
+    expect(snapshot?.todaySessions?.map((item) => item.id)).toEqual([SESSION_ID])
+    expect(snapshot?.todaySessions?.[0]).toMatchObject({ startedAt, endedAt: stoppedAt })
   })
 })

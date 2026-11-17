@@ -347,3 +347,175 @@ describe('server day reconciliation', () => {
     })
   })
 })
+
+describe('timer lifecycle regressions', () => {
+  it('Start → Stop → Start keeps counting instead of staying at zero', () => {
+    let state = timerReducer(createIdleTimerState(), {
+      type: 'start',
+      now: 1_000,
+      sessionId: 'session-1'
+    })
+    state = timerReducer(state, { type: 'stop', now: 61_000 })
+    expect(state.status).toBe('idle')
+    expect(state.completedSessions).toHaveLength(1)
+
+    state = timerReducer(state, {
+      type: 'start',
+      now: 62_000,
+      sessionId: 'session-2'
+    })
+
+    expect(state.status).toBe('working')
+    expect(state.activeSession?.id).toBe('session-2')
+    expect(state.completedSessions.map((session) => session.id)).toEqual(['session-1'])
+    // A second after the new Start the display must advance, not stay at zero.
+    expect(workElapsedMs(state.activeSession!, 63_000)).toBe(1_000)
+    expect(workElapsedMs(state.activeSession!, 92_000)).toBe(30_000)
+  })
+
+  it('Start → Break → Resume → Stop preserves the interval history', () => {
+    let state = timerReducer(createIdleTimerState(), {
+      type: 'start',
+      now: 1_000,
+      sessionId: 'session'
+    })
+    state = timerReducer(state, { type: 'start_break', now: 31_000, breakId: 'break' })
+    expect(ongoingBreakMs(state.activeSession, 51_000)).toBe(20_000)
+
+    state = timerReducer(state, { type: 'resume', now: 51_000 })
+    expect(state.status).toBe('working')
+    expect(getOpenBreak(state.activeSession)).toBeNull()
+
+    state = timerReducer(state, { type: 'stop', now: 91_000 })
+    expect(state.status).toBe('idle')
+    expect(state.completedSessions[0]).toMatchObject({
+      id: 'session',
+      startedAt: 1_000,
+      endedAt: 91_000,
+      breaks: [{ id: 'break', startedAt: 31_000, endedAt: 51_000 }]
+    })
+  })
+
+  it('supports several consecutive sessions without losing or duplicating totals', () => {
+    const now = todayAt(18, 0)
+    let state = createIdleTimerState()
+    const ids = ['one', 'two', 'three']
+
+    ids.forEach((id, index) => {
+      const startedAt = todayAt(9 + index, 0)
+      state = timerReducer(state, { type: 'start', now: startedAt, sessionId: id })
+      state = timerReducer(state, { type: 'stop', now: startedAt + 30 * MINUTE })
+    })
+
+    expect(state.status).toBe('idle')
+    expect(state.completedSessions.map((session) => session.id)).toEqual([
+      'three',
+      'two',
+      'one'
+    ])
+    expect(getTodayTotals(state, now)).toEqual({
+      workMs: 90 * MINUTE,
+      breakMs: 0,
+      sessionCount: 3
+    })
+  })
+
+  it('resumes a cached active session after an app restart and derives elapsed time from its timestamp', () => {
+    const cached = timerReducer(createIdleTimerState(), {
+      type: 'start',
+      now: 1_000,
+      sessionId: 'before-restart'
+    })
+
+    // Reloading the renderer hydrates the persisted state; no tick is needed to
+    // reconstruct the elapsed duration.
+    const reloaded = timerReducer(createIdleTimerState(), { type: 'load_cached', state: cached })
+    expect(reloaded.status).toBe('working')
+    expect(reloaded.activeSession?.startedAt).toBe(1_000)
+    expect(workElapsedMs(reloaded.activeSession!, 121_000)).toBe(120_000)
+
+    const stopped = timerReducer(reloaded, { type: 'stop', now: 121_000 })
+    expect(stopped.completedSessions[0].endedAt).toBe(121_000)
+  })
+
+  it('does not let a delayed completion for an older session clear a newer active session', () => {
+    let state = timerReducer(createIdleTimerState(), {
+      type: 'start',
+      now: 1_000,
+      sessionId: 'older'
+    })
+    state = timerReducer(state, { type: 'stop', now: 2_000 })
+    state = timerReducer(state, {
+      type: 'start',
+      now: 3_000,
+      sessionId: 'newer'
+    })
+
+    const afterLateEvent = timerReducer(state, {
+      type: 'server_session',
+      session: { id: 'older', startedAt: 1_000, endedAt: 2_000, breaks: [] }
+    })
+
+    expect(afterLateEvent.activeSession?.id).toBe('newer')
+    expect(afterLateEvent.status).toBe('working')
+    expect(afterLateEvent.completedSessions.map((session) => session.id)).toEqual(['older'])
+  })
+
+  it('still closes the active session when the completion matches its own ID', () => {
+    let state = timerReducer(createIdleTimerState(), {
+      type: 'start',
+      now: 1_000,
+      sessionId: 'session'
+    })
+    state = timerReducer(state, {
+      type: 'server_session',
+      session: { id: 'session', startedAt: 1_000, endedAt: 8_000, breaks: [] }
+    })
+
+    expect(state.status).toBe('idle')
+    expect(state.activeSession).toBeNull()
+    expect(state.completedSessions).toHaveLength(1)
+  })
+
+  it('replaces an optimistic client ID with the server ID instead of double counting', () => {
+    const now = todayAt(18, 0)
+    let state = timerReducer(createIdleTimerState(), {
+      type: 'start',
+      now: todayAt(9, 0),
+      sessionId: 'local-optimistic'
+    })
+    state = timerReducer(state, { type: 'stop', now: todayAt(9, 30) })
+    expect(getTodayTotals(state, now).sessionCount).toBe(1)
+
+    state = timerReducer(state, {
+      type: 'server_session',
+      session: {
+        id: 'server-authoritative',
+        startedAt: todayAt(9, 0),
+        endedAt: todayAt(9, 30),
+        breaks: []
+      },
+      replacesSessionId: 'local-optimistic'
+    })
+
+    expect(state.completedSessions.map((session) => session.id)).toEqual([
+      'server-authoritative'
+    ])
+    expect(getTodayTotals(state, now)).toEqual({
+      workMs: 30 * MINUTE,
+      breakMs: 0,
+      sessionCount: 1
+    })
+  })
+
+  it('counts an active session that starts exactly at the displayed server now', () => {
+    const now = todayAt(12, 0)
+    const state = timerReducer(createIdleTimerState(), {
+      type: 'start',
+      now,
+      sessionId: 'just-started'
+    })
+
+    expect(getTodayTotals(state, now).sessionCount).toBe(1)
+  })
+})

@@ -110,6 +110,12 @@ export const screenshotPolicyUpdateSchema = z
     message: 'At least one policy field must be provided',
   });
 
+export const screenshotEmployeeMonitoringPolicySchema = z
+  .object({
+    enabled: z.boolean(),
+  })
+  .strict();
+
 export type ScreenshotClaimInput = z.infer<typeof screenshotClaimSchema>;
 export type ScreenshotCompleteInput = z.infer<typeof screenshotCompleteSchema>;
 export type ScreenshotFailInput = z.infer<typeof screenshotFailSchema>;

@@ -119,6 +119,7 @@ function trackingRow(overrides: Partial<TrackingStatusRow> = {}): TrackingStatus
     activeSession: activeSession(),
     lastHeartbeatAt: "2026-10-24T11:59:00.000Z",
     lastSeenAt: "2026-10-24T11:59:00.000Z",
+    monitoringEnabled: true,
     agent: {
       id: "agent-1",
       userId: "employee-1",
@@ -287,6 +288,34 @@ describe("ScreenshotReviewView", () => {
       await screen.findByText("The employee's desktop agent is offline."),
     ).toBeInTheDocument();
     expect(screen.queryByText("The employee needs an active work session")).not.toBeInTheDocument();
+  });
+
+  it("blocks request, live view, and shows the disabled-employee explanation", async () => {
+    mockedApiRequest.mockImplementation(async (path) => {
+      if (path.endsWith("/members")) return page([member]);
+      if (path.includes("/reports/tracking-status")) {
+        return page([trackingRow({ monitoringEnabled: false })]);
+      }
+      if (path === "/admin/screenshot-policy") return policy(true);
+      if (path === "/admin/screenshot-requests") return page([]);
+      if (path === "/admin/screenshots") return page([]);
+      if (path === "/admin/screenshot-audit-events") return page([]);
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    renderView();
+
+    expect(await screen.findByText("Employee monitoring is disabled")).toBeInTheDocument();
+    expect(screen.getByText("Monitoring off")).toBeInTheDocument();
+    const request = await screen.findByRole("button", { name: /Request screenshot/ });
+    await waitFor(() => expect(request).toBeDisabled());
+    const live = await screen.findByRole("button", { name: /View live screen/ });
+    await waitFor(() => expect(live).toBeDisabled());
+    expect(
+      screen.getAllByText(
+        "Screen monitoring is disabled for this employee by the organization owner.",
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("opens a short-lived private preview and records the access call", async () => {

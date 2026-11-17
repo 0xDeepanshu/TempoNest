@@ -167,6 +167,7 @@ const tracking: TrackingStatusResponse = {
       activeSession: null,
       lastHeartbeatAt: null,
       lastSeenAt: null,
+      monitoringEnabled: false,
       agent: null,
     },
   ],

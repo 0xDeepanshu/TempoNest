@@ -14,6 +14,7 @@ import {
   app,
   createOwner,
   desktopAuth,
+  enableEmployeeMonitoring,
   inviteAndAccept,
   registerAgent,
   resetDatabase,
@@ -43,6 +44,7 @@ async function createTeam() {
   });
   const auth = await desktopAuth(employee.email);
   const agent = await registerAgent(auth, owner.organization.id);
+  await enableEmployeeMonitoring(owner.organization.id, employee.user.id, owner.user.id);
   return { owner, ownerAuth, employee, auth, agent, orgId: owner.organization.id };
 }
 

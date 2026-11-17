@@ -10,6 +10,10 @@ import {
   updateScreenshotPolicy,
 } from './screenshotPolicy.service';
 import {
+  getEmployeeMonitoringPolicyView,
+  updateEmployeeMonitoringPolicy,
+} from './employeeMonitoringPolicy.service';
+import {
   acknowledgeScreenshotRequest,
   cancelScreenshotRequest,
   claimScreenshotRequest,
@@ -29,7 +33,10 @@ import {
   storeScreenshotUpload,
 } from './screenshot.service';
 import { idempotencyKeySchema } from './screenshot.schemas';
-import { terminateActiveScreenLiveSessionsForOrganization } from './screenLive.service';
+import {
+  terminateActiveScreenLiveSessionsForEmployee,
+  terminateActiveScreenLiveSessionsForOrganization,
+} from './screenLive.service';
 import type {
   OrganizationScreenshotRequestListQuery,
   ScreenshotAuditQuery,
@@ -236,6 +243,43 @@ export const updatePolicy = asyncHandler(async (req: Request, res: Response) => 
     serverTime: now(),
   });
 });
+
+export const getEmployeeMonitoringPolicy = asyncHandler(
+  async (req: Request, res: Response) => {
+    const policy = await getEmployeeMonitoringPolicyView({
+      organizationId: req.organization!.organization.id,
+      employeeId: req.params.employeeId!,
+      actorRole: req.organization!.membership.role,
+    });
+    res.status(200).json({ data: { policy }, serverTime: now() });
+  },
+);
+
+export const updateEmployeeMonitoringPolicyHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const body = req.body as { enabled: boolean };
+    const policy = await updateEmployeeMonitoringPolicy({
+      organizationId: req.organization!.organization.id,
+      employeeId: req.params.employeeId!,
+      actorUserId: req.auth!.user.id,
+      actorRole: req.organization!.membership.role,
+      enabled: body.enabled,
+      context: auditContext(req),
+    });
+
+    if (!policy.enabled) {
+      // Stop capture that is already running, not only future starts. The
+      // service has already cancelled active screenshot requests.
+      await terminateActiveScreenLiveSessionsForEmployee(
+        req.organization!.organization.id,
+        req.params.employeeId!,
+        'POLICY_DISABLED',
+      );
+    }
+
+    res.status(200).json({ data: { policy }, serverTime: now() });
+  },
+);
 
 export const getMyPolicy = asyncHandler(async (req: Request, res: Response) => {
   const policy = await getEmployeeScreenshotPolicyDisclosure(

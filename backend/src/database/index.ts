@@ -63,6 +63,7 @@ export const {
   ActivityIdleInterval,
   AgentSyncEvent,
   ScreenshotPolicy,
+  EmployeeMonitoringPolicy,
   ScreenshotPolicyAcknowledgement,
   ScreenshotRequest,
   Screenshot,

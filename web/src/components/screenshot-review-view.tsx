@@ -48,6 +48,7 @@ import { NoOrganization, useWorkspace } from "./workspace";
 
 const AUDIT_LABELS: Record<string, string> = {
   SCREENSHOT_POLICY_UPDATED: "Monitoring policy updated",
+  EMPLOYEE_MONITORING_POLICY_UPDATED: "Employee monitoring policy updated",
   SCREENSHOT_POLICY_ACKNOWLEDGED: "Employee acknowledged disclosure",
   SCREENSHOT_REQUEST_CREATED: "Screenshot requested",
   SCREENSHOT_REQUEST_ACKNOWLEDGED: "Agent acknowledged request",
@@ -210,6 +211,7 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
   const selectedMember = (members.data?.data ?? []).find((member) => member.userId === employeeId);
   const policyValue = policy.data?.data.policy;
   const monitoringEnabled = policyValue?.enabled === true;
+  const employeeMonitoringEnabled = selectedRow?.monitoringEnabled === true;
   const pendingRequest = requestRows.find(
     (request) => request.status === "PENDING" || request.status === "CLAIMED",
   );
@@ -234,6 +236,9 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
       "The monitoring policy could not be loaded, so a request cannot be authorized right now.";
   else if (!monitoringEnabled)
     requestDisabledReason = "Screen monitoring is disabled by the organization policy.";
+  else if (selectedRow && !selectedRow.monitoringEnabled)
+    requestDisabledReason =
+      "Screen monitoring is disabled for this employee by the organization owner.";
   else if (pendingRequest)
     requestDisabledReason =
       "A screenshot request is already pending for this employee. Wait for it, or cancel it in Requests.";
@@ -262,6 +267,9 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
       "The monitoring policy could not be loaded, so live viewing cannot be authorized right now.";
   else if (!monitoringEnabled)
     liveDisabledReason = "Live screen viewing is disabled by the organization policy.";
+  else if (selectedRow && !selectedRow.monitoringEnabled)
+    liveDisabledReason =
+      "Screen monitoring is disabled for this employee by the organization owner.";
   else if (!liveRoleAllowed)
     liveDisabledReason = "The monitoring policy does not permit your role to start live viewing.";
   else if (!selectedRow) liveDisabledReason = "Tracking status is unavailable, so live view cannot start.";
@@ -538,6 +546,9 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
                           {selectedRow.agent?.status === "REVOKED" ? (
                             <Badge tone="danger">Agent revoked</Badge>
                           ) : null}
+                          <Badge tone={selectedRow.monitoringEnabled ? "outline" : "warning"}>
+                            {selectedRow.monitoringEnabled ? "Monitoring on" : "Monitoring off"}
+                          </Badge>
                         </div>
                         <p className="mt-1 text-[11px] leading-5 text-muted">
                           {selectedRow.employee.email}
@@ -605,6 +616,14 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
                     active session or connected a desktop agent.
                   </Alert>
                 )}
+
+                {selectedRow && !selectedRow.monitoringEnabled && !policy.loading ? (
+                  <Alert tone="warning" title="Employee monitoring is disabled">
+                    Screenshot requests, live view, and review are blocked for this employee. An
+                    organization owner can change the employee&apos;s Screen Monitoring Policy on
+                    their profile. Existing screenshots and audit records are retained.
+                  </Alert>
+                ) : null}
 
                 {!monitoringEnabled && canConfigurePolicy && !policy.loading ? (
                   <Alert tone="warning" title="Monitoring is disabled">

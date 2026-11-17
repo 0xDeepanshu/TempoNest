@@ -37,6 +37,12 @@ export interface TrackingSnapshot {
   session: ServerSessionSnapshot | null
   serverTime: string | null
   /**
+   * Monotonic revision assigned by the main process. The renderer ignores a
+   * snapshot whose revision is not newer than the last one it applied, so a
+   * delayed IPC response cannot overwrite a newer timer state.
+   */
+  revision?: number
+  /**
    * Set when `idle` is inferred from a durable queued stop while the server is
    * unreachable, so the renderer can close the cached session at the time the
    * employee stopped it instead of discarding those minutes.

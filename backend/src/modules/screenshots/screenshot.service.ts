@@ -47,6 +47,11 @@ import {
   getOrCreateScreenshotPolicy,
 } from './screenshotPolicy.service';
 import {
+  assertEmployeeMonitoringEnabled,
+  isEmployeeMonitoringEnabled,
+  listEmployeesWithMonitoringEnabled,
+} from './employeeMonitoringPolicy.service';
+import {
   toScreenshotAuditEventSummary,
   toScreenshotPendingSummary,
   toScreenshotRequestCommand,
@@ -459,6 +464,7 @@ export async function createScreenshotRequest(options: {
 
         const policy = await getOrCreateScreenshotPolicy(organizationId, transaction);
         assertScreenshotRequestAllowed(policy, actorRole);
+        await assertEmployeeMonitoringEnabled(organizationId, employeeId, transaction);
         await assertEmployeePolicyAcknowledgement(policy, employeeId, transaction);
 
         const activeForEmployee = await ScreenshotRequest.findOne({
@@ -640,6 +646,7 @@ export async function listScreenshotRequestsForEmployee(options: {
   await assertEmployeeInOrganization(options.organizationId, options.employeeId);
   const policy = await getOrCreateScreenshotPolicy(options.organizationId);
   assertScreenshotViewAllowed(policy, options.actorRole);
+  await assertEmployeeMonitoringEnabled(options.organizationId, options.employeeId);
   await expireOverdueRequestsForEmployee(options.organizationId, options.employeeId);
 
   const where: Record<string, unknown> = {
@@ -680,8 +687,18 @@ export async function listScreenshotRequestsForOrganization(options: {
   assertScreenshotViewAllowed(policy, options.actorRole);
   await expireOverdueRequests();
 
+  const monitoredEmployeeIds = await listEmployeesWithMonitoringEnabled(options.organizationId);
   const where: Record<string, unknown> = { organizationId: options.organizationId };
-  if (options.employeeId) where.employeeId = options.employeeId;
+  if (options.employeeId) {
+    // A disabled employee stays visible in the member directory, but their
+    // screenshot requests are excluded from review like their screenshots.
+    if (!monitoredEmployeeIds.includes(options.employeeId)) {
+      return paginate([], 0, options.page, options.limit);
+    }
+    where.employeeId = options.employeeId;
+  } else {
+    where.employeeId = { [Op.in]: monitoredEmployeeIds };
+  }
   if (options.status) where.status = options.status;
 
   const result = await ScreenshotRequest.findAndCountAll({
@@ -712,9 +729,12 @@ export async function getScreenshotRequestForAdmin(options: {
   const policy = await getOrCreateScreenshotPolicy(options.organizationId);
   assertScreenshotViewAllowed(policy, options.actorRole);
   await markRequestExpiredIfOverdue(options.requestId, options.organizationId);
-  return toScreenshotRequestSummary(
-    await loadRequestWithAssociations(options.requestId, options.organizationId),
+  const request = await loadRequestWithAssociations(
+    options.requestId,
+    options.organizationId,
   );
+  await assertEmployeeMonitoringEnabled(options.organizationId, request.employeeId);
+  return toScreenshotRequestSummary(request);
 }
 
 async function markRequestExpiredIfOverdue(requestId: string, organizationId: string): Promise<void> {
@@ -808,6 +828,11 @@ export async function getPendingScreenshotRequestsForAgent(
 ) {
   const now = new Date();
   await expireOverdueRequests(now);
+  if (!(await isEmployeeMonitoringEnabled(organizationId, agent.userId))) {
+    // Disabling monitoring cancels outstanding requests; never surface one to
+    // the agent even if a cancellation notification was missed.
+    return [];
+  }
   const requests = await ScreenshotRequest.findAll({
     where: {
       organizationId,
@@ -840,6 +865,7 @@ export async function acknowledgeScreenshotRequest(options: {
   if (!existing) {
     throw AppError.notFound('Screenshot request not found', 'SCREENSHOT_REQUEST_NOT_FOUND');
   }
+  await assertEmployeeMonitoringEnabled(options.organizationId, options.employeeId);
   if (isActiveStatus(existing.status) && existing.expiresAt.getTime() <= now.getTime()) {
     await markRequestExpired(existing.id, now, 'request');
     throw AppError.conflict('Screenshot request has expired', 'SCREENSHOT_REQUEST_EXPIRED');
@@ -918,7 +944,6 @@ export async function claimScreenshotRequest(options: {
       'SCREENSHOT_POLICY_DISABLED',
     );
   }
-
   const existing = await ScreenshotRequest.findOne({
     where: {
       id: options.requestId,
@@ -930,6 +955,7 @@ export async function claimScreenshotRequest(options: {
   if (!existing) {
     throw AppError.notFound('Screenshot request not found', 'SCREENSHOT_REQUEST_NOT_FOUND');
   }
+  await assertEmployeeMonitoringEnabled(options.organizationId, options.employeeId);
   if (isActiveStatus(existing.status) && existing.expiresAt.getTime() <= now.getTime()) {
     await markRequestExpired(existing.id, now, 'request');
     throw AppError.conflict('Screenshot request has expired', 'SCREENSHOT_REQUEST_EXPIRED');
@@ -984,6 +1010,11 @@ export async function claimScreenshotRequest(options: {
     if (!request) {
       throw AppError.notFound('Screenshot request not found', 'SCREENSHOT_REQUEST_NOT_FOUND');
     }
+    await assertEmployeeMonitoringEnabled(
+      options.organizationId,
+      options.employeeId,
+      transaction,
+    );
     if (request.status === 'CLAIMED') {
       throw AppError.conflict(
         'Screenshot request has already been claimed',
@@ -1092,6 +1123,7 @@ export async function reauthorizeScreenshotUpload(options: {
   if (!current) {
     throw AppError.notFound('Screenshot request not found', 'SCREENSHOT_REQUEST_NOT_FOUND');
   }
+  await assertEmployeeMonitoringEnabled(options.organizationId, options.employeeId);
   if (current.status === 'CLAIMED' && !current.uploadedAt && current.storageKey) {
     const existingObject = await screenshotStorage.statObject(current.storageKey);
     if (existingObject) {
@@ -1119,6 +1151,11 @@ export async function reauthorizeScreenshotUpload(options: {
     if (!request) {
       throw AppError.notFound('Screenshot request not found', 'SCREENSHOT_REQUEST_NOT_FOUND');
     }
+    await assertEmployeeMonitoringEnabled(
+      options.organizationId,
+      options.employeeId,
+      transaction,
+    );
     if (request.status !== 'CLAIMED') {
       throw AppError.conflict(
         `Screenshot request is ${request.status}`,
@@ -1177,6 +1214,7 @@ export async function storeScreenshotUpload(options: {
   if (!request) {
     throw AppError.notFound('Upload authorization is invalid', 'UPLOAD_AUTHORIZATION_INVALID');
   }
+  await assertEmployeeMonitoringEnabled(options.organizationId, options.agent.userId);
   if (request.status !== 'CLAIMED') {
     throw AppError.conflict(
       `Screenshot request is ${request.status}`,
@@ -1292,6 +1330,7 @@ export async function completeScreenshotRequest(options: {
   if (!existing) {
     throw AppError.notFound('Screenshot request not found', 'SCREENSHOT_REQUEST_NOT_FOUND');
   }
+  await assertEmployeeMonitoringEnabled(options.organizationId, options.employeeId);
   if (existing.status === 'COMPLETED') {
     throw AppError.conflict(
       'This screenshot request was already completed',
@@ -1354,6 +1393,11 @@ export async function completeScreenshotRequest(options: {
     if (!request) {
       throw AppError.notFound('Screenshot request not found', 'SCREENSHOT_REQUEST_NOT_FOUND');
     }
+    await assertEmployeeMonitoringEnabled(
+      options.organizationId,
+      options.employeeId,
+      transaction,
+    );
     if (request.status === 'COMPLETED') {
       throw AppError.conflict(
         'This screenshot request was already completed',
@@ -1564,11 +1608,19 @@ export async function listScreenshotsForAdmin(options: {
   assertScreenshotViewAllowed(policy, options.actorRole);
   await expireOverdueRequests();
 
+  const monitoredEmployeeIds = await listEmployeesWithMonitoringEnabled(options.organizationId);
   const where: Record<string, unknown> = {
     organizationId: options.organizationId,
     retentionExpiresAt: { [Op.gt]: new Date() },
   };
-  if (options.employeeId) where.employeeId = options.employeeId;
+  if (options.employeeId) {
+    if (!monitoredEmployeeIds.includes(options.employeeId)) {
+      return paginate([], 0, options.page, options.limit);
+    }
+    where.employeeId = options.employeeId;
+  } else {
+    where.employeeId = { [Op.in]: monitoredEmployeeIds };
+  }
   if (options.sessionId) where.timeSessionId = options.sessionId;
   if (options.from || options.to) {
     const capturedAt: Record<symbol, Date> = {};
@@ -1666,6 +1718,7 @@ export async function getScreenshotForAdmin(options: {
   if (screenshot.retentionExpiresAt.getTime() <= Date.now()) {
     throw AppError.notFound('Screenshot not found', 'SCREENSHOT_NOT_FOUND');
   }
+  await assertEmployeeMonitoringEnabled(options.organizationId, screenshot.employeeId);
   return toScreenshotSummary(screenshot);
 }
 
@@ -1685,6 +1738,7 @@ export async function createScreenshotAccess(options: {
   if (screenshot.retentionExpiresAt.getTime() <= Date.now()) {
     throw AppError.notFound('Screenshot not found', 'SCREENSHOT_NOT_FOUND');
   }
+  await assertEmployeeMonitoringEnabled(options.organizationId, screenshot.employeeId);
 
   const expiresAt = new Date(Date.now() + config.screenshots.downloadTtlSeconds * 1000);
   const access = await screenshotStorage.createDownloadUrl({
@@ -1742,6 +1796,8 @@ export async function openScreenshotFile(token: string, context?: AuditContext) 
   if (!screenshot || screenshot.retentionExpiresAt.getTime() <= Date.now()) {
     throw AppError.notFound('Screenshot not found', 'SCREENSHOT_NOT_FOUND');
   }
+  // A signed link minted before monitoring was disabled must not keep working.
+  await assertEmployeeMonitoringEnabled(screenshot.organizationId, screenshot.employeeId);
 
   const object = await screenshotStorage.openObject(screenshot.storageKey);
   if (!object) {

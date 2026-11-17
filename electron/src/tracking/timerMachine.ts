@@ -95,7 +95,7 @@ export function getTodayTotals(state: TimerState, now: number): TodayTotals {
     breakMs += sessionBreaksInRange(session, todayStartedAt, now)
   }
 
-  const activeStartedToday = state.activeSession !== null && state.activeSession.startedAt < now
+  const activeStartedToday = state.activeSession !== null && state.activeSession.startedAt <= now
   if (state.activeSession) {
     workMs += sessionWorkInRange(state.activeSession, todayStartedAt, now)
     breakMs += sessionBreaksInRange(state.activeSession, todayStartedAt, now)
@@ -114,7 +114,16 @@ export type TimerAction =
   | { type: 'resume'; now: number }
   | { type: 'stop'; now: number }
   | { type: 'hydrate'; activeSession: WorkSession | null; status: TrackingStatus }
-  | { type: 'server_session'; session: WorkSession }
+  | {
+      type: 'server_session'
+      session: WorkSession
+      /**
+       * A local optimistic ID that the server replaced with its own ID. When the
+       * completed server session arrives, the alias is closed instead of being
+       * counted as a second session.
+       */
+      replacesSessionId?: string
+    }
   | { type: 'server_day'; sessions: WorkSession[]; now: number }
   | { type: 'load_cached'; state: TimerState }
   | { type: 'reset' }
@@ -148,7 +157,12 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
           breaks: [...action.activeSession.breaks].sort(
             (left, right) => left.startedAt - right.startedAt
           )
-        }
+        },
+        // An active session is never also a completed one, even if a stale
+        // local history entry reused its ID.
+        completedSessions: state.completedSessions.filter(
+          (completed) => completed.id !== action.activeSession?.id
+        )
       }
     }
 
@@ -162,20 +176,23 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
         })
       }
 
-      const existingIndex = state.completedSessions.findIndex(
-        (completed) => completed.id === session.id
-      )
-      const completedSessions =
-        existingIndex >= 0
-          ? state.completedSessions.map((completed) =>
-              completed.id === session.id ? session : completed
-            )
-          : [session, ...state.completedSessions].slice(0, MAX_COMPLETED_SESSIONS)
+      const replacedIds = new Set<string>([session.id])
+      if (action.replacesSessionId) replacedIds.add(action.replacesSessionId)
+
+      // A completion event only closes the active session it belongs to. A
+      // delayed event for an older session must not wipe a session that was
+      // started after it, which is what pinned the UI at 00:00:00.
+      const activeSession = state.activeSession
+      const closesActive = activeSession !== null && replacedIds.has(activeSession.id)
+      const completedSessions = [
+        session,
+        ...state.completedSessions.filter((completed) => !replacedIds.has(completed.id))
+      ].slice(0, MAX_COMPLETED_SESSIONS)
 
       return {
         ...state,
-        status: 'idle',
-        activeSession: null,
+        status: closesActive ? 'idle' : state.status,
+        activeSession: closesActive ? null : activeSession,
         completedSessions
       }
     }

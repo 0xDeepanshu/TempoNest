@@ -29,6 +29,7 @@ import {
   toTimeSessionSummary,
 } from '../timeTracking/timeSession.mapper';
 import type { Organization as OrganizationModel } from '../organizations/organization.model';
+import { listEmployeesWithMonitoringEnabled } from '../screenshots/employeeMonitoringPolicy.service';
 import type { TimeSession as TimeSessionModel } from '../timeTracking/timeSession.model';
 import type { DesktopAgent as DesktopAgentModel } from '../desktopAgents/desktopAgent.model';
 import type { Break as BreakModel } from '../timeTracking/break.model';
@@ -219,6 +220,9 @@ export async function getTrackingStatus(options: {
         });
 
   const sessionByUser = new Map(activeSessions.map((session) => [session.employeeId, session]));
+  const monitoredEmployeeIds = new Set(
+    await listEmployeesWithMonitoringEnabled(organization.id),
+  );
   const latestAgentByUser = new Map<string, DesktopAgentModel>();
   for (const agent of agents) {
     const current = latestAgentByUser.get(agent.userId);
@@ -258,6 +262,11 @@ export async function getTrackingStatus(options: {
       lastHeartbeatAt: session?.lastHeartbeatAt ?? null,
       lastSeenAt: agent?.lastSeenAt ?? null,
       agent: agent ? toDesktopAgentSummary(agent, now) : null,
+      /**
+       * Per-employee monitoring switch. Live tracking still shows the employee
+       * when this is false; it only disables capture actions.
+       */
+      monitoringEnabled: monitoredEmployeeIds.has(membership.userId),
     };
   });
 

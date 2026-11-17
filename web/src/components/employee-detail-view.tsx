@@ -21,6 +21,7 @@ import type {
 } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { ArrowRightIcon, CalendarIcon, ClockIcon } from "./icons";
+import { ScreenMonitoringPolicyCard } from "./screen-monitoring-policy";
 import { CorrectionHistory } from "./correction-history";
 import {
   Alert,
@@ -282,6 +283,16 @@ export function EmployeeDetailView({
           </CardBody>
         </Card>
       </div>
+
+      {membership && hasPermission(membership, "screenshot:policy") ? (
+        <ScreenMonitoringPolicyCard
+          organizationId={organization.id}
+          employeeId={employee.userId}
+          actor={membership}
+          employeeName={`${employee.user.name} · ${employee.user.email}`}
+          timezone={timezone}
+        />
+      ) : null}
 
       {!canViewReports ? (
         <Alert tone="info" title="Attendance metrics restricted">

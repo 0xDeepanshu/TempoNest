@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Membership } from '../src/database';
+import { AuditEvent, Membership } from '../src/database';
 import {
   API,
   app,
@@ -88,6 +88,44 @@ describe('role transitions', () => {
     });
     expect(toEmployee.body.data.membership.permissions).not.toContain('member:update');
     expect((await storedMembership(membershipId)).role).toBe('EMPLOYEE');
+  });
+
+  it('audits granting and revoking administration access', async () => {
+    const owner = await createOwner();
+    const orgId = owner.organization.id;
+    const employee = await inviteAndAccept(owner, { role: 'EMPLOYEE' });
+    const membershipId = employee.membership.id as string;
+
+    expect((await changeRole(owner, orgId, membershipId, { role: 'ADMIN' })).status).toBe(200);
+    expect((await changeRole(owner, orgId, membershipId, { role: 'EMPLOYEE' })).status).toBe(200);
+
+    const events = await AuditEvent.findAll({
+      where: { organizationId: orgId, action: 'MEMBERSHIP_ROLE_CHANGED' },
+      order: [['createdAt', 'ASC']],
+      raw: true,
+    });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      actorUserId: owner.user.id,
+      targetEmployeeId: employee.user.id,
+      entityType: 'MEMBERSHIP',
+      entityId: membershipId,
+    });
+    expect(JSON.parse(events[0]!.metadata as unknown as string)).toEqual({
+      previousRole: 'EMPLOYEE',
+      role: 'ADMIN',
+    });
+    expect(events[1]).toMatchObject({
+      actorUserId: owner.user.id,
+      targetEmployeeId: employee.user.id,
+      entityType: 'MEMBERSHIP',
+      entityId: membershipId,
+    });
+    expect(JSON.parse(events[1]!.metadata as unknown as string)).toEqual({
+      previousRole: 'ADMIN',
+      role: 'EMPLOYEE',
+    });
   });
 
   it('moves between custom roles and built-in roles without conflicting fields', async () => {

@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { createApp } from '../src/app';
-import { sequelize } from '../src/database';
+import { EmployeeMonitoringPolicy, sequelize } from '../src/database';
 import { clearLocalScreenshotStorage } from '../src/modules/screenshots/storage/localStorage';
 import { clearMemoryOutbox } from '../src/utils/mailer';
 
@@ -17,7 +17,7 @@ export async function resetDatabase(): Promise<void> {
     // clear data between tests.
     await sequelize.sync();
     await sequelize.query(
-      'TRUNCATE TABLE password_reset_tokens, leave_ledger_entries, leave_requests, leave_balances, organization_holiday_settings, leave_holidays, leave_policies, leave_types, platform_audit_events, attendance_location_samples, attendance_location_tracking, attendance_check_ins, attendance_evidence, attendance_correction_requests, screen_live_viewers, screen_live_sessions, audit_events, screenshots, screenshot_requests, screenshot_policy_acknowledgements, screenshot_policies, agent_sync_events, activity_idle_intervals, application_classifications, organization_tracking_settings, application_activities, breaks, time_sessions, desktop_agents, sessions, invitations, memberships, custom_roles, manager_role_overrides, users, organizations RESTART IDENTITY CASCADE',
+      'TRUNCATE TABLE password_reset_tokens, leave_ledger_entries, leave_requests, leave_balances, organization_holiday_settings, leave_holidays, leave_policies, leave_types, platform_audit_events, attendance_location_samples, attendance_location_tracking, attendance_check_ins, attendance_evidence, attendance_correction_requests, screen_live_viewers, screen_live_sessions, audit_events, screenshots, screenshot_requests, screenshot_policy_acknowledgements, employee_monitoring_policies, screenshot_policies, agent_sync_events, activity_idle_intervals, application_classifications, organization_tracking_settings, application_activities, breaks, time_sessions, desktop_agents, sessions, invitations, memberships, custom_roles, manager_role_overrides, users, organizations RESTART IDENTITY CASCADE',
     );
     await clearLocalScreenshotStorage();
     return;
@@ -149,8 +149,31 @@ export async function registerAgent(
   };
 }
 
-export async function createAccount(email = uniqueEmail(), name = 'Test User') {
-  const registerResponse = await registerUser(email, name);
+/**
+ * Test setup: per-employee monitoring defaults to disabled by design. Existing
+ * screenshot/live tests are about capture mechanics, so they explicitly opt in.
+ */
+export async function enableEmployeeMonitoring(
+  organizationId: string,
+  employeeId: string,
+  updatedByUserId?: string | null,
+): Promise<void> {
+  await EmployeeMonitoringPolicy.findOrCreate({
+    where: { organizationId, employeeId },
+    defaults: {
+      organizationId,
+      employeeId,
+      enabled: true,
+      updatedByUserId: updatedByUserId ?? null,
+    },
+  }).then(async ([policy, created]) => {
+    if (!created && !policy.enabled) {
+      await policy.update({ enabled: true, updatedByUserId: updatedByUserId ?? null });
+    }
+  });
+}
+
+export async function createAccount(email = uniqueEmail(), name = 'Test User') {  const registerResponse = await registerUser(email, name);
   const session = await loginBrowser(email);
   return { email, registerResponse, ...session };
 }

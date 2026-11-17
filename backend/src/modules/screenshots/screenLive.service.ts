@@ -32,6 +32,11 @@ import {
   getOrCreateScreenshotPolicy,
 } from './screenshotPolicy.service';
 import {
+  assertEmployeeMonitoringEnabled,
+  EMPLOYEE_MONITORING_DISABLED,
+  isEmployeeMonitoringEnabled,
+} from './employeeMonitoringPolicy.service';
+import {
   toScreenLivePendingSession,
   toScreenLiveSessionSummary,
   toScreenLiveStartCommand,
@@ -248,6 +253,7 @@ export async function startScreenLiveSession(options: {
   const policy = await getOrCreateScreenshotPolicy(organizationId);
   try {
     assertScreenLiveStartAllowed(policy, actorRole);
+    await assertEmployeeMonitoringEnabled(organizationId, employeeId);
   } catch (error) {
     if (error instanceof AppError) {
       await auditAccessDenied({
@@ -290,6 +296,7 @@ export async function startScreenLiveSession(options: {
       sequelize.transaction(async (transaction) => {
         const lockedPolicy = await getOrCreateScreenshotPolicy(organizationId, transaction);
         assertScreenLiveStartAllowed(lockedPolicy, actorRole);
+        await assertEmployeeMonitoringEnabled(organizationId, employeeId, transaction);
         await assertEmployeePolicyAcknowledgement(lockedPolicy, employeeId, transaction);
 
         const target = await resolveLiveTarget(organizationId, employeeId, now, transaction);
@@ -420,6 +427,7 @@ export async function issueScreenLiveViewerTicket(options: {
   const policy = await getOrCreateScreenshotPolicy(options.organizationId);
   try {
     assertScreenLiveViewAllowed(policy, options.actorRole);
+    await assertEmployeeMonitoringEnabled(options.organizationId, session.employeeId);
   } catch (error) {
     await auditAccessDenied({
       organizationId: options.organizationId,
@@ -587,6 +595,15 @@ export async function consumeScreenLiveViewerTicket(
     if (error instanceof AppError) return deny(error);
     throw error;
   }
+  if (!(await isEmployeeMonitoringEnabled(viewer.organizationId, session.employeeId))) {
+    return deny(
+      new AppError(
+        403,
+        EMPLOYEE_MONITORING_DISABLED,
+        'Screen monitoring is disabled for this employee',
+      ),
+    );
+  }
 
   const timeSession = await TimeSession.findOne({
     where: {
@@ -728,6 +745,9 @@ export async function canScreenLiveViewerContinue(viewerId: string): Promise<boo
   try {
     assertScreenLiveViewAllowed(policy, membership.role);
   } catch {
+    return false;
+  }
+  if (!(await isEmployeeMonitoringEnabled(viewer.organizationId, viewer.session.employeeId))) {
     return false;
   }
   return true;
@@ -944,6 +964,18 @@ export async function terminateActiveScreenLiveSessionsForOrganization(
   return terminateActiveSessionsWhere({ organizationId }, reason);
 }
 
+/**
+ * Ends the live session for one employee when their individual monitoring
+ * policy is disabled. Other employees in the organization are unaffected.
+ */
+export async function terminateActiveScreenLiveSessionsForEmployee(
+  organizationId: string,
+  employeeId: string,
+  reason: ScreenLiveTerminationReason = 'POLICY_DISABLED',
+): Promise<number> {
+  return terminateActiveSessionsWhere({ organizationId, employeeId }, reason);
+}
+
 export async function stopScreenLiveSession(options: {
   organizationId: string;
   sessionId: string;
@@ -1130,6 +1162,18 @@ export async function authorizeScreenLiveAgentStream(options: {
     throw AppError.forbidden('Organization is suspended', 'ORGANIZATION_SUSPENDED');
   }
 
+  if (!(await isEmployeeMonitoringEnabled(session.organizationId, session.employeeId))) {
+    await terminateScreenLiveSession({
+      sessionId: session.id,
+      organizationId: session.organizationId,
+      reason: 'POLICY_DISABLED',
+    });
+    throw AppError.forbidden(
+      'Screen monitoring is disabled for this employee',
+      EMPLOYEE_MONITORING_DISABLED,
+    );
+  }
+
   return session;
 }
 
@@ -1153,13 +1197,25 @@ export async function getPendingScreenLiveSessionForAgent(
       expiresAt: { [Op.gt]: now },
     },
   });
-  return session ? toScreenLivePendingSession(session) : null;
+  if (!session) return null;
+
+  if (!(await isEmployeeMonitoringEnabled(organizationId, agent.userId))) {
+    await terminateScreenLiveSession({
+      sessionId: session.id,
+      organizationId,
+      reason: 'POLICY_DISABLED',
+    });
+    return null;
+  }
+
+  return toScreenLivePendingSession(session);
 }
 
 async function terminationReasonFor(
   session: ScreenLiveSessionModel,
   now: Date,
   disabledOrganizations: Map<string, boolean>,
+  disabledEmployees: Map<string, boolean>,
 ): Promise<ScreenLiveTerminationReason | null> {
   if (session.expiresAt.getTime() <= now.getTime()) return 'EXPIRED';
 
@@ -1185,6 +1241,15 @@ async function terminationReasonFor(
   }
   if (disabledOrganizations.get(session.organizationId)) return 'POLICY_DISABLED';
 
+  const employeeKey = `${session.organizationId}:${session.employeeId}`;
+  if (!disabledEmployees.has(employeeKey)) {
+    disabledEmployees.set(
+      employeeKey,
+      !(await isEmployeeMonitoringEnabled(session.organizationId, session.employeeId)),
+    );
+  }
+  if (disabledEmployees.get(employeeKey)) return 'POLICY_DISABLED';
+
   return null;
 }
 
@@ -1197,10 +1262,16 @@ async function expireSessionsWhere(
     limit: 500,
   });
   const disabledOrganizations = new Map<string, boolean>();
+  const disabledEmployees = new Map<string, boolean>();
   let terminated = 0;
 
   for (const session of sessions) {
-    const reason = await terminationReasonFor(session, now, disabledOrganizations);
+    const reason = await terminationReasonFor(
+      session,
+      now,
+      disabledOrganizations,
+      disabledEmployees,
+    );
     if (!reason) continue;
     if (
       await terminateScreenLiveSession({

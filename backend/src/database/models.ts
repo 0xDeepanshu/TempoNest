@@ -15,6 +15,7 @@ import { initOrganizationTrackingSettings } from '../modules/activity/trackingSe
 import { initApplicationClassification } from '../modules/activity/applicationClassification.model';
 import { initActivityIdleInterval } from '../modules/activity/idleInterval.model';
 import { initScreenshotPolicy } from '../modules/screenshots/screenshotPolicy.model';
+import { initEmployeeMonitoringPolicy } from '../modules/screenshots/employeeMonitoringPolicy.model';
 import { initScreenshotPolicyAcknowledgement } from '../modules/screenshots/screenshotPolicyAcknowledgement.model';
 import { initScreenshotRequest } from '../modules/screenshots/screenshotRequest.model';
 import { initScreenshot } from '../modules/screenshots/screenshot.model';
@@ -53,6 +54,7 @@ export function initModels(sequelize: Sequelize) {
   const ActivityIdleInterval = initActivityIdleInterval(sequelize);
   const AgentSyncEvent = initAgentSyncEvent(sequelize);
   const ScreenshotPolicy = initScreenshotPolicy(sequelize);
+  const EmployeeMonitoringPolicy = initEmployeeMonitoringPolicy(sequelize);
   const ScreenshotPolicyAcknowledgement = initScreenshotPolicyAcknowledgement(sequelize);
   const ScreenshotRequest = initScreenshotRequest(sequelize);
   const Screenshot = initScreenshot(sequelize);
@@ -132,6 +134,11 @@ export function initModels(sequelize: Sequelize) {
   Organization.hasOne(ScreenshotPolicy, {
     foreignKey: 'organizationId',
     as: 'screenshotPolicy',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(EmployeeMonitoringPolicy, {
+    foreignKey: 'organizationId',
+    as: 'employeeMonitoringPolicies',
     onDelete: 'CASCADE',
   });
   Organization.hasMany(ScreenshotPolicyAcknowledgement, {
@@ -556,6 +563,22 @@ export function initModels(sequelize: Sequelize) {
     foreignKey: 'organizationId',
     as: 'organization',
     onDelete: 'CASCADE',
+  });
+
+  EmployeeMonitoringPolicy.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  EmployeeMonitoringPolicy.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  EmployeeMonitoringPolicy.belongsTo(User, {
+    foreignKey: 'updatedByUserId',
+    as: 'updatedBy',
+    onDelete: 'SET NULL',
   });
 
   ScreenshotPolicyAcknowledgement.belongsTo(Organization, {
@@ -1108,6 +1131,7 @@ export function initModels(sequelize: Sequelize) {
     ActivityIdleInterval,
     AgentSyncEvent,
     ScreenshotPolicy,
+    EmployeeMonitoringPolicy,
     ScreenshotPolicyAcknowledgement,
     ScreenshotRequest,
     Screenshot,

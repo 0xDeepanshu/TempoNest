@@ -435,6 +435,8 @@ export interface TrackingStatusRow {
   activeSession: TimeSession | null;
   lastHeartbeatAt: string | null;
   lastSeenAt: string | null;
+  /** Per-employee monitoring switch; capture actions stay disabled when false. */
+  monitoringEnabled: boolean;
   agent: {
     id: string;
     userId: string;
@@ -644,6 +646,21 @@ export interface ScreenshotPolicyDisclosure {
 
 export interface ScreenshotPolicyDisclosureResponse {
   data: { policy: ScreenshotPolicyDisclosure };
+  serverTime: string;
+}
+
+/** Per-employee monitoring switch. Independent of the member role. */
+export interface EmployeeMonitoringPolicy {
+  employeeId: string;
+  enabled: boolean;
+  organizationEnabled: boolean;
+  effectiveEnabled: boolean;
+  updatedAt: string | null;
+  updatedBy: ScreenshotUserSummary | null;
+}
+
+export interface EmployeeMonitoringPolicyResponse {
+  data: { policy: EmployeeMonitoringPolicy };
   serverTime: string;
 }
 

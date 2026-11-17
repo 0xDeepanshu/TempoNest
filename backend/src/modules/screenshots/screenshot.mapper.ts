@@ -116,9 +116,10 @@ export function toScreenshotPendingSummary(request: ScreenshotRequest) {
 export function toScreenshotPolicyDisclosure(
   policy: ScreenshotPolicy,
   acknowledgedAt: Date | null,
+  employeeMonitoringEnabled: boolean,
 ) {
   return {
-    enabled: policy.enabled,
+    enabled: policy.enabled && employeeMonitoringEnabled,
     retentionDays: policy.retentionDays,
     disclosure: {
       version: policy.disclosureVersion,
