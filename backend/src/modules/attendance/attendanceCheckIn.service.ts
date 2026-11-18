@@ -24,6 +24,7 @@ import {
   publishSessionUpdate,
   startSessionInTransaction,
 } from '../timeTracking/timeSession.service';
+import { publishIntegrationEventSafely } from '../integrations/integration.webhook.service';
 import { toTimeSessionSummary } from '../timeTracking/timeSession.mapper';
 import {
   toAttendanceCheckInAdminSummary,
@@ -464,6 +465,19 @@ export async function checkIn(options: {
 
   if (!result.replayed) {
     publishSessionUpdate(session);
+    publishIntegrationEventSafely({
+      organizationId,
+      employeeId,
+      eventType: 'attendance.started',
+      payload: {
+        sessionId: session.id,
+        checkInId: checkInRecord.id,
+        workMode: checkInRecord.workMode,
+        source: session.source,
+        autoClosedSessionId: result.autoClosedSessionId,
+      },
+      occurredAt: session.startedAt,
+    });
   }
 
   return {

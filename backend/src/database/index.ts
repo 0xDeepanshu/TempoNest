@@ -84,6 +84,15 @@ export const {
   LeaveRequest,
   LeaveLedgerEntry,
   PasswordResetToken,
+  IntegrationClient,
+  IntegrationConnection,
+  IntegrationAuthorizationRequest,
+  IntegrationAuthorizationCode,
+  IntegrationCredential,
+  IntegrationEmployeeMapping,
+  IntegrationWebhookSubscription,
+  IntegrationWebhookEvent,
+  IntegrationWebhookDelivery,
 } = models;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -16,6 +16,8 @@ import {
   createAgentAttendanceRouter,
   createAttendanceFileRouter,
 } from '../modules/attendance/attendance.routes';
+import { createIntegrationOAuthRouter } from '../modules/integrations/integration.oauth.routes';
+import { createIntegrationDataRouter } from '../modules/integrations/integration.routes';
 
 export function createApiRouter(): Router {
   const router = Router();
@@ -33,6 +35,8 @@ export function createApiRouter(): Router {
   router.use('/screenshot-policy', createScreenshotPolicyRouter());
   router.use('/screenshot-files', createScreenshotFileRouter());
   router.use('/attendance-files', createAttendanceFileRouter());
+  router.use('/integrations/oauth', createIntegrationOAuthRouter());
+  router.use('/integration/v1', createIntegrationDataRouter());
 
   return router;
 }

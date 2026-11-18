@@ -19,6 +19,7 @@ import { createOrganizationAttendanceRouter } from '../attendance/attendance.rou
 import { createOrganizationLeaveRouter } from '../leave/leave.routes';
 import { createOrganizationHolidayRouter } from '../leave/holiday.routes';
 import { createOrganizationRolesRouter } from '../roles/customRole.routes';
+import { createOrganizationIntegrationRouter } from '../integrations/integration.management.routes';
 
 /**
  * Organization and nested membership/invitation routes. Every nested route
@@ -76,6 +77,7 @@ export function createOrganizationRouter(): Router {
   router.use(createOrganizationLeaveRouter());
   router.use(createOrganizationHolidayRouter());
   router.use(createOrganizationRolesRouter());
+  router.use(createOrganizationIntegrationRouter());
 
   return router;
 }

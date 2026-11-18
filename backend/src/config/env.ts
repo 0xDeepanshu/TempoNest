@@ -159,6 +159,69 @@ const envSchema = z
       .max(86_400)
       .default(3_600),
 
+    // Flowtrium partner integration. It is dark by default so a deployment
+    // does not expose the OAuth surface until a client has been provisioned
+    // with the server-side CLI. The integration is read-only and never creates
+    // WorkZen users, roles, sessions or attendance records.
+    INTEGRATION_ENABLED: booleanFromEnv.default('false'),
+    INTEGRATION_AUTH_REQUEST_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(3_600)
+      .default(600),
+    INTEGRATION_AUTHORIZATION_CODE_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(30)
+      .max(600)
+      .default(60),
+    INTEGRATION_ACCESS_TOKEN_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(86_400)
+      .default(900),
+    INTEGRATION_REFRESH_TOKEN_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(300)
+      .max(31_536_000)
+      .default(2_592_000),
+    // Dedicated key-encryption key for webhook signing secrets. When omitted,
+    // the existing TOKEN_PEPPER is used (both are server-only secrets). Webhook
+    // secrets must be recoverable to compute signatures, so they are encrypted
+    // at rest with AES-256-GCM rather than stored in plaintext.
+    INTEGRATION_WEBHOOK_SECRET_KEY: optionalString,
+    INTEGRATION_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(5_000),
+    INTEGRATION_WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(8),
+    INTEGRATION_WEBHOOK_BATCH_SIZE: z.coerce.number().int().min(1).max(200).default(20),
+    INTEGRATION_WEBHOOK_DISPATCH_INTERVAL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(300)
+      .default(5),
+    INTEGRATION_WEBHOOK_BACKOFF_BASE_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(5)
+      .max(3_600)
+      .default(30),
+    INTEGRATION_WEBHOOK_BACKOFF_MAX_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(86_400)
+      .default(21_600),
+    INTEGRATION_WEBHOOK_SECRET_GRACE_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(604_800)
+      .default(86_400),
+    INTEGRATION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(300),
+
     ARGON2_MEMORY_KIB: z.coerce.number().int().min(8 * 2).max(1_048_576).default(19_456),
     ARGON2_TIME_COST: z.coerce.number().int().min(1).max(20).default(2),
     ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16).default(1),
@@ -229,6 +292,20 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['COOKIE_SECURE'],
         message: 'COOKIE_SECURE must be true when COOKIE_SAME_SITE=none',
+      });
+    }
+
+    if (
+      env.NODE_ENV === 'production' &&
+      env.INTEGRATION_ENABLED &&
+      !env.INTEGRATION_WEBHOOK_SECRET_KEY &&
+      (!env.TOKEN_PEPPER || env.TOKEN_PEPPER.length < 32)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['INTEGRATION_WEBHOOK_SECRET_KEY'],
+        message:
+          'Set INTEGRATION_WEBHOOK_SECRET_KEY (or a 32+ character TOKEN_PEPPER) before enabling integrations in production',
       });
     }
 
@@ -458,6 +535,28 @@ export const config = {
   },
   leave: {
     accrualSweepIntervalMs: env.LEAVE_ACCRUAL_SWEEP_INTERVAL_SECONDS * 1000,
+  },
+  integrations: {
+    enabled: env.INTEGRATION_ENABLED,
+    authRequestTtlSeconds: env.INTEGRATION_AUTH_REQUEST_TTL_SECONDS,
+    authorizationCodeTtlSeconds: env.INTEGRATION_AUTHORIZATION_CODE_TTL_SECONDS,
+    accessTokenTtlSeconds: env.INTEGRATION_ACCESS_TOKEN_TTL_SECONDS,
+    refreshTokenTtlSeconds: env.INTEGRATION_REFRESH_TOKEN_TTL_SECONDS,
+    rateLimitMax: env.INTEGRATION_RATE_LIMIT_MAX,
+    bindingCookie: 'tn_integration_binding',
+    webhook: {
+      secretKey:
+        env.INTEGRATION_WEBHOOK_SECRET_KEY ??
+        env.TOKEN_PEPPER ??
+        'development-only-webhook-key-do-not-use-in-production',
+      timeoutMs: env.INTEGRATION_WEBHOOK_TIMEOUT_MS,
+      maxAttempts: env.INTEGRATION_WEBHOOK_MAX_ATTEMPTS,
+      batchSize: env.INTEGRATION_WEBHOOK_BATCH_SIZE,
+      dispatchIntervalMs: env.INTEGRATION_WEBHOOK_DISPATCH_INTERVAL_SECONDS * 1000,
+      backoffBaseSeconds: env.INTEGRATION_WEBHOOK_BACKOFF_BASE_SECONDS,
+      backoffMaxSeconds: env.INTEGRATION_WEBHOOK_BACKOFF_MAX_SECONDS,
+      secretGraceSeconds: env.INTEGRATION_WEBHOOK_SECRET_GRACE_SECONDS,
+    },
   },
   logLevel: env.LOG_LEVEL,
   paths: {

@@ -6,8 +6,31 @@ import { AppError } from '../utils/errors';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-export function isOriginAllowed(origin: string): boolean {
-  return config.cors.origins.includes(origin);
+/** Paths authenticated by a confidential client secret rather than a cookie. */
+const CSRF_EXEMPT_PATHS = new Set([
+  `${config.apiPrefix}/integrations/oauth/token`,
+  `${config.apiPrefix}/integrations/oauth/revoke`,
+]);
+
+/**
+ * An unsafe cookie-authenticated request must come from an allowlisted origin
+ * or from the same origin that served the request (the hosted integration
+ * pages are rendered by this same backend).
+ */
+export function isOriginAllowed(origin: string, req?: Request): boolean {
+  if (config.cors.origins.includes(origin)) return true;
+
+  if (req) {
+    try {
+      const parsed = new URL(origin);
+      const host = req.get('host');
+      if (host && parsed.host === host) return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 function originFromReferer(referer: string | undefined): string | undefined {
@@ -20,23 +43,43 @@ function originFromReferer(referer: string | undefined): string | undefined {
   }
 }
 
+function bodyCsrfToken(req: Request): string | undefined {
+  const body: unknown = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const value = (body as Record<string, unknown>)['_csrf'];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 /**
  * CSRF protection for cookie-based browser sessions.
  *
- * - Bearer-token clients (Electron main process) are not vulnerable to CSRF
- *   because tokens are not sent automatically by the browser, so they skip it.
- * - Cookie sessions must send `X-CSRF-Token` matching both the readable
- *   double-submit cookie and the hash stored on the server-side session.
+ * - Bearer-token clients (Electron main process, partner integrations) are not
+ *   vulnerable to CSRF because tokens are not sent automatically by the
+ *   browser, so they skip it.
+ * - Cookie sessions must send a token matching both the readable
+ *   double-submit cookie and the hash stored on the server-side session. JSON
+ *   clients use `X-CSRF-Token`; the server-rendered integration forms use a
+ *   hidden `_csrf` field.
  * - Unsafe requests carrying an `Origin` header must come from an allowlisted
- *   origin.
+ *   or same origin.
  */
 export function csrfProtection(req: Request, _res: Response, next: NextFunction): void {
   if (SAFE_METHODS.has(req.method)) return next();
   if (req.auth?.transport === 'bearer') return next();
 
+  const path = req.path;
+  if (CSRF_EXEMPT_PATHS.has(path)) return next();
+
   const origin = req.get('origin');
   if (origin) {
-    if (!isOriginAllowed(origin)) {
+    if (!isOriginAllowed(origin, req)) {
+      return next(AppError.forbidden('Request origin is not allowed', 'ORIGIN_NOT_ALLOWED'));
+    }
+  } else {
+    // Some privacy-focused browsers omit Origin on same-origin form posts but
+    // still send a Referer. Apply the same check when one is present.
+    const refererOrigin = originFromReferer(req.get('referer'));
+    if (refererOrigin && !isOriginAllowed(refererOrigin, req)) {
       return next(AppError.forbidden('Request origin is not allowed', 'ORIGIN_NOT_ALLOWED'));
     }
   }
@@ -49,7 +92,7 @@ export function csrfProtection(req: Request, _res: Response, next: NextFunction)
   // check above still applies when the browser supplies one.
   if (!req.auth && !hasSessionCookie) return next();
 
-  const headerToken = req.get('x-csrf-token');
+  const headerToken = req.get('x-csrf-token') ?? bodyCsrfToken(req);
   const cookieToken: unknown = req.cookies?.[CSRF_COOKIE];
 
   if (

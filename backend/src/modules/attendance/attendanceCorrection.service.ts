@@ -17,6 +17,7 @@ import {
 } from '../memberships/permissions';
 import { ensureEmployee } from '../reporting/reporting.service';
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
+import { publishIntegrationEventSafely } from '../integrations/integration.webhook.service';
 import { toAttendanceCorrectionSummary } from './attendance.mapper';
 import type { Role } from '../memberships/roles';
 import type { Organization as OrganizationModel } from '../organizations/organization.model';
@@ -558,7 +559,7 @@ export async function approveAttendanceCorrection(options: {
     throw AppError.notFound('Attendance correction not found', 'CORRECTION_NOT_FOUND');
   }
 
-  await serializeByKey(`employee:${header.employeeId}`, () =>
+  const approvedCorrection = await serializeByKey(`employee:${header.employeeId}`, () =>
     sequelize.transaction(async (transaction) => {
       await lockEmployee(transaction, header.employeeId);
       const correction = await AttendanceCorrectionRequest.findOne({
@@ -579,7 +580,7 @@ export async function approveAttendanceCorrection(options: {
 
       // Repeated approval is deliberately idempotent: the first decision and
       // its applied attendance snapshot remain authoritative.
-      if (correction.status === 'APPROVED') return;
+      if (correction.status === 'APPROVED') return null;
       if (correction.status === 'REJECTED') {
         throw AppError.conflict(
           'This attendance correction has already been rejected',
@@ -724,8 +725,30 @@ export async function approveAttendanceCorrection(options: {
         },
         { transaction, context },
       );
+
+      return {
+        sessionId: session.id,
+        requestType: correction.requestType,
+        workDate: correction.workDate,
+      };
     }),
   );
+
+  // Only a correction that actually changed attendance produces the event;
+  // repeated idempotent approvals return before reaching this point.
+  if (approvedCorrection) {
+    publishIntegrationEventSafely({
+      organizationId: organization.id,
+      employeeId: header.employeeId,
+      eventType: 'attendance.updated',
+      payload: {
+        sessionId: approvedCorrection.sessionId,
+        correctionId,
+        requestType: approvedCorrection.requestType,
+        workDate: approvedCorrection.workDate,
+      },
+    });
+  }
 
   return toAttendanceCorrectionSummary(await loadCorrection(organization.id, correctionId));
 }

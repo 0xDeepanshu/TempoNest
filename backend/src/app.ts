@@ -87,6 +87,9 @@ export function createApp(): Express {
   );
   app.use(cors(buildCorsOptions()));
   app.use(express.json({ limit: config.bodyLimit }));
+  // The hosted integration consent/sign-in pages post regular HTML forms.
+  // Only flat fields are accepted; the global CSRF middleware reads `_csrf`.
+  app.use(express.urlencoded({ extended: false, limit: config.bodyLimit }));
   app.use(cookieParser());
 
   if (config.rateLimit.enabled) {

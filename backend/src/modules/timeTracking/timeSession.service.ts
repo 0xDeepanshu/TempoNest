@@ -20,6 +20,10 @@ import { isLocationPauseReason } from '../attendance/attendanceLocationTracking.
 import { toTimeSessionSummary } from './timeSession.mapper';
 import type { Role } from '../memberships/roles';
 import { isSelfScoped, type PermissionSubject } from '../memberships/permissions';
+import {
+  publishIntegrationEventSafely,
+  type PublishIntegrationEventInput,
+} from '../integrations/integration.webhook.service';
 import type { DesktopAgent as DesktopAgentModel } from '../desktopAgents/desktopAgent.model';
 import type { OfflineEventInput, OfflineSyncInput, SessionListQuery } from './timeSession.schemas';
 import type { TimeSession as TimeSessionModel } from './timeSession.model';
@@ -30,6 +34,14 @@ const sessionIncludes = [
   { model: DesktopAgent, as: 'desktopAgent', required: false },
   { model: User, as: 'employee', required: false, attributes: ['id', 'name', 'email'] },
 ];
+
+/** Offline device events map onto the same public integration event names. */
+const OFFLINE_INTEGRATION_EVENTS = {
+  SESSION_START: 'attendance.started',
+  SESSION_STOP: 'attendance.stopped',
+  BREAK_START: 'break.started',
+  BREAK_END: 'break.ended',
+} as const;
 
 export async function lockEmployee(
   transaction: Transaction,
@@ -182,6 +194,18 @@ export async function startSession(options: {
 
     const full = await loadSession(result.session.id);
     publishSession(full);
+    publishIntegrationEventSafely({
+      organizationId,
+      employeeId,
+      eventType: 'attendance.started',
+      payload: {
+        sessionId: full.id,
+        startedAt: full.startedAt,
+        source: full.source,
+        autoClosedSessionId: result.autoClosedSessionId,
+      },
+      occurredAt: full.startedAt,
+    });
     return { session: full, autoClosedSessionId: result.autoClosedSessionId };
   } catch (error) {
     if (error instanceof UniqueConstraintError) {
@@ -236,6 +260,18 @@ export async function stopSession(options: {
 
   const full = await loadSession(session.id);
   publishSession(full);
+  publishIntegrationEventSafely({
+    organizationId,
+    employeeId,
+    eventType: 'attendance.stopped',
+    payload: {
+      sessionId: full.id,
+      startedAt: full.startedAt,
+      endedAt: full.endedAt,
+      source: full.source,
+    },
+    occurredAt: full.endedAt ?? new Date(),
+  });
   return full;
 }
 
@@ -296,6 +332,19 @@ export async function startBreak(options: {
 
   const full = await loadSession(result.session.id);
   publishSession(full);
+  const breakStartedAt =
+    full.breaks?.find((brk) => brk.id === result.breakId)?.startedAt ?? new Date();
+  publishIntegrationEventSafely({
+    organizationId,
+    employeeId,
+    eventType: 'break.started',
+    payload: {
+      sessionId: full.id,
+      breakId: result.breakId,
+      startedAt: breakStartedAt,
+    },
+    occurredAt: breakStartedAt,
+  });
   return { session: full, breakId: result.breakId };
 }
 
@@ -373,6 +422,19 @@ export async function endBreak(options: {
 
   const full = await loadSession(result.session.id);
   publishSession(full);
+  const breakEndedAt =
+    full.breaks?.find((brk) => brk.id === result.breakId)?.endedAt ?? new Date();
+  publishIntegrationEventSafely({
+    organizationId,
+    employeeId,
+    eventType: 'break.ended',
+    payload: {
+      sessionId: full.id,
+      breakId: result.breakId,
+      endedAt: breakEndedAt,
+    },
+    occurredAt: breakEndedAt,
+  });
   return { session: full, breakId: result.breakId };
 }
 
@@ -872,6 +934,7 @@ export async function syncOfflineEvents(options: {
 
   const results: OfflineResult[] = new Array(input.events.length);
   const touchedSessions = new Set<string>();
+  const publishedEvents: PublishIntegrationEventInput[] = [];
 
   for (const item of indexed) {
     const { event, occurredAt, index } = item;
@@ -921,6 +984,19 @@ export async function syncOfflineEvents(options: {
     });
 
     if (applied.sessionId) touchedSessions.add(applied.sessionId);
+    if (applied.sessionId && !applied.duplicate) {
+      publishedEvents.push({
+        organizationId,
+        employeeId,
+        eventType: OFFLINE_INTEGRATION_EVENTS[event.type],
+        payload: {
+          sessionId: applied.sessionId,
+          source: 'OFFLINE',
+          offlineEventId: event.eventId,
+        },
+        occurredAt,
+      });
+    }
     results[index] = storedResult(applied.record, applied.duplicate);
   }
 
@@ -929,6 +1005,10 @@ export async function syncOfflineEvents(options: {
   for (const sessionId of touchedSessions) {
     const session = await TimeSession.findByPk(sessionId, { include: sessionIncludes });
     if (session) publishSession(session);
+  }
+
+  for (const event of publishedEvents) {
+    publishIntegrationEventSafely(event);
   }
 
   return {

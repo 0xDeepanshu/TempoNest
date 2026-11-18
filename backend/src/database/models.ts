@@ -36,6 +36,15 @@ import { initLeaveBalance } from '../modules/leave/leaveBalance.model';
 import { initLeaveRequest } from '../modules/leave/leaveRequest.model';
 import { initLeaveLedgerEntry } from '../modules/leave/leaveLedgerEntry.model';
 import { initPasswordResetToken } from '../modules/auth/passwordResetToken.model';
+import { initIntegrationClient } from '../modules/integrations/integrationClient.model';
+import { initIntegrationConnection } from '../modules/integrations/integrationConnection.model';
+import { initIntegrationAuthorizationRequest } from '../modules/integrations/integrationAuthorizationRequest.model';
+import { initIntegrationAuthorizationCode } from '../modules/integrations/integrationAuthorizationCode.model';
+import { initIntegrationCredential } from '../modules/integrations/integrationCredential.model';
+import { initIntegrationEmployeeMapping } from '../modules/integrations/integrationEmployeeMapping.model';
+import { initIntegrationWebhookSubscription } from '../modules/integrations/integrationWebhookSubscription.model';
+import { initIntegrationWebhookEvent } from '../modules/integrations/integrationWebhookEvent.model';
+import { initIntegrationWebhookDelivery } from '../modules/integrations/integrationWebhookDelivery.model';
 
 export function initModels(sequelize: Sequelize) {
   const Organization = initOrganization(sequelize);
@@ -75,6 +84,15 @@ export function initModels(sequelize: Sequelize) {
   const LeaveRequest = initLeaveRequest(sequelize);
   const LeaveLedgerEntry = initLeaveLedgerEntry(sequelize);
   const PasswordResetToken = initPasswordResetToken(sequelize);
+  const IntegrationClient = initIntegrationClient(sequelize);
+  const IntegrationConnection = initIntegrationConnection(sequelize);
+  const IntegrationAuthorizationRequest = initIntegrationAuthorizationRequest(sequelize);
+  const IntegrationAuthorizationCode = initIntegrationAuthorizationCode(sequelize);
+  const IntegrationCredential = initIntegrationCredential(sequelize);
+  const IntegrationEmployeeMapping = initIntegrationEmployeeMapping(sequelize);
+  const IntegrationWebhookSubscription = initIntegrationWebhookSubscription(sequelize);
+  const IntegrationWebhookEvent = initIntegrationWebhookEvent(sequelize);
+  const IntegrationWebhookDelivery = initIntegrationWebhookDelivery(sequelize);
 
   Organization.hasMany(Membership, {
     foreignKey: 'organizationId',
@@ -1114,6 +1132,282 @@ export function initModels(sequelize: Sequelize) {
     onDelete: 'CASCADE',
   });
 
+  Organization.hasMany(IntegrationConnection, {
+    foreignKey: 'organizationId',
+    as: 'integrationConnections',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(IntegrationAuthorizationRequest, {
+    foreignKey: 'organizationId',
+    as: 'integrationAuthorizationRequests',
+    onDelete: 'SET NULL',
+  });
+  Organization.hasMany(IntegrationAuthorizationCode, {
+    foreignKey: 'organizationId',
+    as: 'integrationAuthorizationCodes',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(IntegrationEmployeeMapping, {
+    foreignKey: 'organizationId',
+    as: 'integrationEmployeeMappings',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(IntegrationWebhookSubscription, {
+    foreignKey: 'organizationId',
+    as: 'integrationWebhookSubscriptions',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(IntegrationWebhookEvent, {
+    foreignKey: 'organizationId',
+    as: 'integrationWebhookEvents',
+    onDelete: 'CASCADE',
+  });
+  Organization.hasMany(IntegrationWebhookDelivery, {
+    foreignKey: 'organizationId',
+    as: 'integrationWebhookDeliveries',
+    onDelete: 'CASCADE',
+  });
+
+  User.hasMany(IntegrationConnection, {
+    foreignKey: 'connectedByUserId',
+    as: 'connectedIntegrationConnections',
+    onDelete: 'SET NULL',
+  });
+  User.hasMany(IntegrationAuthorizationRequest, {
+    foreignKey: 'authorizedByUserId',
+    as: 'integrationAuthorizationRequests',
+    onDelete: 'SET NULL',
+  });
+  User.hasMany(IntegrationAuthorizationCode, {
+    foreignKey: 'authorizedByUserId',
+    as: 'integrationAuthorizationCodes',
+    onDelete: 'SET NULL',
+  });
+  User.hasMany(IntegrationCredential, {
+    foreignKey: 'createdByUserId',
+    as: 'createdIntegrationCredentials',
+    onDelete: 'SET NULL',
+  });
+  User.hasMany(IntegrationEmployeeMapping, {
+    foreignKey: 'workzenUserId',
+    as: 'integrationEmployeeMappings',
+    onDelete: 'CASCADE',
+  });
+  User.hasMany(IntegrationEmployeeMapping, {
+    foreignKey: 'resolvedByUserId',
+    as: 'resolvedIntegrationEmployeeMappings',
+    onDelete: 'SET NULL',
+  });
+  User.hasMany(IntegrationWebhookSubscription, {
+    foreignKey: 'createdByUserId',
+    as: 'createdIntegrationWebhookSubscriptions',
+    onDelete: 'SET NULL',
+  });
+
+  IntegrationClient.hasMany(IntegrationConnection, {
+    foreignKey: 'clientId',
+    as: 'connections',
+    onDelete: 'CASCADE',
+  });
+  IntegrationClient.hasMany(IntegrationAuthorizationRequest, {
+    foreignKey: 'clientId',
+    as: 'authorizationRequests',
+    onDelete: 'CASCADE',
+  });
+  IntegrationClient.hasMany(IntegrationAuthorizationCode, {
+    foreignKey: 'clientId',
+    as: 'authorizationCodes',
+    onDelete: 'CASCADE',
+  });
+  IntegrationClient.hasMany(IntegrationCredential, {
+    foreignKey: 'clientId',
+    as: 'credentials',
+    onDelete: 'CASCADE',
+  });
+
+  IntegrationConnection.belongsTo(IntegrationClient, {
+    foreignKey: 'clientId',
+    as: 'client',
+    onDelete: 'CASCADE',
+  });
+  IntegrationConnection.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  IntegrationConnection.belongsTo(User, {
+    foreignKey: 'connectedByUserId',
+    as: 'connectedBy',
+    onDelete: 'SET NULL',
+  });
+  IntegrationConnection.hasMany(IntegrationAuthorizationCode, {
+    foreignKey: 'connectionId',
+    as: 'authorizationCodes',
+    onDelete: 'SET NULL',
+  });
+  IntegrationConnection.hasMany(IntegrationCredential, {
+    foreignKey: 'connectionId',
+    as: 'credentials',
+    onDelete: 'CASCADE',
+  });
+  IntegrationConnection.hasMany(IntegrationEmployeeMapping, {
+    foreignKey: 'connectionId',
+    as: 'employeeMappings',
+    onDelete: 'CASCADE',
+  });
+  IntegrationConnection.hasMany(IntegrationWebhookSubscription, {
+    foreignKey: 'connectionId',
+    as: 'webhookSubscriptions',
+    onDelete: 'CASCADE',
+  });
+  IntegrationConnection.hasMany(IntegrationWebhookEvent, {
+    foreignKey: 'connectionId',
+    as: 'webhookEvents',
+    onDelete: 'CASCADE',
+  });
+
+  IntegrationAuthorizationRequest.belongsTo(IntegrationClient, {
+    foreignKey: 'clientId',
+    as: 'client',
+    onDelete: 'CASCADE',
+  });
+  IntegrationAuthorizationRequest.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'SET NULL',
+  });
+  IntegrationAuthorizationRequest.belongsTo(User, {
+    foreignKey: 'authorizedByUserId',
+    as: 'authorizedBy',
+    onDelete: 'SET NULL',
+  });
+  IntegrationAuthorizationRequest.hasOne(IntegrationAuthorizationCode, {
+    foreignKey: 'authorizationRequestId',
+    as: 'authorizationCode',
+    onDelete: 'CASCADE',
+  });
+
+  IntegrationAuthorizationCode.belongsTo(IntegrationAuthorizationRequest, {
+    foreignKey: 'authorizationRequestId',
+    as: 'authorizationRequest',
+    onDelete: 'CASCADE',
+  });
+  IntegrationAuthorizationCode.belongsTo(IntegrationClient, {
+    foreignKey: 'clientId',
+    as: 'client',
+    onDelete: 'CASCADE',
+  });
+  IntegrationAuthorizationCode.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  IntegrationAuthorizationCode.belongsTo(User, {
+    foreignKey: 'authorizedByUserId',
+    as: 'authorizedBy',
+    onDelete: 'SET NULL',
+  });
+  IntegrationAuthorizationCode.belongsTo(IntegrationConnection, {
+    foreignKey: 'connectionId',
+    as: 'connection',
+    onDelete: 'SET NULL',
+  });
+
+  IntegrationCredential.belongsTo(IntegrationConnection, {
+    foreignKey: 'connectionId',
+    as: 'connection',
+    onDelete: 'CASCADE',
+  });
+  IntegrationCredential.belongsTo(IntegrationClient, {
+    foreignKey: 'clientId',
+    as: 'client',
+    onDelete: 'CASCADE',
+  });
+  IntegrationCredential.belongsTo(IntegrationAuthorizationCode, {
+    foreignKey: 'authorizationCodeId',
+    as: 'authorizationCode',
+    onDelete: 'SET NULL',
+  });
+  IntegrationCredential.belongsTo(User, {
+    foreignKey: 'createdByUserId',
+    as: 'createdBy',
+    onDelete: 'SET NULL',
+  });
+
+  IntegrationEmployeeMapping.belongsTo(IntegrationConnection, {
+    foreignKey: 'connectionId',
+    as: 'connection',
+    onDelete: 'CASCADE',
+  });
+  IntegrationEmployeeMapping.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  IntegrationEmployeeMapping.belongsTo(User, {
+    foreignKey: 'workzenUserId',
+    as: 'workzenUser',
+    onDelete: 'CASCADE',
+  });
+  IntegrationEmployeeMapping.belongsTo(User, {
+    foreignKey: 'resolvedByUserId',
+    as: 'resolvedBy',
+    onDelete: 'SET NULL',
+  });
+
+  IntegrationWebhookSubscription.belongsTo(IntegrationConnection, {
+    foreignKey: 'connectionId',
+    as: 'connection',
+    onDelete: 'CASCADE',
+  });
+  IntegrationWebhookSubscription.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  IntegrationWebhookSubscription.belongsTo(User, {
+    foreignKey: 'createdByUserId',
+    as: 'createdBy',
+    onDelete: 'SET NULL',
+  });
+  IntegrationWebhookSubscription.hasMany(IntegrationWebhookDelivery, {
+    foreignKey: 'subscriptionId',
+    as: 'deliveries',
+    onDelete: 'CASCADE',
+  });
+
+  IntegrationWebhookEvent.belongsTo(IntegrationConnection, {
+    foreignKey: 'connectionId',
+    as: 'connection',
+    onDelete: 'CASCADE',
+  });
+  IntegrationWebhookEvent.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  IntegrationWebhookEvent.hasMany(IntegrationWebhookDelivery, {
+    foreignKey: 'eventId',
+    as: 'deliveries',
+    onDelete: 'CASCADE',
+  });
+
+  IntegrationWebhookDelivery.belongsTo(IntegrationWebhookEvent, {
+    foreignKey: 'eventId',
+    as: 'event',
+    onDelete: 'CASCADE',
+  });
+  IntegrationWebhookDelivery.belongsTo(IntegrationWebhookSubscription, {
+    foreignKey: 'subscriptionId',
+    as: 'subscription',
+    onDelete: 'CASCADE',
+  });
+  IntegrationWebhookDelivery.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+
   return {
     Organization,
     User,
@@ -1152,6 +1446,15 @@ export function initModels(sequelize: Sequelize) {
     LeaveRequest,
     LeaveLedgerEntry,
     PasswordResetToken,
+    IntegrationClient,
+    IntegrationConnection,
+    IntegrationAuthorizationRequest,
+    IntegrationAuthorizationCode,
+    IntegrationCredential,
+    IntegrationEmployeeMapping,
+    IntegrationWebhookSubscription,
+    IntegrationWebhookEvent,
+    IntegrationWebhookDelivery,
   };
 }
 

@@ -38,6 +38,7 @@ export const PERMISSIONS = [
   'holiday:update',
   'holiday:delete',
   'holiday:settings:manage',
+  'integration:manage',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -83,6 +84,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'holiday:update',
     'holiday:delete',
     'holiday:settings:manage',
+    'integration:manage',
   ],
   MANAGER: [
     'organization:read',

@@ -12,6 +12,7 @@ import { startScreenLiveMaintenance } from './modules/screenshots/screenLive.mai
 import { startAttendanceLocationMaintenance } from './modules/attendance/attendanceLocation.maintenance';
 import { startLeaveAccrualMaintenance } from './modules/leave/leaveAccrual.maintenance';
 import { startActivityMaintenance } from './modules/activity/activity.maintenance';
+import { startIntegrationWebhookMaintenance } from './modules/integrations/integrationWebhook.maintenance';
 
 let shuttingDown = false;
 
@@ -25,6 +26,7 @@ async function shutdown(
   stopLocationMaintenance?: () => void,
   stopLeaveAccrualMaintenance?: () => void,
   stopActivityMaintenance?: () => void,
+  stopIntegrationWebhookMaintenance?: () => void,
 ): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -35,6 +37,7 @@ async function shutdown(
   stopLocationMaintenance?.();
   stopLeaveAccrualMaintenance?.();
   stopActivityMaintenance?.();
+  stopIntegrationWebhookMaintenance?.();
   agentHub.closeAll(1001, 'Server shutting down');
   wss?.close();
   if (relay) {
@@ -87,6 +90,7 @@ async function main(): Promise<void> {
   const stopLocationMaintenance = startAttendanceLocationMaintenance();
   const stopLeaveAccrualMaintenance = startLeaveAccrualMaintenance();
   const stopActivityMaintenance = startActivityMaintenance();
+  const stopIntegrationWebhookMaintenance = startIntegrationWebhookMaintenance();
 
   // Both realtime endpoints above ignore paths they do not own. Reject any
   // other upgrade request so unhandled sockets do not linger.
@@ -118,6 +122,7 @@ async function main(): Promise<void> {
       stopLocationMaintenance,
       stopLeaveAccrualMaintenance,
       stopActivityMaintenance,
+      stopIntegrationWebhookMaintenance,
     ).then(() => process.exit(process.exitCode ?? 0));
   };
 
@@ -140,6 +145,7 @@ async function main(): Promise<void> {
       stopLocationMaintenance,
       stopLeaveAccrualMaintenance,
       stopActivityMaintenance,
+      stopIntegrationWebhookMaintenance,
     ).then(() => process.exit(1));
   });
 }

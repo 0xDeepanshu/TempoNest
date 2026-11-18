@@ -22,6 +22,10 @@ process.env.ARGON2_MEMORY_KIB = '4096';
 process.env.ARGON2_TIME_COST = '1';
 process.env.ARGON2_PARALLELISM = '1';
 
+// The integration API is dark by default. The integration suite opts in here so
+// that configuration is fixed before any module reads it.
+process.env.INTEGRATION_ENABLED = 'true';
+
 // Screenshot tests use the local adapter in an OS temp directory. The small
 // size cap makes oversized-upload tests cheap while still exercising Express'
 // raw-body limit and the storage-level validation.
