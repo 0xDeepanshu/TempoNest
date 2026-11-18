@@ -1,7 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import { Platform } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
 
 import {
   fetchAttendanceLocationStatus,
@@ -19,27 +19,42 @@ import type {
   AttendanceLocationPermissionState,
   AttendanceLocationStateSummary,
   AttendanceLocationTrackingStatus,
+  ReportAttendanceLocationStatusResponse,
+  TimeSessionSummary,
 } from '../api/types';
 import { readAgentKey, subscribeToSessionExpired } from '../auth/tokens';
 import {
   LOCATION_BATCH_INTERVAL_MS,
+  LOCATION_MONITOR_INTERVAL_MS,
+  LOCATION_RESUME_FIX_TIMEOUT_MS,
   LOCATION_SAMPLE_DISTANCE_METERS,
   LOCATION_SAMPLE_INTERVAL_MS,
   LOCATION_TRACKING_TASK,
+  classifyTrackingRestart,
   createQueuedLocationSample,
+  isLocationPauseReason,
   phaseFromLocationState,
+  type LocationPauseReason,
   type OnSiteTrackingPhase,
 } from './tracking-core';
 import {
+  openAppPermissionSettings,
+  openLocationServicesSettings,
+} from './location-recovery';
+import {
   applyLocationUploadResults,
   clearLocationQueue,
+  clearPendingLocationReport,
   clearTrackingContext,
   enqueueLocationSample,
   ensureLocationQueue,
   readLocationUploadBatch,
+  readPendingLocationReport,
   readTrackingContext,
+  writePendingLocationReport,
   writeTrackingContext,
   type LocationTrackingContext,
+  type PendingLocationReport,
 } from './tracking-store';
 
 export interface OnSiteTrackingIdentity {
@@ -47,6 +62,10 @@ export interface OnSiteTrackingIdentity {
   userId: string;
   agent: AgentCredentials;
   sessionId: string;
+  /** Applies a server-normalized session so the timer pauses immediately. */
+  applySession?: (session: TimeSessionSummary, serverTime: string) => void;
+  /** Freezes the local timer before the pause report round-trip completes. */
+  applyLocationPause?: (sessionId: string, pausedAt: string) => void;
 }
 
 export interface OnSiteTrackingSnapshot {
@@ -100,8 +119,16 @@ interface TrackerRuntime {
   backgroundAllowed: boolean;
   foreground: Location.LocationSubscription | null;
   backgroundPrompted: boolean;
+  notificationPrompted: boolean;
   validated: boolean;
   generation: number;
+  /** Why the server paused the timer, including manual breaks. */
+  pauseReason: string | null;
+  /** True after a process/service interruption; only an explicit resume clears it. */
+  recoveryRequired: boolean;
+  monitorTimer: ReturnType<typeof setInterval> | null;
+  applySession?: OnSiteTrackingIdentity['applySession'];
+  applyLocationPause?: OnSiteTrackingIdentity['applyLocationPause'];
 }
 
 let runtime: TrackerRuntime | null = null;
@@ -137,17 +164,32 @@ function makeRuntime(identity: OnSiteTrackingIdentity): TrackerRuntime {
     backgroundAllowed: false,
     foreground: null,
     backgroundPrompted: false,
+    notificationPrompted: false,
     validated: false,
     generation: 0,
+    pauseReason: null,
+    recoveryRequired: false,
+    monitorTimer: null,
+    applySession: identity.applySession,
+    applyLocationPause: identity.applyLocationPause,
   };
 }
 
 async function ensureRuntime(identity: OnSiteTrackingIdentity): Promise<TrackerRuntime> {
-  if (runtime && sameRuntimeIdentity(runtime, identity)) return runtime;
+  if (runtime && sameRuntimeIdentity(runtime, identity)) {
+    runtime.applySession = identity.applySession ?? runtime.applySession;
+    runtime.applyLocationPause =
+      identity.applyLocationPause ?? runtime.applyLocationPause;
+    return runtime;
+  }
 
   if (runtime) {
+    stopMonitor(runtime);
     await stopOsTracking(runtime);
     await clearLocationQueue(runtime.organizationId, runtime.userId).catch(() => undefined);
+    await clearPendingLocationReport(runtime.organizationId, runtime.userId).catch(
+      () => undefined,
+    );
   }
   await clearTrackingContext().catch(() => undefined);
 
@@ -158,6 +200,83 @@ async function ensureRuntime(identity: OnSiteTrackingIdentity): Promise<TrackerR
     identity.sessionId,
   ).catch(() => undefined);
   return runtime;
+}
+
+function identityFor(current: TrackerRuntime): OnSiteTrackingIdentity {
+  return {
+    organizationId: current.organizationId,
+    userId: current.userId,
+    agent: current.agent,
+    sessionId: current.sessionId,
+    applySession: current.applySession,
+    applyLocationPause: current.applyLocationPause,
+  };
+}
+
+function stopMonitor(current: TrackerRuntime): void {
+  if (current.monitorTimer) clearInterval(current.monitorTimer);
+  current.monitorTimer = null;
+}
+
+/**
+ * Runs while the app process is alive. It distinguishes a manual break (do
+ * nothing) from a location pause (wait for recovery and keep retrying an
+ * undelivered pause report) and checks permissions/services from the OS rather
+ * than from a cached flag.
+ */
+function ensureMonitor(current: TrackerRuntime): void {
+  if (current.monitorTimer) return;
+  current.monitorTimer = setInterval(() => {
+    void enqueueOperation(() => monitorTracking(current)).catch(() => undefined);
+  }, LOCATION_MONITOR_INTERVAL_MS);
+}
+
+/** Starts the interval and checks once immediately (runs after the caller's lock). */
+function kickMonitor(current: TrackerRuntime): void {
+  ensureMonitor(current);
+  void enqueueOperation(() => monitorTracking(current)).catch(() => undefined);
+}
+
+async function locationServicesEnabled(): Promise<boolean> {
+  if (Platform.OS === 'web') return true;
+  try {
+    return await Location.hasServicesEnabledAsync();
+  } catch {
+    return false;
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Location request timed out')), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** The foreground service still runs without this; only its notification hides. */
+async function ensureNotificationPermission(current: TrackerRuntime): Promise<void> {
+  if (Platform.OS !== 'android' || current.notificationPrompted) return;
+  if (Number(Platform.Version) < 33) return;
+  current.notificationPrompted = true;
+  try {
+    const granted = await PermissionsAndroid.check(
+      PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+    );
+    if (!granted) {
+      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    }
+  } catch {
+    // Tracking does not depend on the notification permission.
+  }
 }
 
 function trackingOptions(): Location.LocationTaskOptions {
@@ -289,7 +408,14 @@ async function resolvePermission(
 
 class TrackingPermissionError extends Error {}
 
-class TrackingUnavailableError extends Error {}
+class TrackingUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly reason: 'LOCATION_DISABLED' | 'LOCATION_UNAVAILABLE' = 'LOCATION_UNAVAILABLE',
+  ) {
+    super(message);
+  }
+}
 
 interface StartResult {
   mode: TrackerMode;
@@ -303,13 +429,19 @@ async function startTracking(current: TrackerRuntime): Promise<StartResult> {
     throw new TrackingPermissionError('Location permission is not available.');
   }
 
+  if (!(await locationServicesEnabled())) {
+    throw new TrackingUnavailableError('Location services are turned off.', 'LOCATION_DISABLED');
+  }
+
   if (permission.backgroundGranted && Platform.OS !== 'web') {
     try {
       const taskManagerAvailable = await TaskManager.isAvailableAsync();
       if (taskManagerAvailable) {
+        await ensureNotificationPermission(current);
         await Location.startLocationUpdatesAsync(LOCATION_TRACKING_TASK, trackingOptions());
         await writeTrackingContext(contextFor(current));
         current.backgroundAllowed = true;
+        ensureMonitor(current);
         return {
           mode: 'background',
           permission: 'ALWAYS',
@@ -337,22 +469,17 @@ async function startTracking(current: TrackerRuntime): Promise<StartResult> {
         void enqueueOperation(() => recordForegroundPosition(current, position));
       },
       () => {
-        void enqueueOperation(async () => {
-          if (runtime !== current) return;
-          await stopOsTracking(current);
-          current.mode = null;
-          await clearTrackingContext().catch(() => undefined);
-          publish({
-            phase: 'unavailable',
-            message: 'This device stopped providing location updates.',
-          });
-        });
+        void enqueueOperation(() => pauseForLocation(current, 'LOCATION_UNAVAILABLE'));
       },
     );
   } catch {
     throw new TrackingUnavailableError('Location updates could not be started.');
   }
 
+  // Persist the session even without a foreground service: if the process is
+  // killed, the next launch can tell that collection stopped unverified.
+  await writeTrackingContext(contextFor(current));
+  ensureMonitor(current);
   return {
     mode: 'foreground',
     permission: permission.permission,
@@ -415,14 +542,30 @@ function terminalTrackingError(error: unknown): boolean {
   );
 }
 
-async function tearDown(current: TrackerRuntime, clearQueue: boolean): Promise<void> {
+async function tearDown(
+  current: TrackerRuntime,
+  clearQueue: boolean,
+  options: { keepMonitor?: boolean } = {},
+): Promise<void> {
   await stopOsTracking(current);
   current.mode = null;
   current.validated = false;
+  if (!options.keepMonitor) stopMonitor(current);
   if (clearQueue) {
     await clearLocationQueue(current.organizationId, current.userId).catch(() => undefined);
+    await clearPendingLocationReport(current.organizationId, current.userId).catch(
+      () => undefined,
+    );
   }
   await clearTrackingContext().catch(() => undefined);
+}
+
+function reportErrorIsRetryable(error: unknown): boolean {
+  if (error instanceof NetworkError) return true;
+  return (
+    error instanceof ApiError &&
+    (error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500)
+  );
 }
 
 async function reportTracking(
@@ -431,7 +574,8 @@ async function reportTracking(
   reason: string | undefined,
   permission: AttendanceLocationPermissionState,
   backgroundAllowed: boolean,
-): Promise<AttendanceLocationStateSummary | null> {
+  options: { persistOnFailure?: boolean } = {},
+): Promise<ReportAttendanceLocationStatusResponse['data'] | null> {
   try {
     const response = await reportAttendanceLocationStatus(
       identity.organizationId,
@@ -444,12 +588,261 @@ async function reportTracking(
         backgroundAllowed,
       },
     );
-    return response.data.locationState;
-  } catch {
+    // Applying the normalized session here pauses the local timer immediately
+    // instead of waiting for the next refresh.
+    identity.applySession?.(response.data.session, response.serverTime);
+    return response.data;
+  } catch (error) {
+    if (options.persistOnFailure && reportErrorIsRetryable(error)) {
+      const pending: PendingLocationReport = {
+        version: 1,
+        sessionId: identity.sessionId,
+        state,
+        reason: reason ?? null,
+        permission,
+        backgroundAllowed,
+        queuedAt: new Date().toISOString(),
+      };
+      await writePendingLocationReport(
+        identity.organizationId,
+        identity.userId,
+        pending,
+      ).catch(() => undefined);
+    }
     // Status reports are advisory; sample uploads and the next reconciliation
     // remain the source of truth. A session/agent failure is handled by the
     // next request, which will stop tracking.
     return null;
+  }
+}
+
+async function syncPendingReport(identity: OnSiteTrackingIdentity): Promise<boolean> {
+  const pending = await readPendingLocationReport(identity.organizationId, identity.userId);
+  if (!pending) return true;
+  if (pending.sessionId !== identity.sessionId) {
+    await clearPendingLocationReport(identity.organizationId, identity.userId).catch(
+      () => undefined,
+    );
+    return true;
+  }
+
+  const data = await reportTracking(
+    identity,
+    pending.state,
+    pending.reason ?? undefined,
+    pending.permission,
+    pending.backgroundAllowed,
+    { persistOnFailure: true },
+  );
+  if (!data) return false;
+  await clearPendingLocationReport(identity.organizationId, identity.userId).catch(
+    () => undefined,
+  );
+  return true;
+}
+
+const PAUSE_PHASE: Record<LocationPauseReason, OnSiteTrackingPhase> = {
+  LOCATION_DISABLED: 'location-disabled',
+  LOCATION_UNAVAILABLE: 'location-unavailable',
+  PERMISSION_DENIED: 'permission-denied',
+};
+
+/**
+ * Stops collection and records a pause the server can enforce. The reason is
+ * persisted by the server on the tracking row and the timer moves to the
+ * existing ON_BREAK state; this is not a second timer system.
+ */
+async function pauseForLocation(
+  current: TrackerRuntime,
+  reason: LocationPauseReason,
+): Promise<void> {
+  if (runtime !== current) return;
+
+  const permission = reason === 'PERMISSION_DENIED' ? 'DENIED' : current.permission;
+  // Freeze the actual elapsed-time calculation now. The server pause is
+  // backdated to the last verified sample once the report is delivered.
+  current.applyLocationPause?.(current.sessionId, new Date().toISOString());
+  current.pauseReason = reason;
+  current.recoveryRequired = false;
+  current.permission = permission;
+  current.backgroundAllowed = false;
+
+  await tearDown(current, false, { keepMonitor: true });
+  await flushInternal(current).catch(() => undefined);
+  if (runtime !== current) return;
+  ensureMonitor(current);
+
+  const data = await reportTracking(
+    identityFor(current),
+    'PAUSED',
+    reason,
+    permission,
+    false,
+    { persistOnFailure: true },
+  );
+  if (runtime !== current) return;
+
+  publish({
+    phase: PAUSE_PHASE[reason],
+    permission,
+    backgroundAllowed: false,
+    reason,
+    serverState: data?.locationState ?? snapshot.serverState,
+    message: null,
+  });
+}
+
+/**
+ * Periodically verifies permission and services from the OS. Cached report
+ * values are never treated as proof that tracking still works.
+ */
+async function monitorTracking(current: TrackerRuntime): Promise<void> {
+  if (runtime !== current) return;
+
+  const pauseDelivered = await syncPendingReport(identityFor(current)).catch(() => false);
+  if (runtime !== current) return;
+
+  if (current.pauseReason) {
+    if (!isLocationPauseReason(current.pauseReason)) return;
+    // An interrupted tracking session stays in recovery until the employee
+    // explicitly checks and resumes; the monitor must not downgrade it.
+    if (current.recoveryRequired) return;
+
+    const permissionState = await readPermissionState();
+    if (runtime !== current) return;
+
+    if (permissionState.foreground !== 'granted') {
+      if (snapshot.phase !== 'permission-denied') {
+        publish({
+          phase: 'permission-denied',
+          permission: 'DENIED',
+          backgroundAllowed: false,
+          reason: 'PERMISSION_DENIED',
+          message: null,
+        });
+      }
+      return;
+    }
+
+    if (!(await locationServicesEnabled())) {
+      if (snapshot.phase !== 'location-disabled') {
+        publish({
+          phase: 'location-disabled',
+          permission: current.permission,
+          backgroundAllowed: false,
+          reason: 'LOCATION_DISABLED',
+          message: null,
+        });
+      }
+      return;
+    }
+
+    // Do not announce readiness while the pause itself is still queued: the
+    // timer would look resumable before the server recorded the pause.
+    if (!pauseDelivered) return;
+
+    if (snapshot.phase !== 'location-restored') {
+      publish({
+        phase: 'location-restored',
+        permission:
+          permissionState.background === 'granted' ? 'ALWAYS' : 'FOREGROUND_ONLY',
+        backgroundAllowed: false,
+        reason: current.pauseReason,
+        message: null,
+      });
+    }
+    return;
+  }
+
+  if (current.mode === null) return;
+
+  const permissionState = await readPermissionState();
+  if (runtime !== current) return;
+
+  if (permissionState.foreground !== 'granted') {
+    await pauseForLocation(current, 'PERMISSION_DENIED');
+    return;
+  }
+
+  if (!(await locationServicesEnabled())) {
+    await pauseForLocation(current, 'LOCATION_DISABLED');
+    return;
+  }
+
+  if (current.mode === 'background' && Platform.OS !== 'web') {
+    // The OS can drop the foreground-service registration without telling the
+    // app. Verify it instead of trusting the in-memory mode.
+    let running = false;
+    try {
+      running = await Location.hasStartedLocationUpdatesAsync(LOCATION_TRACKING_TASK);
+    } catch {
+      running = false;
+    }
+    if (!running) {
+      current.mode = null;
+      current.backgroundAllowed = false;
+      try {
+        const started = await startTracking(current);
+        current.mode = started.mode;
+        current.permission = started.permission;
+        current.backgroundAllowed = started.backgroundAllowed;
+        const data = await reportTracking(
+          identityFor(current),
+          'ACTIVE',
+          started.backgroundAllowed ? undefined : 'BACKGROUND_UNAVAILABLE',
+          started.permission,
+          started.backgroundAllowed,
+          { persistOnFailure: true },
+        );
+        publish({
+          phase:
+            started.mode === 'background' ? 'active-background' : 'active-foreground',
+          permission: started.permission,
+          backgroundAllowed: started.backgroundAllowed,
+          reason: started.backgroundAllowed ? null : 'BACKGROUND_UNAVAILABLE',
+          serverState: data?.locationState ?? snapshot.serverState,
+          message: null,
+        });
+      } catch (error) {
+        const reason =
+          error instanceof TrackingUnavailableError ? error.reason : 'LOCATION_UNAVAILABLE';
+        await pauseForLocation(current, reason);
+      }
+      return;
+    }
+  }
+
+  if (current.mode === 'background' && permissionState.background !== 'granted') {
+    // Continuous background tracking is no longer permitted. Fall back to the
+    // foreground watcher instead of pretending the session is fully tracked.
+    current.backgroundPrompted = true;
+    await stopOsTracking(current);
+    current.mode = null;
+    try {
+      const started = await startTracking(current);
+      current.mode = started.mode;
+      current.permission = started.permission;
+      current.backgroundAllowed = started.backgroundAllowed;
+      await reportTracking(
+        identityFor(current),
+        'ACTIVE',
+        'BACKGROUND_UNAVAILABLE',
+        started.permission,
+        started.backgroundAllowed,
+        { persistOnFailure: true },
+      );
+      publish({
+        phase: 'active-foreground',
+        permission: started.permission,
+        backgroundAllowed: false,
+        reason: 'BACKGROUND_UNAVAILABLE',
+        message: null,
+      });
+    } catch (error) {
+      const reason =
+        error instanceof TrackingUnavailableError ? error.reason : 'LOCATION_UNAVAILABLE';
+      await pauseForLocation(current, reason);
+    }
   }
 }
 
@@ -514,10 +907,109 @@ async function flushInternal(current: TrackerRuntime): Promise<FlushOutcome> {
   }
 }
 
+async function hasRunningBackgroundTask(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  try {
+    return await Location.hasStartedLocationUpdatesAsync(LOCATION_TRACKING_TASK);
+  } catch {
+    return false;
+  }
+}
+
+interface PersistedTrackingState {
+  interrupted: boolean;
+  survivingBackground: boolean;
+}
+
+/**
+ * Distinguishes a live tracker from one that stopped while the JavaScript
+ * process was gone. The persisted context is written for both tracker modes,
+ * so its presence plus a missing foreground service is the restart evidence;
+ * an in-memory runtime is never treated as an interruption.
+ */
+async function readPersistedTrackingState(
+  identity: OnSiteTrackingIdentity,
+): Promise<PersistedTrackingState> {
+  const context = await readTrackingContext().catch(() => null);
+  const state = classifyTrackingRestart({
+    hasInMemoryRuntime: Boolean(runtime && sameRuntimeIdentity(runtime, identity)),
+    context,
+    sessionId: identity.sessionId,
+    agentId: identity.agent.id,
+    backgroundRunning: context ? await hasRunningBackgroundTask() : false,
+  });
+
+  return {
+    interrupted: state === 'interrupted',
+    survivingBackground: state === 'surviving-background',
+  };
+}
+
+/**
+ * Uploads the samples that were genuinely captured, then records one pause so
+ * the unverified interval is excluded. The session stays paused until the
+ * employee verifies location and explicitly resumes.
+ */
+async function recoverInterruptedTracking(
+  current: TrackerRuntime,
+  identity: OnSiteTrackingIdentity,
+): Promise<void> {
+  const permissionState = await readPermissionState().catch(() => null);
+  const permission: AttendanceLocationPermissionState = !permissionState
+    ? 'UNKNOWN'
+    : permissionState.foreground !== 'granted'
+      ? 'DENIED'
+      : permissionState.background === 'granted'
+        ? 'ALWAYS'
+        : 'FOREGROUND_ONLY';
+
+  // Verified fixes are uploaded before the pause so the backend can anchor the
+  // break to the last accepted sample instead of counting the interruption.
+  await flushInternal(current).catch(() => undefined);
+  if (runtime !== current) return;
+
+  current.applyLocationPause?.(current.sessionId, new Date().toISOString());
+  current.pauseReason = 'LOCATION_UNAVAILABLE';
+  current.recoveryRequired = true;
+  current.permission = permission;
+  current.backgroundAllowed = false;
+  await stopOsTracking(current);
+  stopMonitor(current);
+  await clearTrackingContext().catch(() => undefined);
+
+  const data = await reportTracking(
+    identityFor(current),
+    'PAUSED',
+    'LOCATION_UNAVAILABLE',
+    permission,
+    false,
+    { persistOnFailure: true },
+  );
+  if (runtime !== current) return;
+
+  publish({
+    phase: 'interrupted',
+    permission,
+    backgroundAllowed: false,
+    reason: 'LOCATION_UNAVAILABLE',
+    serverState: data?.locationState ?? null,
+    message: null,
+  });
+}
+
 export function reconcileOnSiteTracking(identity: OnSiteTrackingIdentity): Promise<void> {
   return enqueueOperation(async () => {
-    const current = await ensureRuntime(identity);
+    const persisted = await readPersistedTrackingState(identity);
+    const current = persisted.survivingBackground
+      ? await adoptBackgroundRuntime(identity)
+      : await ensureRuntime(identity);
     const generation = (current.generation += 1);
+    await syncPendingReport(identity).catch(() => undefined);
+
+    if (persisted.interrupted) {
+      await recoverInterruptedTracking(current, identity);
+      return;
+    }
 
     if (current.mode === null) {
       publish({
@@ -554,7 +1046,7 @@ export function reconcileOnSiteTracking(identity: OnSiteTrackingIdentity): Promi
         return;
       }
 
-      if (current.mode === null) {
+      if (current.mode === null && !current.recoveryRequired) {
         publish({
           phase: 'error',
           message:
@@ -567,11 +1059,16 @@ export function reconcileOnSiteTracking(identity: OnSiteTrackingIdentity): Promi
     if (generation !== current.generation || runtime !== current) return;
 
     if (!status.shouldTrack) {
-      const paused = status.reason === 'BREAK';
-      await tearDown(current, !paused);
+      const locationPause = Boolean(status.reason && isLocationPauseReason(status.reason));
+      const paused = status.reason === 'BREAK' || locationPause;
+      await tearDown(current, !paused, { keepMonitor: locationPause });
+      current.pauseReason = paused ? status.reason : null;
       current.permission = status.locationState.permission;
+      if (locationPause) kickMonitor(current);
       publish({
-        phase: phaseFromLocationState(status.locationState.state, false),
+        phase: current.recoveryRequired
+          ? 'interrupted'
+          : phaseFromLocationState(status.locationState.state, false, status.reason),
         permission: status.locationState.permission,
         backgroundAllowed: false,
         reason: status.reason,
@@ -581,24 +1078,51 @@ export function reconcileOnSiteTracking(identity: OnSiteTrackingIdentity): Promi
       return;
     }
 
+    if (current.recoveryRequired) {
+      // The server still believes the session is active, but the interruption
+      // was not cleared. Never restart collection implicitly; the employee
+      // must verify location and press Resume.
+      await tearDown(current, false);
+      current.mode = null;
+      publish({
+        phase: 'interrupted',
+        permission: status.locationState.permission,
+        backgroundAllowed: false,
+        reason: 'LOCATION_UNAVAILABLE',
+        serverState: status.locationState,
+        message: null,
+      });
+      return;
+    }
+
+    if (!(await locationServicesEnabled())) {
+      if (generation !== current.generation || runtime !== current) return;
+      await pauseForLocation(current, 'LOCATION_DISABLED');
+      return;
+    }
+
     if (current.mode !== null) {
       const permissionState = await readPermissionState();
 
       if (permissionState.foreground !== 'granted') {
-        await tearDown(current, false);
-        const serverState = await reportTracking(
+        current.pauseReason = 'PERMISSION_DENIED';
+        current.permission = 'DENIED';
+        await tearDown(current, false, { keepMonitor: true });
+        ensureMonitor(current);
+        const data = await reportTracking(
           identity,
-          'STOPPED',
+          'PAUSED',
           'PERMISSION_DENIED',
           'DENIED',
           false,
+          { persistOnFailure: true },
         );
         publish({
           phase: 'permission-denied',
           permission: 'DENIED',
           backgroundAllowed: false,
           reason: 'PERMISSION_DENIED',
-          serverState,
+          serverState: data?.locationState ?? status.locationState,
           message: null,
         });
         return;
@@ -643,13 +1167,15 @@ export function reconcileOnSiteTracking(identity: OnSiteTrackingIdentity): Promi
       current.permission = started.permission;
       current.backgroundAllowed = started.backgroundAllowed;
       current.validated = true;
+      current.pauseReason = null;
 
-      const serverState = await reportTracking(
+      const data = await reportTracking(
         identity,
         'ACTIVE',
         started.backgroundAllowed ? undefined : 'BACKGROUND_UNAVAILABLE',
         started.permission,
         started.backgroundAllowed,
+        { persistOnFailure: true },
       );
 
       publish({
@@ -658,7 +1184,7 @@ export function reconcileOnSiteTracking(identity: OnSiteTrackingIdentity): Promi
         permission: started.permission,
         backgroundAllowed: started.backgroundAllowed,
         reason: started.backgroundAllowed ? null : 'BACKGROUND_UNAVAILABLE',
-        serverState: serverState ?? status.locationState,
+        serverState: data?.locationState ?? status.locationState,
         message: null,
       });
 
@@ -669,55 +1195,93 @@ export function reconcileOnSiteTracking(identity: OnSiteTrackingIdentity): Promi
       current.mode = null;
       current.validated = false;
       if (error instanceof TrackingPermissionError) {
-        const serverState = await reportTracking(
-          identity,
-          'STOPPED',
-          'PERMISSION_DENIED',
-          'DENIED',
-          false,
-        );
-        publish({
-          phase: 'permission-denied',
-          permission: 'DENIED',
-          backgroundAllowed: false,
-          reason: 'PERMISSION_DENIED',
-          serverState,
-          message: null,
-        });
+        await pauseForLocation(current, 'PERMISSION_DENIED');
         return;
       }
 
       if (error instanceof TrackingUnavailableError) {
-        const serverState = await reportTracking(
-          identity,
-          'STOPPED',
-          'OS_RESTRICTED',
-          current.permission,
-          false,
-        );
-        publish({
-          phase: 'unavailable',
-          permission: current.permission,
-          backgroundAllowed: false,
-          reason: 'OS_RESTRICTED',
-          serverState,
-          message: null,
-        });
+        await pauseForLocation(current, error.reason);
         return;
       }
 
-      publish({
-        phase: 'error',
-        message: 'Location tracking could not be started. Pull to refresh and try again.',
-      });
+      // Tracking could not start for an unknown reason. Never leave the timer
+      // running without location; the employee resumes explicitly afterwards.
+      await pauseForLocation(current, 'LOCATION_UNAVAILABLE');
     }
+  });
+}
+
+/**
+ * Used when the client already sees a paused session, including after an app
+ * restart. The server stays authoritative for why the timer paused; this never
+ * resumes it.
+ */
+async function syncPausedStatus(identity: OnSiteTrackingIdentity): Promise<void> {
+  let response: Awaited<ReturnType<typeof fetchAttendanceLocationStatus>>;
+  try {
+    response = await fetchAttendanceLocationStatus(identity.organizationId, identity.agent);
+  } catch {
+    return;
+  }
+
+  const status = response.data;
+  const current = await ensureRuntime(identity);
+  if (status.shouldTrack) {
+    // The pause ended elsewhere (for example on the web); the next reconcile
+    // starts tracking instead of resuming from a stale local view.
+    return;
+  }
+
+  if (status.session) identity.applySession?.(status.session, response.serverTime);
+
+  const locationPause = Boolean(status.reason && isLocationPauseReason(status.reason));
+  const paused = status.reason === 'BREAK' || locationPause;
+
+  current.pauseReason = paused ? status.reason : null;
+  current.permission = status.locationState.permission;
+  current.backgroundAllowed = false;
+  await tearDown(current, !paused, { keepMonitor: locationPause });
+  if (locationPause) kickMonitor(current);
+
+  publish({
+    phase: phaseFromLocationState(status.locationState.state, false, status.reason),
+    permission: status.locationState.permission,
+    backgroundAllowed: false,
+    reason: status.reason,
+    serverState: status.locationState,
+    message: null,
   });
 }
 
 export function pauseOnSiteTracking(identity: OnSiteTrackingIdentity): Promise<void> {
   return enqueueOperation(async () => {
     const current = runtime;
-    if (!current || !sameRuntimeIdentity(current, identity)) return;
+    if (!current || !sameRuntimeIdentity(current, identity)) {
+      await syncPausedStatus(identity);
+      return;
+    }
+
+    if (current.recoveryRequired) {
+      // A service/process interruption is only cleared by an explicit resume.
+      current.applySession = identity.applySession ?? current.applySession;
+      current.applyLocationPause =
+        identity.applyLocationPause ?? current.applyLocationPause;
+      return;
+    }
+
+    if (current.pauseReason && isLocationPauseReason(current.pauseReason)) {
+      // Already paused for a location reason. Keep monitoring so the employee
+      // can be told when location returns, and never relabel the pause as a
+      // manual break.
+      current.applySession = identity.applySession ?? current.applySession;
+      current.applyLocationPause =
+        identity.applyLocationPause ?? current.applyLocationPause;
+      await tearDown(current, false, { keepMonitor: true });
+      ensureMonitor(current);
+      return;
+    }
+
+    if (current.pauseReason === 'BREAK' && current.mode === null) return;
 
     const permission =
       current.permission === 'UNKNOWN'
@@ -732,12 +1296,14 @@ export function pauseOnSiteTracking(identity: OnSiteTrackingIdentity): Promise<v
 
     if (runtime !== current) return;
 
-    const serverState = await reportTracking(
+    current.pauseReason = 'BREAK';
+    const data = await reportTracking(
       identity,
       'PAUSED',
       'BREAK',
       permission,
       wasBackground,
+      { persistOnFailure: true },
     );
 
     publish({
@@ -745,9 +1311,181 @@ export function pauseOnSiteTracking(identity: OnSiteTrackingIdentity): Promise<v
       permission,
       backgroundAllowed: false,
       reason: 'BREAK',
-      serverState,
+      serverState: data?.locationState ?? null,
       message: null,
     });
+  });
+}
+
+export type LocationResumeResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'PERMISSION_DENIED' | 'LOCATION_DISABLED' | 'LOCATION_UNAVAILABLE' | 'NETWORK';
+      message: string;
+    };
+
+/**
+ * Preflight for the employee's explicit resume. It verifies the OS state and
+ * sends one fresh fix; the server only lifts the pause after receiving that
+ * fix, so a stale local belief can never resume the timer.
+ */
+export function resumeOnSiteTracking(
+  identity: OnSiteTrackingIdentity,
+): Promise<LocationResumeResult> {
+  return enqueueOperation(async () => {
+    const current = await ensureRuntime(identity);
+
+    // Deliver a queued pause before the fresh fix advances the last sample.
+    // Otherwise the server would anchor the pause to this new fix and count
+    // the unverified gap as work.
+    const pauseDelivered = await syncPendingReport(identity).catch(() => false);
+    if (!pauseDelivered) {
+      return {
+        ok: false,
+        reason: 'NETWORK',
+        message:
+          'The pause has not reached WorkZen yet. The timer stays paused; try again when you have a connection.',
+      };
+    }
+    if (runtime !== current) {
+      return {
+        ok: false,
+        reason: 'NETWORK',
+        message: 'This session changed. Try again.',
+      };
+    }
+
+    const permissionState = await readPermissionState();
+    if (permissionState.foreground !== 'granted') {
+      await pauseForLocation(current, 'PERMISSION_DENIED');
+      return {
+        ok: false,
+        reason: 'PERMISSION_DENIED',
+        message:
+          'Location permission is not available. Allow location for WorkZen, then try again.',
+      };
+    }
+
+    if (!(await locationServicesEnabled())) {
+      await pauseForLocation(current, 'LOCATION_DISABLED');
+      return {
+        ok: false,
+        reason: 'LOCATION_DISABLED',
+        message: 'Location services are turned off. Enable them, then try again.',
+      };
+    }
+
+    let position: Location.LocationObject;
+    try {
+      position = await withTimeout(
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        LOCATION_RESUME_FIX_TIMEOUT_MS,
+      );
+    } catch {
+      await pauseForLocation(current, 'LOCATION_UNAVAILABLE');
+      return {
+        ok: false,
+        reason: 'LOCATION_UNAVAILABLE',
+        message:
+          'A current location fix is not available yet. Move near a window or outdoors, then try again.',
+      };
+    }
+
+    const sample = createQueuedLocationSample({
+      clientSampleId: Crypto.randomUUID(),
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracyMeters: position.coords.accuracy,
+      capturedAtMs: position.timestamp || Date.now(),
+    });
+    if (!sample) {
+      return {
+        ok: false,
+        reason: 'LOCATION_UNAVAILABLE',
+        message: 'The location reading was not accurate enough. Move to a clearer spot and try again.',
+      };
+    }
+
+    try {
+      const response = await ingestAttendanceLocationSamples(
+        identity.organizationId,
+        identity.agent,
+        { sessionId: identity.sessionId, samples: [sample] },
+      );
+      const result = response.data.results[0];
+      if (!result || result.status === 'REJECTED') {
+        return {
+          ok: false,
+          reason: 'LOCATION_UNAVAILABLE',
+          message: 'WorkZen could not record this location. Try again in a moment.',
+        };
+      }
+    } catch (error) {
+      if (terminalTrackingError(error)) {
+        const ended = isSessionExpiredError(error);
+        await tearDown(current, true);
+        if (runtime === current) runtime = null;
+        publish({
+          phase: ended ? 'stopped' : 'error',
+          permission: ended ? 'UNKNOWN' : current.permission,
+          backgroundAllowed: false,
+          reason: null,
+          message: ended ? null : 'This session can no longer be resumed.',
+        });
+        return {
+          ok: false,
+          reason: 'NETWORK',
+          message: ended
+            ? 'This session has already ended.'
+            : 'This session can no longer be resumed.',
+        };
+      }
+      return {
+        ok: false,
+        reason: 'NETWORK',
+        message:
+          'The location update did not reach WorkZen. The timer stays paused; try again when you have a connection.',
+      };
+    }
+
+    current.recoveryRequired = false;
+    publish({
+      phase: 'location-restored',
+      permission:
+        permissionState.background === 'granted' ? 'ALWAYS' : 'FOREGROUND_ONLY',
+      backgroundAllowed: false,
+      reason: current.pauseReason,
+      message: null,
+    });
+    return { ok: true };
+  });
+}
+
+/**
+ * "Enable Location" action. It prompts the OS when the permission can still be
+ * requested, and otherwise deep-links to the screen that can actually change
+ * the setting. It never resumes the timer.
+ */
+export function requestOnSiteLocationAccess(
+  identity: OnSiteTrackingIdentity,
+): Promise<void> {
+  return enqueueOperation(async () => {
+    await ensureRuntime(identity);
+    const state = await readPermissionState();
+
+    if (state.foreground !== 'granted') {
+      if (state.foregroundCanAskAgain) {
+        await Location.requestForegroundPermissionsAsync().catch(() => undefined);
+        return;
+      }
+      await openAppPermissionSettings();
+      return;
+    }
+
+    if (!(await locationServicesEnabled())) {
+      await openLocationServicesSettings();
+    }
   });
 }
 
@@ -775,6 +1513,7 @@ export function stopOnSiteTracking(
     };
 
     await stopOsTracking(current);
+    stopMonitor(current);
     current.mode = null;
     current.validated = false;
 
@@ -783,6 +1522,9 @@ export function stopOnSiteTracking(
     }
 
     await clearLocationQueue(current.organizationId, current.userId).catch(() => undefined);
+    await clearPendingLocationReport(current.organizationId, current.userId).catch(
+      () => undefined,
+    );
     await clearTrackingContext().catch(() => undefined);
     runtime = null;
 
@@ -803,6 +1545,7 @@ export function flushOnSiteTrackingQueue(
   return enqueueOperation(async () => {
     const current = runtime;
     if (!current || !sameRuntimeIdentity(current, identity)) return;
+    await syncPendingReport(identity).catch(() => undefined);
     await flushInternal(current);
   });
 }
@@ -897,11 +1640,13 @@ export async function processBackgroundLocationUpdates(
       }
 
       if (!status.shouldTrack) {
-        const paused = status.reason === 'BREAK';
+        const locationPause = Boolean(status.reason && isLocationPauseReason(status.reason));
+        const paused = status.reason === 'BREAK' || locationPause;
         await tearDown(current, !paused);
+        current.pauseReason = paused ? status.reason : null;
         if (!paused && runtime === current) runtime = null;
         publish({
-          phase: phaseFromLocationState(status.locationState.state, false),
+          phase: phaseFromLocationState(status.locationState.state, false, status.reason),
           permission: status.locationState.permission,
           backgroundAllowed: false,
           reason: status.reason,
@@ -912,6 +1657,7 @@ export async function processBackgroundLocationUpdates(
       }
 
       current.validated = true;
+      current.pauseReason = null;
       await reportTracking(identity, 'ACTIVE', undefined, 'ALWAYS', true);
     }
 
@@ -934,7 +1680,7 @@ export async function processBackgroundLocationUpdates(
 
     await flushInternal(current);
 
-    if (runtime === current) {
+    if (runtime === current && !current.pauseReason) {
       publish({
         phase: 'active-background',
         permission: 'ALWAYS',

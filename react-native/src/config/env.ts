@@ -14,7 +14,9 @@ function normalizeBaseUrl(value: string): string {
       'EXPO_PUBLIC_API_BASE_URL must be an absolute http(s) URL, for example http://192.168.1.20:4000/api/v1',
     );
   }
-  return trimmed;
+  // Every API route is mounted under /api/v1. A bare origin would resolve
+  // /auth/login outside the router and fail with ROUTE_NOT_FOUND.
+  return /\/api\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/api/v1`;
 }
 
 function resolveBaseUrl(): string {

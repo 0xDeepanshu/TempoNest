@@ -18,6 +18,32 @@ export const LOCATION_MAX_ACCURACY_METERS = 500;
 export const LOCATION_FUTURE_SKEW_MS = 60_000;
 export const LOCATION_MAX_FIX_AGE_MS = 10 * 60_000;
 
+/** Tracks permission, location services, and a paused session's recovery. */
+export const LOCATION_MONITOR_INTERVAL_MS = 10_000;
+
+/** How long a resume preflight waits for a fresh fix before giving up. */
+export const LOCATION_RESUME_FIX_TIMEOUT_MS = 20_000;
+
+/**
+ * Reasons the server stores on the tracking row and uses to pause the timer.
+ * They must match the backend's `LOCATION_PAUSE_REASONS`.
+ */
+export const LOCATION_PAUSE_REASONS = [
+  'LOCATION_DISABLED',
+  'PERMISSION_DENIED',
+  'LOCATION_UNAVAILABLE',
+] as const;
+export type LocationPauseReason = (typeof LOCATION_PAUSE_REASONS)[number];
+
+export function isLocationPauseReason(
+  reason: string | null | undefined,
+): reason is LocationPauseReason {
+  return (
+    typeof reason === 'string' &&
+    (LOCATION_PAUSE_REASONS as readonly string[]).includes(reason)
+  );
+}
+
 export interface QueuedLocationSample {
   clientSampleId: string;
   latitude: number;
@@ -118,6 +144,36 @@ export function shouldTrackOnSite(options: {
   );
 }
 
+export type TrackingRestartState =
+  | 'live'
+  | 'surviving-background'
+  | 'interrupted'
+  | 'none';
+
+/**
+ * Classifies a relaunch against the persisted tracking context. A surviving
+ * foreground service is adopted; a context without a running service means the
+ * tracker stopped while the process was gone and the interval is unverified.
+ */
+export function classifyTrackingRestart(options: {
+  hasInMemoryRuntime: boolean;
+  context: { sessionId: string; agentId: string } | null;
+  sessionId: string;
+  agentId: string;
+  backgroundRunning: boolean;
+}): TrackingRestartState {
+  if (options.hasInMemoryRuntime) return 'live';
+  const { context } = options;
+  if (
+    !context ||
+    context.sessionId !== options.sessionId ||
+    context.agentId !== options.agentId
+  ) {
+    return 'none';
+  }
+  return options.backgroundRunning ? 'surviving-background' : 'interrupted';
+}
+
 export type OnSiteTrackingPhase =
   | 'idle'
   | 'starting'
@@ -125,6 +181,10 @@ export type OnSiteTrackingPhase =
   | 'active-foreground'
   | 'paused'
   | 'permission-denied'
+  | 'location-disabled'
+  | 'location-unavailable'
+  | 'interrupted'
+  | 'location-restored'
   | 'stale'
   | 'stopped'
   | 'unavailable'
@@ -164,10 +224,34 @@ const PHASE_PRESENTATION: Record<OnSiteTrackingPhase, TrackingPhasePresentation>
     detail: 'Location tracking pauses while you are on a break.',
   },
   'permission-denied': {
-    label: 'Blocked',
+    label: 'Timer paused',
     tone: 'danger',
     detail:
-      'Location permission is not available. Allow it in device settings so this on-site session can be tracked.',
+      'Timer paused — location permission is not available. Allow location for WorkZen, then tap Resume work.',
+  },
+  'location-disabled': {
+    label: 'Timer paused',
+    tone: 'danger',
+    detail:
+      'Timer paused — location services are turned off. Enable location to resume.',
+  },
+  'location-unavailable': {
+    label: 'Timer paused',
+    tone: 'danger',
+    detail:
+      'Timer paused — WorkZen is not receiving location updates. Check device location settings, then tap Resume work.',
+  },
+  interrupted: {
+    label: 'Tracking interrupted',
+    tone: 'danger',
+    detail:
+      'Location tracking stopped while the app was closed. The timer is paused until you check location and resume.',
+  },
+  'location-restored': {
+    label: 'Ready to resume',
+    tone: 'warning',
+    detail:
+      'Location is available again. Tap Resume work to continue the timer.',
   },
   stale: {
     label: 'No recent fix',
@@ -202,11 +286,14 @@ export function trackingPhasePresentation(
 export function phaseFromLocationState(
   state: AttendanceLocationState,
   backgroundAllowed: boolean,
+  reason?: string | null,
 ): OnSiteTrackingPhase {
   switch (state) {
     case 'ACTIVE':
       return backgroundAllowed ? 'active-background' : 'active-foreground';
     case 'PAUSED':
+      if (reason === 'LOCATION_DISABLED') return 'location-disabled';
+      if (reason === 'LOCATION_UNAVAILABLE') return 'location-unavailable';
       return 'paused';
     case 'PERMISSION_UNAVAILABLE':
       return 'permission-denied';

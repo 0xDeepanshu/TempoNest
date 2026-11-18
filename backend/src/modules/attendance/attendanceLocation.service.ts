@@ -23,6 +23,7 @@ import {
   getCurrentSession,
 } from '../timeTracking/timeSession.service';
 import { toTimeSessionSummary } from '../timeTracking/timeSession.mapper';
+import { isLocationPauseReason } from './attendanceLocationTracking.model';
 import type { Role } from '../memberships/roles';
 import type { DesktopAgent as DesktopAgentModel } from '../desktopAgents/desktopAgent.model';
 import type { Organization as OrganizationModel } from '../organizations/organization.model';
@@ -132,6 +133,11 @@ export function deriveAttendanceLocationState(options: {
     return build('STOPPED', 'SESSION_ENDED');
   }
   if (session.status === 'ON_BREAK') {
+    if (tracking && isLocationPauseReason(tracking.reason)) {
+      return tracking.reason === 'PERMISSION_DENIED'
+        ? build('PERMISSION_UNAVAILABLE', 'PERMISSION_DENIED')
+        : build('PAUSED', tracking.reason);
+    }
     return build('PAUSED', 'BREAK');
   }
   if (!tracking) {
@@ -330,11 +336,14 @@ export async function getAttendanceLocationStatus(options: {
     });
   }
 
+  const locationPauseReason =
+    tracking && isLocationPauseReason(tracking.reason) ? tracking.reason : null;
+
   let reason: string | null = null;
   if (!agentMatches) reason = 'AGENT_MISMATCH';
   else if (!checkIn) reason = 'NO_CHECK_IN';
   else if (checkIn.workMode !== 'ON_SITE') reason = 'WORK_MODE_NOT_ON_SITE';
-  else if (session.status === 'ON_BREAK') reason = 'BREAK';
+  else if (session.status === 'ON_BREAK') reason = locationPauseReason ?? 'BREAK';
   else if (session.endedAt || session.status === 'STOPPED') reason = 'SESSION_ENDED';
 
   return {
@@ -356,6 +365,65 @@ export async function getAttendanceLocationStatus(options: {
       now,
     }),
   };
+}
+
+/**
+ * Pauses the running session through the existing Break state machine when the
+ * device can no longer prove continuous location. Work time already excludes
+ * break intervals, so an active session can never keep accruing after a
+ * location-loss report.
+ */
+/**
+ * The server only trusts location up to the last accepted sample, so the pause
+ * is backdated there. Everything between that fix and the report (app killed,
+ * offline, location switched off) is excluded from work time instead of being
+ * counted as verified activity. A manual break that already ended is a floor:
+ * two break intervals may never overlap.
+ */
+export function resolveLocationPauseStart(options: {
+  session: TimeSessionModel;
+  lastVerifiedAt: Date | null;
+  now: Date;
+}): Date {
+  const { session, lastVerifiedAt, now } = options;
+  const floor = (session.breaks ?? []).reduce(
+    (latest, brk) => Math.max(latest, brk.endedAt?.getTime() ?? 0),
+    session.startedAt.getTime(),
+  );
+  const candidate = lastVerifiedAt ? lastVerifiedAt.getTime() : now.getTime();
+  return new Date(Math.min(now.getTime(), Math.max(floor, candidate)));
+}
+
+async function pauseSessionForLocation(
+  transaction: Transaction,
+  session: TimeSessionModel,
+  now: Date,
+  lastVerifiedAt: Date | null,
+): Promise<void> {
+  if (session.status === 'ON_BREAK') return;
+
+  const openBreak = await Break.findOne({
+    where: { timeSessionId: session.id, endedAt: null },
+    transaction,
+    lock: Transaction.LOCK.UPDATE,
+  });
+
+  const pauseAt = resolveLocationPauseStart({ session, lastVerifiedAt, now });
+  const brk =
+    openBreak ??
+    (await Break.create(
+      {
+        organizationId: session.organizationId,
+        timeSessionId: session.id,
+        startedAt: pauseAt,
+        endedAt: null,
+        status: 'ACTIVE',
+      },
+      { transaction },
+    ));
+
+  session.breaks = [...(session.breaks ?? []), brk];
+  await session.update({ status: 'ON_BREAK', lastHeartbeatAt: now }, { transaction });
 }
 
 /**
@@ -395,15 +463,41 @@ export async function reportAttendanceLocationStatus(options: {
       }
       if (!ended && input.state !== 'STOPPED') assertSessionActive(session, now);
 
+      const existingTracking = await AttendanceLocationTracking.findOne({
+        where: { timeSessionId: session.id },
+        transaction,
+        lock: Transaction.LOCK.UPDATE,
+      });
+      const priorPauseReason =
+        existingTracking && isLocationPauseReason(existingTracking.reason)
+          ? existingTracking.reason
+          : null;
+
       let status: 'ACTIVE' | 'PAUSED' | 'STOPPED' = input.state;
       let reason = input.reason ?? null;
-      if (!ended && session.status === 'ON_BREAK') {
-        status = 'PAUSED';
-        reason = 'BREAK';
-      }
-      if (!ended && input.permission === 'DENIED' && input.state !== 'STOPPED') {
-        status = 'STOPPED';
-        reason = 'PERMISSION_DENIED';
+
+      if (!ended) {
+        const reportedPauseReason = isLocationPauseReason(input.reason)
+          ? input.reason
+          : input.permission === 'DENIED'
+            ? 'PERMISSION_DENIED'
+            : null;
+
+        if (session.status === 'ON_BREAK') {
+          // A device that recovers while the timer is paused must not resume
+          // it; only the employee's explicit resume action may do that.
+          status = 'PAUSED';
+          reason = reportedPauseReason ?? priorPauseReason ?? 'BREAK';
+        } else if (reportedPauseReason) {
+          await pauseSessionForLocation(
+            transaction,
+            session,
+            now,
+            existingTracking?.lastSampleAt ?? null,
+          );
+          status = reportedPauseReason === 'PERMISSION_DENIED' ? 'STOPPED' : 'PAUSED';
+          reason = reportedPauseReason;
+        }
       }
 
       const tracking = await upsertTracking({
@@ -463,6 +557,18 @@ export async function ingestAttendanceLocationSamples(options: {
       });
       assertOnSite(checkIn);
       assertSessionActive(session, now);
+
+      const trackingBefore = await AttendanceLocationTracking.findOne({
+        where: { timeSessionId: session.id },
+        transaction,
+        lock: Transaction.LOCK.UPDATE,
+      });
+      // A location pause is still a Break for work-time purposes, but a fresh
+      // fix received during it is the server-side proof the employee needs
+      // before an explicit resume can be accepted.
+      const locationPause =
+        session.status === 'ON_BREAK' &&
+        Boolean(trackingBefore && isLocationPauseReason(trackingBefore.reason));
 
       const breaks = session.breaks ?? [];
       const entries = input.samples.map((sample) => ({
@@ -544,7 +650,7 @@ export async function ingestAttendanceLocationSamples(options: {
           reject('ACCURACY_TOO_LOW');
           continue;
         }
-        if (isInsideBreak(breaks, capturedAt)) {
+        if (!locationPause && isInsideBreak(breaks, capturedAt)) {
           reject('SAMPLE_DURING_BREAK');
           continue;
         }
@@ -574,15 +680,23 @@ export async function ingestAttendanceLocationSamples(options: {
           ignoreDuplicates: true,
         });
 
-        const tracking = await AttendanceLocationTracking.findOne({
-          where: { timeSessionId: session.id },
-          transaction,
-          lock: Transaction.LOCK.UPDATE,
-        });
-
         const status = session.status === 'ON_BREAK' ? 'PAUSED' : 'ACTIVE';
-        const reason = session.status === 'ON_BREAK' ? 'BREAK' : null;
-        const permission = tracking?.permission === 'DENIED' ? 'UNKNOWN' : tracking?.permission ?? 'UNKNOWN';
+        const reason =
+          session.status === 'ON_BREAK'
+            ? (locationPause ? trackingBefore?.reason ?? 'BREAK' : 'BREAK')
+            : null;
+        const permission =
+          trackingBefore?.permission === 'DENIED'
+            ? 'UNKNOWN'
+            : trackingBefore?.permission ?? 'UNKNOWN';
+        // Evidence is anchored to when the fix was captured, not when a queued
+        // batch finally arrived. A pause reported after an offline gap or a
+        // process kill is then backdated to the last real fix instead of
+        // counting the unverified interval as work.
+        const latestCapturedAt = rows.reduce(
+          (latest, row) => (row.capturedAt > latest ? row.capturedAt : latest),
+          new Date(0),
+        );
 
         await upsertTracking({
           transaction,
@@ -593,8 +707,8 @@ export async function ingestAttendanceLocationSamples(options: {
           status,
           reason,
           permission,
-          backgroundAllowed: tracking?.backgroundAllowed ?? false,
-          lastSampleAt: now,
+          backgroundAllowed: trackingBefore?.backgroundAllowed ?? false,
+          lastSampleAt: latestCapturedAt,
         });
 
         // Accepted samples are the mobile heartbeat while the app is

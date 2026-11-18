@@ -1,5 +1,13 @@
 import { Op, Transaction, UniqueConstraintError } from 'sequelize';
-import { sequelize, AgentSyncEvent, Break, DesktopAgent, TimeSession, User } from '../../database';
+import {
+  sequelize,
+  AgentSyncEvent,
+  AttendanceLocationTracking,
+  Break,
+  DesktopAgent,
+  TimeSession,
+  User,
+} from '../../database';
 import { config } from '../../config/env';
 import { logger } from '../../config/logger';
 import { AppError } from '../../utils/errors';
@@ -8,6 +16,7 @@ import { secondsBetween } from '../../utils/time';
 import { serializeByKey } from '../../utils/serialize';
 import { agentHub } from '../../realtime/agentHub';
 import { touchAgent } from '../desktopAgents/desktopAgent.service';
+import { isLocationPauseReason } from '../attendance/attendanceLocationTracking.model';
 import { toTimeSessionSummary } from './timeSession.mapper';
 import type { Role } from '../memberships/roles';
 import { isSelfScoped, type PermissionSubject } from '../memberships/permissions';
@@ -331,6 +340,29 @@ export async function endBreak(options: {
       }
       if (now.getTime() < brk.startedAt.getTime()) {
         throw AppError.conflict('Break end must be after its start', 'INVALID_BREAK_INTERVAL');
+      }
+
+      const tracking = await AttendanceLocationTracking.findOne({
+        where: { timeSessionId: session.id },
+        transaction,
+        lock: Transaction.LOCK.UPDATE,
+      });
+      if (tracking && isLocationPauseReason(tracking.reason)) {
+        // A location pause only ends after a server-received fix proves the
+        // device can track again. Resuming on a stale fix would silently put
+        // the employee back on the clock without verified location.
+        const fresh =
+          tracking.permission !== 'DENIED' &&
+          tracking.lastSampleAt !== null &&
+          now.getTime() - tracking.lastSampleAt.getTime() <=
+            config.attendance.trackingStaleSeconds * 1000;
+        if (!fresh) {
+          throw AppError.conflict(
+            'Location is not available yet. Enable location and wait for a fresh location update before resuming.',
+            'LOCATION_NOT_READY',
+          );
+        }
+        await tracking.update({ status: 'ACTIVE', reason: null }, { transaction });
       }
 
       await brk.update({ endedAt: now, status: 'ENDED' }, { transaction });

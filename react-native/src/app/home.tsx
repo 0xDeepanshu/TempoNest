@@ -30,12 +30,17 @@ import { Button } from '../components/button';
 import { Card } from '../components/card';
 import { ErrorBanner } from '../components/error-banner';
 import { LoadingScreen } from '../components/loading-screen';
+import { LocationRecoveryModal } from '../components/location-recovery-modal';
 import { Screen } from '../components/screen';
 import { StatusBadge } from '../components/status-badge';
 import { TimerDisplay } from '../components/timer-display';
 import { WorkModeCard } from '../components/work-mode-card';
 import { useMobileAgent } from '../device/use-mobile-agent';
-import { trackingPhasePresentation } from '../location/tracking-core';
+import { locationRecoveryView } from '../location/location-recovery';
+import {
+  isLocationPauseReason,
+  trackingPhasePresentation,
+} from '../location/tracking-core';
 import { colors, spacing, typography } from '../theme/tokens';
 
 const WORK_MODE_LABELS: Record<AttendanceWorkMode, string> = {
@@ -172,29 +177,84 @@ function HomeContent({
     session,
     checkIn,
     ownsSession: attendance.ownsSession,
+    applySession: attendance.applySession,
+    applyLocationPause: attendance.applyLocationPause,
   });
   const trackingPresentation = trackingPhasePresentation(tracking.phase);
   const showTracking =
     Boolean(session) && checkIn?.workMode === 'ON_SITE' && attendance.ownsSession;
+  const locationPaused =
+    isOnBreak && Boolean(tracking.reason) && isLocationPauseReason(tracking.reason);
+  const locationReady = !locationPaused || tracking.phase === 'location-restored';
+  // The OS-level pause is applied locally first; the server pause follows as
+  // soon as the report is delivered.
+  const locallyPaused =
+    tracking.phase === 'permission-denied' ||
+    tracking.phase === 'location-disabled' ||
+    tracking.phase === 'location-unavailable' ||
+    tracking.phase === 'interrupted';
+  const timerPaused = isOnBreak || locallyPaused;
+
+  const settingsPhases = ['permission-denied', 'location-disabled'];
+  const retryPhases = ['location-unavailable', 'interrupted', 'unavailable', 'error'];
   const trackingBanner = !showTracking
     ? null
-    : tracking.phase === 'active-foreground'
+    : tracking.phase === 'active-foreground' || tracking.phase === 'location-restored'
       ? { tone: 'info' as const, message: trackingPresentation.detail ?? '' }
-      : tracking.phase === 'permission-denied' ||
-          tracking.phase === 'unavailable' ||
-          tracking.phase === 'stale' ||
-          tracking.phase === 'error'
+      : settingsPhases.includes(tracking.phase) ||
+          retryPhases.includes(tracking.phase) ||
+          tracking.phase === 'stale'
         ? {
             tone: tracking.phase === 'stale' ? ('info' as const) : ('error' as const),
             message: trackingPresentation.detail ?? '',
           }
         : null;
+  const trackingBannerAction = !trackingBanner
+    ? undefined
+    : settingsPhases.includes(tracking.phase)
+      ? { label: 'Settings', run: () => void Linking.openSettings() }
+      : retryPhases.includes(tracking.phase)
+        ? { label: 'Retry', run: tracking.retry }
+        : undefined;
 
+  const prepareResume = tracking.prepareResume;
   const handleToggleBreak = useCallback(() => {
     setConfirmCheckout(false);
-    if (isOnBreak) void sessionActions.resume();
-    else void sessionActions.start();
-  }, [isOnBreak, sessionActions]);
+    if (!isOnBreak) {
+      void sessionActions.start();
+      return;
+    }
+    void sessionActions.resume(
+      locationPaused
+        ? async () => {
+            const result = await prepareResume();
+            return result.ok ? null : result.message;
+          }
+        : undefined,
+    );
+  }, [isOnBreak, locationPaused, prepareResume, sessionActions]);
+
+  const recoveryView = showTracking
+    ? locationRecoveryView({ phase: tracking.phase, paused: isOnBreak })
+    : null;
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+
+  const handleRecoveryCheck = useCallback(async () => {
+    setRecoveryBusy(true);
+    setRecoveryMessage(null);
+    try {
+      const result = await prepareResume();
+      if (!result.ok) setRecoveryMessage(result.message);
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }, [prepareResume]);
+
+  const enableLocation = tracking.enableLocation;
+  const handleEnableLocation = useCallback(() => {
+    void enableLocation();
+  }, [enableLocation]);
 
   const handleCheckout = useCallback(() => {
     setConfirmCheckout(false);
@@ -314,8 +374,14 @@ function HomeContent({
                 </Text>
               </View>
               <StatusBadge
-                label={isOnBreak ? 'On break' : 'Working'}
-                tone={isOnBreak ? 'warning' : 'success'}
+                label={
+                  locallyPaused || locationPaused
+                    ? 'Location paused'
+                    : isOnBreak
+                      ? 'On break'
+                      : 'Working'
+                }
+                tone={timerPaused ? 'warning' : 'success'}
               />
             </View>
 
@@ -326,7 +392,7 @@ function HomeContent({
                   ? `${formatDurationWords(workTime.breakSeconds)} on break`
                   : undefined
               }
-              paused={isOnBreak}
+              paused={timerPaused}
             />
 
             <View style={styles.divider} />
@@ -362,7 +428,7 @@ function HomeContent({
             {isOnBreak && session.activeBreak ? (
               <InfoRow
                 icon="pause-circle-outline"
-                label="Break started"
+                label={locationPaused ? 'Paused at' : 'Break started'}
                 value={formatClockTime(session.activeBreak.startedAt)}
               />
             ) : null}
@@ -371,20 +437,8 @@ function HomeContent({
               <ErrorBanner
                 tone={trackingBanner.tone}
                 message={trackingBanner.message}
-                actionLabel={
-                  tracking.phase === 'permission-denied' || tracking.phase === 'unavailable'
-                    ? 'Settings'
-                    : tracking.phase === 'error'
-                      ? 'Retry'
-                      : undefined
-                }
-                onAction={
-                  tracking.phase === 'permission-denied' || tracking.phase === 'unavailable'
-                    ? () => void Linking.openSettings()
-                    : tracking.phase === 'error'
-                      ? tracking.retry
-                      : undefined
-                }
+                actionLabel={trackingBannerAction?.label}
+                onAction={trackingBannerAction?.run}
               />
             ) : null}
 
@@ -437,13 +491,18 @@ function HomeContent({
                     <Button
                       label={isOnBreak ? 'Resume work' : 'Take a break'}
                       variant={isOnBreak ? 'primary' : 'secondary'}
-                      disabled={sessionActionPending}
+                      disabled={sessionActionPending || (isOnBreak && !locationReady)}
                       loading={
                         sessionActions.action === 'break-start' ||
                         sessionActions.action === 'break-end'
                       }
                       onPress={handleToggleBreak}
                     />
+                    {locationPaused && !locationReady ? (
+                      <Text style={styles.helper}>
+                        Resume unlocks after location is available again.
+                      </Text>
+                    ) : null}
                     <Button
                       label="Check out"
                       variant="ghost"
@@ -515,6 +574,15 @@ function HomeContent({
       {agentState.agent ? (
         <Text style={styles.footer}>Device: {agentState.agent.name}</Text>
       ) : null}
+
+      <LocationRecoveryModal
+        view={recoveryView}
+        busy={recoveryBusy || sessionActionPending}
+        message={recoveryMessage}
+        onEnable={handleEnableLocation}
+        onCheckAgain={() => void handleRecoveryCheck()}
+        onResume={handleToggleBreak}
+      />
     </Screen>
   );
 }

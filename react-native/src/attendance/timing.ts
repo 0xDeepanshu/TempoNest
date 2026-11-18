@@ -83,6 +83,35 @@ export function serverClockOffset(serverTime: string, receivedAtMs: number): num
   return parsed - receivedAtMs;
 }
 
+/**
+ * Optimistically applies the same ON_BREAK transition the backend records when
+ * location is lost. The timer reads this projection while the pause report is
+ * in flight (or still queued offline), so worked time never keeps accruing
+ * between the location loss and the server acknowledgement. Calling it again
+ * keeps the existing open break, so duplicate events cannot create a second
+ * pause.
+ */
+export interface PausedTiming extends SessionTiming {
+  status: 'ON_BREAK';
+  activeBreak: BreakTiming;
+}
+
+export function pauseSessionAt(session: SessionTiming, pausedAt: string): PausedTiming {
+  const breaks = session.breaks ?? (session.activeBreak ? [session.activeBreak] : []);
+  const open = breaks.find((brk) => brk.endedAt === null);
+  if (open) {
+    return { ...session, status: 'ON_BREAK', activeBreak: open, breaks };
+  }
+
+  const created: BreakTiming = { startedAt: pausedAt, endedAt: null };
+  return {
+    ...session,
+    status: 'ON_BREAK',
+    activeBreak: created,
+    breaks: [...breaks, created],
+  };
+}
+
 export function formatDuration(totalSeconds: number): string {
   const safe = Math.max(0, Math.floor(totalSeconds));
   const hours = Math.floor(safe / 3600);

@@ -5,6 +5,7 @@ import {
   AttendanceLocationSample,
   AttendanceLocationTracking,
   AuditEvent,
+  Break,
   TimeSession,
 } from '../src/database';
 import { config } from '../src/config/env';
@@ -523,6 +524,8 @@ describe('ON_SITE location tracking', () => {
     expect(denied.body.data.tracking.status).toBe('STOPPED');
     expect(denied.body.data.tracking.reason).toBe('PERMISSION_DENIED');
     expect(denied.body.data.locationState.state).toBe('PERMISSION_UNAVAILABLE');
+    expect(denied.body.data.session.status).toBe('ON_BREAK');
+    expect(denied.body.data.session.activeBreak).not.toBeNull();
 
     const permissionReason = await postLocationStatus(team, {
       sessionId: onSite.sessionId,
@@ -531,11 +534,31 @@ describe('ON_SITE location tracking', () => {
       permission: 'ALWAYS',
       backgroundAllowed: true,
     });
-    expect(permissionReason.body.data.tracking.status).toBe('STOPPED');
-    expect(permissionReason.body.data.locationState.state).toBe('STOPPED');
-    expect(permissionReason.body.data.locationState.reason).toBe('OS_RESTRICTED');
+    // The timer is paused until the employee explicitly resumes; a later
+    // device report cannot silently restart it.
+    expect(permissionReason.body.data.tracking.status).toBe('PAUSED');
+    expect(permissionReason.body.data.tracking.reason).toBe('PERMISSION_DENIED');
+    expect(permissionReason.body.data.locationState.state).toBe('PERMISSION_UNAVAILABLE');
+    expect(permissionReason.body.data.session.status).toBe('ON_BREAK');
 
-    await postSamples(team, { sessionId: onSite.sessionId, samples: [sample()] });
+    // A fresh fix received during the location pause is accepted and is the
+    // proof required before the employee can resume.
+    const fresh = await postSamples(team, {
+      sessionId: onSite.sessionId,
+      samples: [sample({ capturedAt: new Date().toISOString() })],
+    });
+    expect(fresh.status).toBe(201);
+    expect(fresh.body.data.accepted).toBe(1);
+
+    const resumed = await request(app)
+      .post(`${API}/organizations/${team.orgId}/time-sessions/${onSite.sessionId}/breaks/end`)
+      .set(team.agent.headers)
+      .send({});
+    expect(resumed.status).toBe(200);
+    expect(resumed.body.data.session.status).toBe('ACTIVE');
+    expect(resumed.body.data.session.breaks).toHaveLength(1);
+    expect(resumed.body.data.session.breaks[0].endedAt).not.toBeNull();
+
     await AttendanceLocationTracking.update(
       {
         status: 'ACTIVE',
@@ -557,6 +580,205 @@ describe('ON_SITE location tracking', () => {
     const history = await getHistory(team, team.ownerAuth.headers, onSite.checkInId);
     expect(history.body.data.locationState.state).toBe('STALE');
     expect(history.body.data.tracking.permission).toBe('ALWAYS');
+  });
+
+  it('pauses the timer for location loss and refuses to resume without a fresh fix', async () => {
+    const team = await createMobileTeam();
+    const onSite = await startOnSite(team);
+
+    const paused = await postLocationStatus(team, {
+      sessionId: onSite.sessionId,
+      state: 'PAUSED',
+      reason: 'LOCATION_DISABLED',
+      permission: 'ALWAYS',
+      backgroundAllowed: true,
+    });
+    expect(paused.status).toBe(200);
+    expect(paused.body.data.tracking.status).toBe('PAUSED');
+    expect(paused.body.data.tracking.reason).toBe('LOCATION_DISABLED');
+    expect(paused.body.data.session.status).toBe('ON_BREAK');
+    expect(paused.body.data.session.activeBreak).not.toBeNull();
+    expect(paused.body.data.locationState.state).toBe('PAUSED');
+    expect(paused.body.data.locationState.reason).toBe('LOCATION_DISABLED');
+
+    const session = await TimeSession.findByPk(onSite.sessionId);
+    expect(session?.status).toBe('ON_BREAK');
+    expect(await Break.count({ where: { timeSessionId: onSite.sessionId, endedAt: null } })).toBe(1);
+
+    // Repeated reports (for example an offline pause retried after reconnect)
+    // must not stack breaks or change the pause reason.
+    const replay = await postLocationStatus(team, {
+      sessionId: onSite.sessionId,
+      state: 'PAUSED',
+      reason: 'LOCATION_DISABLED',
+      permission: 'ALWAYS',
+      backgroundAllowed: true,
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.body.data.session.status).toBe('ON_BREAK');
+    expect(await Break.count({ where: { timeSessionId: onSite.sessionId } })).toBe(1);
+
+    const status = await getLocationStatus(team);
+    expect(status.body.data.shouldTrack).toBe(false);
+    expect(status.body.data.reason).toBe('LOCATION_DISABLED');
+    expect(status.body.data.session.status).toBe('ON_BREAK');
+    expect(status.body.data.locationState.state).toBe('PAUSED');
+
+    // The restored device reporting ACTIVE is not a resume.
+    const ready = await postLocationStatus(team, {
+      sessionId: onSite.sessionId,
+      state: 'ACTIVE',
+      permission: 'ALWAYS',
+      backgroundAllowed: true,
+    });
+    expect(ready.status).toBe(200);
+    expect(ready.body.data.session.status).toBe('ON_BREAK');
+    expect(ready.body.data.tracking.status).toBe('PAUSED');
+
+    const early = await request(app)
+      .post(`${API}/organizations/${team.orgId}/time-sessions/${onSite.sessionId}/breaks/end`)
+      .set(team.agent.headers)
+      .send({});
+    expect(early.status).toBe(409);
+    expect(early.body.error.code).toBe('LOCATION_NOT_READY');
+
+    // A fresh server-received fix proves location is available again. Because
+    // the timer is paused, this fix is accepted instead of being rejected as a
+    // break sample, but the session still does not resume on its own.
+    const fresh = await postSamples(team, {
+      sessionId: onSite.sessionId,
+      samples: [sample({ capturedAt: new Date().toISOString() })],
+    });
+    expect(fresh.status).toBe(201);
+    expect(fresh.body.data.accepted).toBe(1);
+    expect(fresh.body.data.session.status).toBe('ON_BREAK');
+    expect(await AttendanceLocationSample.count()).toBe(1);
+
+    const resumed = await request(app)
+      .post(`${API}/organizations/${team.orgId}/time-sessions/${onSite.sessionId}/breaks/end`)
+      .set(team.agent.headers)
+      .send({});
+    expect(resumed.status).toBe(200);
+    expect(resumed.body.data.session.status).toBe('ACTIVE');
+    expect(resumed.body.data.session.activeBreak).toBeNull();
+    expect(resumed.body.data.session.breaks).toHaveLength(1);
+    expect(resumed.body.data.session.breaks[0].endedAt).not.toBeNull();
+
+    const tracking = await AttendanceLocationTracking.findOne({
+      where: { timeSessionId: onSite.sessionId },
+    });
+    expect(tracking?.status).toBe('ACTIVE');
+    expect(tracking?.reason).toBeNull();
+
+    const after = await getLocationStatus(team);
+    expect(after.body.data.shouldTrack).toBe(true);
+    expect(after.body.data.session.status).toBe('ACTIVE');
+
+    const acceptedAfterResume = await postSamples(team, {
+      sessionId: onSite.sessionId,
+      samples: [sample({ capturedAt: new Date().toISOString() })],
+    });
+    expect(acceptedAfterResume.status).toBe(201);
+    expect(acceptedAfterResume.body.data.accepted).toBe(1);
+  });
+
+  it('backdates the location pause to the last verified sample', async () => {
+    const team = await createMobileTeam();
+    const onSite = await startOnSite(team);
+
+    const active = await postLocationStatus(team, {
+      sessionId: onSite.sessionId,
+      state: 'ACTIVE',
+      permission: 'ALWAYS',
+      backgroundAllowed: true,
+    });
+    expect(active.status).toBe(200);
+
+    // Simulate a session that started minutes ago and a device that stopped
+    // delivering fixes after its last sample: the pause report arrives later
+    // than the last proof of location.
+    const sessionStart = new Date(Date.now() - 5 * 60_000);
+    await TimeSession.update(
+      { startedAt: sessionStart },
+      { where: { id: onSite.sessionId } },
+    );
+    const lastVerifiedAt = new Date(Date.now() - 60_000);
+    const accepted = await postSamples(team, {
+      sessionId: onSite.sessionId,
+      samples: [sample({ capturedAt: lastVerifiedAt.toISOString() })],
+    });
+    expect(accepted.body.data.accepted).toBe(1);
+
+    // The tracking row keeps the capture time, not the receipt time, so a
+    // delayed batch cannot hide how old the last proof actually is.
+    const trackingBeforePause = await AttendanceLocationTracking.findOne({
+      where: { timeSessionId: onSite.sessionId },
+    });
+    expect(trackingBeforePause?.lastSampleAt?.getTime()).toBe(lastVerifiedAt.getTime());
+
+    const paused = await postLocationStatus(team, {
+      sessionId: onSite.sessionId,
+      state: 'PAUSED',
+      reason: 'LOCATION_UNAVAILABLE',
+      permission: 'ALWAYS',
+      backgroundAllowed: true,
+    });
+    expect(paused.status).toBe(200);
+    expect(paused.body.data.session.status).toBe('ON_BREAK');
+
+    const openBreak = await Break.findOne({
+      where: { timeSessionId: onSite.sessionId, endedAt: null },
+    });
+    expect(openBreak?.startedAt.getTime()).toBe(lastVerifiedAt.getTime());
+
+    // A retried pause (offline queue, duplicate OS events) must not move the
+    // pause start or stack a second break.
+    const replay = await postLocationStatus(team, {
+      sessionId: onSite.sessionId,
+      state: 'PAUSED',
+      reason: 'LOCATION_UNAVAILABLE',
+      permission: 'ALWAYS',
+      backgroundAllowed: true,
+    });
+    expect(replay.status).toBe(200);
+    expect(await Break.count({ where: { timeSessionId: onSite.sessionId } })).toBe(1);
+    const replayedBreak = await Break.findOne({
+      where: { timeSessionId: onSite.sessionId },
+    });
+    expect(replayedBreak?.startedAt.getTime()).toBe(lastVerifiedAt.getTime());
+  });
+
+  it('pauses for permission revocation and treats OS unavailability as a timer pause', async () => {
+    const team = await createMobileTeam();
+    const onSite = await startOnSite(team);
+
+    const unavailable = await postLocationStatus(team, {
+      sessionId: onSite.sessionId,
+      state: 'PAUSED',
+      reason: 'LOCATION_UNAVAILABLE',
+      permission: 'ALWAYS',
+      backgroundAllowed: true,
+    });
+    expect(unavailable.status).toBe(200);
+    expect(unavailable.body.data.session.status).toBe('ON_BREAK');
+    expect(unavailable.body.data.locationState.reason).toBe('LOCATION_UNAVAILABLE');
+
+    const denied = await postLocationStatus(team, {
+      sessionId: onSite.sessionId,
+      state: 'PAUSED',
+      reason: 'PERMISSION_DENIED',
+      permission: 'DENIED',
+      backgroundAllowed: false,
+    });
+    expect(denied.status).toBe(200);
+    expect(denied.body.data.session.status).toBe('ON_BREAK');
+    expect(denied.body.data.locationState.state).toBe('PERMISSION_UNAVAILABLE');
+    expect(await Break.count({ where: { timeSessionId: onSite.sessionId } })).toBe(1);
+
+    const history = await getHistory(team, team.ownerAuth.headers, onSite.checkInId);
+    expect(history.body.data.session.status).toBe('ON_BREAK');
+    expect(history.body.data.session.activeBreak).not.toBeNull();
+    expect(history.body.data.locationState.state).toBe('PERMISSION_UNAVAILABLE');
   });
 });
 

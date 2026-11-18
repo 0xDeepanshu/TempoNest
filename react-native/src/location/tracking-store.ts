@@ -7,10 +7,29 @@ import {
   type LocationQueue,
   type QueuedLocationSample,
 } from './tracking-core';
-import type { AttendanceLocationSampleResult } from '../api/types';
+import type {
+  AttendanceLocationPermissionState,
+  AttendanceLocationSampleResult,
+  AttendanceLocationTrackingStatus,
+} from '../api/types';
 
 const QUEUE_PREFIX = 'temponest.locationQueue.';
+const PENDING_REPORT_PREFIX = 'temponest.locationPendingReport.';
 const CONTEXT_KEY = 'temponest.locationContext.v1';
+
+/**
+ * A pause/state report that could not reach the server. It is written before
+ * the request settles so a network drop or app restart cannot lose the pause.
+ */
+export interface PendingLocationReport {
+  version: 1;
+  sessionId: string;
+  state: AttendanceLocationTrackingStatus;
+  reason: string | null;
+  permission: AttendanceLocationPermissionState;
+  backgroundAllowed: boolean;
+  queuedAt: string;
+}
 
 export interface LocationTrackingContext {
   version: 1;
@@ -146,6 +165,74 @@ export function applyLocationUploadResults(
 export function clearLocationQueue(organizationId: string, userId: string): Promise<void> {
   return withQueueLock(async () => {
     await AsyncStorage.removeItem(queueKey(organizationId, userId));
+  });
+}
+
+function pendingReportKey(organizationId: string, userId: string): string {
+  return `${PENDING_REPORT_PREFIX}${organizationId}.${userId}`;
+}
+
+function isPendingLocationReport(value: unknown): value is PendingLocationReport {
+  if (!value || typeof value !== 'object') return false;
+  const report = value as Partial<PendingLocationReport>;
+  return (
+    report.version === 1 &&
+    typeof report.sessionId === 'string' &&
+    (report.state === 'ACTIVE' ||
+      report.state === 'PAUSED' ||
+      report.state === 'STOPPED') &&
+    (report.reason === null || typeof report.reason === 'string') &&
+    (report.permission === 'ALWAYS' ||
+      report.permission === 'FOREGROUND_ONLY' ||
+      report.permission === 'DENIED' ||
+      report.permission === 'UNKNOWN') &&
+    typeof report.backgroundAllowed === 'boolean' &&
+    typeof report.queuedAt === 'string' &&
+    !Number.isNaN(Date.parse(report.queuedAt))
+  );
+}
+
+/**
+ * Only the latest state matters; a newer report supersedes an older one. This
+ * means an offline pause followed by a stop cannot leave a stale pause queued.
+ */
+export function writePendingLocationReport(
+  organizationId: string,
+  userId: string,
+  report: PendingLocationReport,
+): Promise<void> {
+  return withQueueLock(async () => {
+    await AsyncStorage.setItem(pendingReportKey(organizationId, userId), JSON.stringify(report));
+  });
+}
+
+export function readPendingLocationReport(
+  organizationId: string,
+  userId: string,
+): Promise<PendingLocationReport | null> {
+  return withQueueLock(async () => {
+    let raw: string | null = null;
+    try {
+      raw = await AsyncStorage.getItem(pendingReportKey(organizationId, userId));
+    } catch {
+      return null;
+    }
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return isPendingLocationReport(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+export function clearPendingLocationReport(
+  organizationId: string,
+  userId: string,
+): Promise<void> {
+  return withQueueLock(async () => {
+    await AsyncStorage.removeItem(pendingReportKey(organizationId, userId));
   });
 }
 

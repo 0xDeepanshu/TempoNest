@@ -6,9 +6,11 @@ import {
   LOCATION_QUEUE_MAX_SAMPLES,
   appendLocationSample,
   createQueuedLocationSample,
+  isLocationPauseReason,
   locationUploadBatch,
   phaseFromLocationState,
   removeUploadedLocationSamples,
+  classifyTrackingRestart,
   shouldTrackOnSite,
   trackingPhasePresentation,
   type LocationQueue,
@@ -184,6 +186,11 @@ describe('tracking presentation', () => {
     expect(phaseFromLocationState('ACTIVE', true)).toBe('active-background');
     expect(phaseFromLocationState('ACTIVE', false)).toBe('active-foreground');
     expect(phaseFromLocationState('PAUSED', true)).toBe('paused');
+    expect(phaseFromLocationState('PAUSED', false, 'BREAK')).toBe('paused');
+    expect(phaseFromLocationState('PAUSED', false, 'LOCATION_DISABLED')).toBe('location-disabled');
+    expect(phaseFromLocationState('PAUSED', false, 'LOCATION_UNAVAILABLE')).toBe(
+      'location-unavailable',
+    );
     expect(phaseFromLocationState('PERMISSION_UNAVAILABLE', true)).toBe('permission-denied');
     expect(phaseFromLocationState('STALE', true)).toBe('stale');
     expect(phaseFromLocationState('STOPPED', true)).toBe('stopped');
@@ -195,5 +202,94 @@ describe('tracking presentation', () => {
     expect(trackingPhasePresentation('active-foreground').detail).toContain('only while');
     expect(trackingPhasePresentation('permission-denied').tone).toBe('danger');
     expect(trackingPhasePresentation('paused').label).toBe('Paused');
+  });
+
+  it('explains a location pause and never implies the timer is still running', () => {
+    const disabled = trackingPhasePresentation('location-disabled');
+    expect(disabled.label).toBe('Timer paused');
+    expect(disabled.detail).toBe(
+      'Timer paused — location services are turned off. Enable location to resume.',
+    );
+
+    const unavailable = trackingPhasePresentation('location-unavailable');
+    expect(unavailable.label).toBe('Timer paused');
+    expect(unavailable.detail).toContain('not receiving location updates');
+
+    const denied = trackingPhasePresentation('permission-denied');
+    expect(denied.label).toBe('Timer paused');
+
+    expect(trackingPhasePresentation('location-restored').label).toBe('Ready to resume');
+  });
+});
+
+describe('classifyTrackingRestart', () => {
+  const context = { sessionId: 'session-1', agentId: 'agent-1' };
+
+  it('never treats a live in-memory tracker as a restart', () => {
+    expect(
+      classifyTrackingRestart({
+        hasInMemoryRuntime: true,
+        context,
+        sessionId: 'session-1',
+        agentId: 'agent-1',
+        backgroundRunning: false,
+      }),
+    ).toBe('live');
+  });
+
+  it('adopts a foreground service that survived the process', () => {
+    expect(
+      classifyTrackingRestart({
+        hasInMemoryRuntime: false,
+        context,
+        sessionId: 'session-1',
+        agentId: 'agent-1',
+        backgroundRunning: true,
+      }),
+    ).toBe('surviving-background');
+  });
+
+  it('reports an interruption when the persisted tracker is gone', () => {
+    expect(
+      classifyTrackingRestart({
+        hasInMemoryRuntime: false,
+        context,
+        sessionId: 'session-1',
+        agentId: 'agent-1',
+        backgroundRunning: false,
+      }),
+    ).toBe('interrupted');
+  });
+
+  it('ignores context from another session or device', () => {
+    expect(
+      classifyTrackingRestart({
+        hasInMemoryRuntime: false,
+        context,
+        sessionId: 'session-2',
+        agentId: 'agent-1',
+        backgroundRunning: false,
+      }),
+    ).toBe('none');
+    expect(
+      classifyTrackingRestart({
+        hasInMemoryRuntime: false,
+        context: null,
+        sessionId: 'session-1',
+        agentId: 'agent-1',
+        backgroundRunning: true,
+      }),
+    ).toBe('none');
+  });
+});
+
+describe('isLocationPauseReason', () => {
+  it('accepts only the reasons that must pause the timer', () => {
+    expect(isLocationPauseReason('LOCATION_DISABLED')).toBe(true);
+    expect(isLocationPauseReason('PERMISSION_DENIED')).toBe(true);
+    expect(isLocationPauseReason('LOCATION_UNAVAILABLE')).toBe(true);
+    expect(isLocationPauseReason('BREAK')).toBe(false);
+    expect(isLocationPauseReason(null)).toBe(false);
+    expect(isLocationPauseReason(undefined)).toBe(false);
   });
 });

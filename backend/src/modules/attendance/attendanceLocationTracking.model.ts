@@ -19,6 +19,27 @@ export type AttendanceLocationPermissionState =
   (typeof ATTENDANCE_LOCATION_PERMISSION_STATES)[number];
 
 /**
+ * Device-reported reasons that make an ON_SITE session unverifiable. They are
+ * stored on the tracking row and drive the same Break-based timer pause as a
+ * manual break, so work time stops accruing without a second timer system.
+ */
+export const LOCATION_PAUSE_REASONS = [
+  'LOCATION_DISABLED',
+  'PERMISSION_DENIED',
+  'LOCATION_UNAVAILABLE',
+] as const;
+export type LocationPauseReason = (typeof LOCATION_PAUSE_REASONS)[number];
+
+export function isLocationPauseReason(
+  reason: string | null | undefined,
+): reason is LocationPauseReason {
+  return (
+    typeof reason === 'string' &&
+    (LOCATION_PAUSE_REASONS as readonly string[]).includes(reason)
+  );
+}
+
+/**
  * Last reported state of the device-side tracker for one ON_SITE session.
  * It carries no coordinates; precise samples live in the history table.
  */

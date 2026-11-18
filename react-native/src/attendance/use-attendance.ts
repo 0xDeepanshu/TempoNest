@@ -9,7 +9,12 @@ import type {
 } from '../api/types';
 import { useAuth } from '../auth/auth-context';
 import type { MobileAgent } from '../device/mobile-agent';
-import { computeWorkTime, serverClockOffset, type WorkTime } from './timing';
+import {
+  computeWorkTime,
+  pauseSessionAt,
+  serverClockOffset,
+  type WorkTime,
+} from './timing';
 
 const HEARTBEAT_INTERVAL_MS = 60_000;
 const CLOCK_TICK_MS = 1_000;
@@ -43,6 +48,7 @@ export interface AttendanceResult extends AttendanceState {
   retry: () => void;
   applySession: (session: TimeSessionSummary, serverTime: string) => void;
   clearSession: (serverTime: string) => void;
+  applyLocationPause: (sessionId: string, pausedAt: string) => void;
 }
 
 /**
@@ -56,6 +62,11 @@ export function useAttendance(agent: MobileAgent | null): AttendanceResult {
   const agentId = agent?.id ?? null;
 
   const [state, setState] = useState<AttendanceState>(INITIAL_STATE);
+  // A location loss pauses the session locally before (or without) the server
+  // round-trip, so the elapsed-time calculation freezes immediately.
+  const [localPause, setLocalPause] = useState<{ sessionId: string; pausedAt: string } | null>(
+    null,
+  );
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [attempt, setAttempt] = useState(0);
 
@@ -115,6 +126,7 @@ export function useAttendance(agent: MobileAgent | null): AttendanceResult {
     if (authStatus !== 'authenticated' || !organizationId || !agentId) {
       // Invalidate any in-flight response for a previous identity or device.
       requestSequence.current += 1;
+      setLocalPause(null);
       setState(INITIAL_STATE);
       return;
     }
@@ -201,6 +213,13 @@ export function useAttendance(agent: MobileAgent | null): AttendanceResult {
   const applySession = useCallback((session: TimeSessionSummary, serverTime: string) => {
     requestSequence.current += 1;
     const receivedAt = Date.now();
+    // The server session is authoritative: once it reports ON_BREAK the local
+    // projection is redundant. A session that is still ACTIVE keeps the local
+    // pause, so an older backend response cannot unfreeze the timer.
+    setLocalPause((previous) => {
+      if (!previous || previous.sessionId !== session.id) return null;
+      return session.status === 'ON_BREAK' ? null : previous;
+    });
     setState((previous) => ({
       ...previous,
       status: 'ready',
@@ -214,9 +233,18 @@ export function useAttendance(agent: MobileAgent | null): AttendanceResult {
     }));
   }, []);
 
+  const applyLocationPause = useCallback((sessionId: string, pausedAt: string) => {
+    setLocalPause((previous) => {
+      // Duplicate location-off events keep the first pause timestamp.
+      if (previous && previous.sessionId === sessionId) return previous;
+      return { sessionId, pausedAt };
+    });
+  }, []);
+
   const clearSession = useCallback((serverTime: string) => {
     requestSequence.current += 1;
     const receivedAt = Date.now();
+    setLocalPause(null);
     setState({
       status: 'ready',
       attendance: { checkIn: null, session: null },
@@ -227,7 +255,14 @@ export function useAttendance(agent: MobileAgent | null): AttendanceResult {
     });
   }, []);
 
-  const workTime = session ? computeWorkTime(session, nowMs + state.serverOffsetMs) : null;
+  const pausedSession =
+    localPause && session && session.id === localPause.sessionId && session.status === 'ACTIVE'
+      ? pauseSessionAt(session, localPause.pausedAt)
+      : null;
+  const timingSession = pausedSession ?? session;
+  const workTime = timingSession
+    ? computeWorkTime(timingSession, nowMs + state.serverOffsetMs)
+    : null;
 
   return {
     ...state,
@@ -239,5 +274,6 @@ export function useAttendance(agent: MobileAgent | null): AttendanceResult {
     retry,
     applySession,
     clearSession,
+    applyLocationPause,
   };
 }

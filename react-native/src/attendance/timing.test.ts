@@ -4,6 +4,7 @@ import {
   computeWorkTime,
   formatDuration,
   formatDurationWords,
+  pauseSessionAt,
   serverClockOffset,
 } from './timing';
 
@@ -96,6 +97,52 @@ describe('computeWorkTime', () => {
       workedSeconds: 0,
       isOnBreak: false,
     });
+  });
+});
+
+describe('pauseSessionAt', () => {
+  it('stops worked time accumulating at the location-loss moment', () => {
+    const paused = pauseSessionAt(
+      { startedAt: START, endedAt: null },
+      '2026-10-24T09:30:00.000Z',
+    );
+
+    expect(paused.status).toBe('ON_BREAK');
+    const result = computeWorkTime(paused, at('2026-10-24T10:00:00.000Z'));
+    expect(result.isOnBreak).toBe(true);
+    expect(result.elapsedSeconds).toBe(3600);
+    expect(result.breakSeconds).toBe(1800);
+    expect(result.workedSeconds).toBe(1800);
+  });
+
+  it('keeps the first pause and one open break on duplicate events', () => {
+    const first = pauseSessionAt(
+      { startedAt: START, endedAt: null },
+      '2026-10-24T09:30:00.000Z',
+    );
+    const duplicate = pauseSessionAt(first, '2026-10-24T09:45:00.000Z');
+
+    expect(duplicate.activeBreak.startedAt).toBe('2026-10-24T09:30:00.000Z');
+    expect(duplicate.breaks).toHaveLength(1);
+    const result = computeWorkTime(duplicate, at('2026-10-24T10:00:00.000Z'));
+    expect(result.workedSeconds).toBe(1800);
+  });
+
+  it('reuses an open break instead of stacking a second pause', () => {
+    const paused = pauseSessionAt(
+      {
+        startedAt: START,
+        endedAt: null,
+        activeBreak: { startedAt: '2026-10-24T09:20:00.000Z', endedAt: null },
+      },
+      '2026-10-24T09:30:00.000Z',
+    );
+
+    expect(paused.breaks).toHaveLength(1);
+    expect(paused.activeBreak.startedAt).toBe('2026-10-24T09:20:00.000Z');
+    expect(
+      computeWorkTime(paused, at('2026-10-24T10:00:00.000Z')).workedSeconds,
+    ).toBe(1200);
   });
 });
 

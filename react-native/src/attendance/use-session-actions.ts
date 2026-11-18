@@ -50,12 +50,20 @@ export function useSessionActions(options: Options) {
       kind: SessionAction,
       request: () => Promise<SessionWriteResult>,
       applies: 'session' | 'clear',
+      preflight?: () => Promise<string | null>,
     ) => {
       if (action) return;
       setAction(kind);
       setMessage(null);
 
       try {
+        if (preflight) {
+          const failure = await preflight();
+          if (failure) {
+            setMessage({ tone: 'error', text: failure });
+            return;
+          }
+        }
         const result = await request();
         if (applies === 'clear') clearSession(result.serverTime);
         else applySession(result.session, result.serverTime);
@@ -108,17 +116,21 @@ export function useSessionActions(options: Options) {
     );
   }, [agent, organizationId, ownsSession, run, session]);
 
-  const resume = useCallback(async () => {
-    if (!agent || !organizationId || !session || !ownsSession) return;
-    await run(
-      'break-end',
-      async () => {
-        const response = await endBreak(organizationId, session.id, agent);
-        return { session: response.data.session, serverTime: response.data.serverTime };
-      },
-      'session',
-    );
-  }, [agent, organizationId, ownsSession, run, session]);
+  const resume = useCallback(
+    async (preflight?: () => Promise<string | null>) => {
+      if (!agent || !organizationId || !session || !ownsSession) return;
+      await run(
+        'break-end',
+        async () => {
+          const response = await endBreak(organizationId, session.id, agent);
+          return { session: response.data.session, serverTime: response.data.serverTime };
+        },
+        'session',
+        preflight,
+      );
+    },
+    [agent, organizationId, ownsSession, run, session],
+  );
 
   const checkout = useCallback(async () => {
     if (!agent || !organizationId || !session || !ownsSession) return;
