@@ -1,4 +1,4 @@
-import { Op, UniqueConstraintError } from 'sequelize';
+import { Op, UniqueConstraintError, type Transaction } from 'sequelize';
 import { config } from '../../config/env';
 import {
   sequelize,
@@ -7,6 +7,7 @@ import {
   IntegrationClient,
   IntegrationConnection,
   IntegrationCredential,
+  IntegrationWebhookSubscription,
   Membership,
   Organization,
 } from '../../database';
@@ -606,10 +607,11 @@ export async function rotateRefreshToken(input: {
   // Reuse of an already-rotated token means the token was captured; revoke the
   // whole credential family rather than issuing another one.
   if (credential.previousRefreshTokenHash === suppliedHash) {
-    await IntegrationCredential.update(
-      { revokedAt: new Date(), revokedReason: 'REFRESH_TOKEN_REUSE' },
-      { where: { connectionId: credential.connectionId, revokedAt: null } },
-    );
+    // Committed before the error is thrown: a throw inside a transaction would roll this back.
+    await sequelize.transaction((transaction) => closeConnectionAfterRevocation(
+      { connectionId: credential.connectionId, reason: 'REFRESH_TOKEN_REUSE', trigger: 'refresh_token_reuse', clientId: client.clientId },
+      transaction,
+    ));
     throw AppError.unauthorized('Refresh token reuse detected', 'REFRESH_TOKEN_REUSED');
   }
 
@@ -692,9 +694,55 @@ export async function revokeIntegrationToken(input: {
 
   // Unknown or foreign tokens succeed silently to avoid a token oracle.
   if (!credential || credential.clientId !== client.id) return;
-  if (credential.revokedAt) return;
 
-  await credential.update({ revokedAt: new Date(), revokedReason: 'CLIENT_REVOKED' });
+  // Revoking any token of a connection ends the connection. The record is kept (status REVOKED with
+  // revokedAt) for audit. Every step is idempotent: a repeat call finds the connection already REVOKED
+  // and does nothing, so the first timestamp and audit entry are kept.
+  await sequelize.transaction(async (transaction) => {
+    if (!credential.revokedAt) {
+      await credential.update({ revokedAt: new Date(), revokedReason: 'CLIENT_REVOKED' }, { transaction });
+    }
+    await closeConnectionAfterRevocation(
+      { connectionId: credential.connectionId, reason: 'CONNECTION_REVOKED', trigger: 'token_revocation', clientId: client.clientId },
+      transaction,
+    );
+  });
+}
+
+/**
+ * Ends a connection after any revocation: every live credential is revoked, webhook subscriptions are
+ * disabled (no delivery for a revoked connection), and the record is kept with status REVOKED and
+ * revokedAt. Idempotent: a connection already REVOKED is left as it is, so the first timestamp and
+ * audit entry stay. Runs inside the caller's transaction.
+ */
+async function closeConnectionAfterRevocation(
+  options: { connectionId: string; reason: string; trigger: string; clientId: string },
+  transaction: Transaction,
+): Promise<void> {
+  const connection = await IntegrationConnection.findByPk(options.connectionId, { transaction });
+  const now = new Date();
+  await IntegrationCredential.update(
+    { revokedAt: now, revokedReason: options.reason },
+    { where: { connectionId: options.connectionId, revokedAt: null }, transaction },
+  );
+  if (!connection || connection.status === 'REVOKED') return;
+
+  await IntegrationWebhookSubscription.update(
+    { status: 'DISABLED', disabledAt: now },
+    { where: { connectionId: connection.id, status: { [Op.ne]: 'DISABLED' } }, transaction },
+  );
+  await connection.update({ status: 'REVOKED', revokedAt: now, disconnectedAt: now }, { transaction });
+  await recordAuditEvent(
+    {
+      organizationId: connection.organizationId,
+      actorUserId: null,
+      action: 'INTEGRATION_REVOKED',
+      entityType: 'INTEGRATION_CONNECTION',
+      entityId: connection.id,
+      metadata: { reason: options.reason, via: options.trigger, clientId: options.clientId },
+    },
+    { transaction },
+  );
 }
 
 export function toTokenResponse(issued: IssuedIntegrationTokens) {

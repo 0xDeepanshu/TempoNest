@@ -47,6 +47,7 @@ import {
   Td,
   Th,
 } from "./ui";
+import { IntegrationMappingsPanel } from "./integration-mappings-panel";
 import { NoOrganization, useWorkspace } from "./workspace";
 
 type InvitationStatusFilter = "pending" | "accepted" | "revoked" | "expired" | "all";
@@ -1036,6 +1037,14 @@ function OrganizationView({ organization }: { organization: Organization }) {
 
       {membership ? (
         <InvitationsPanel
+          organizationId={organization.id}
+          actor={membership}
+          timezone={current.timezone}
+        />
+      ) : null}
+
+      {membership && hasPermission(membership, "organization:update") ? (
+        <IntegrationMappingsPanel
           organizationId={organization.id}
           actor={membership}
           timezone={current.timezone}

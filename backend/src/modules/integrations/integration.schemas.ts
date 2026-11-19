@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { paginationSchema } from '../../utils/pagination';
-import { dateRangeSchema } from '../reporting/reporting.schemas';
+import { dateOnlySchema, dateRangeSchema } from '../reporting/reporting.schemas';
+import { LEAVE_REQUEST_STATUSES } from '../leave/leaveRequest.model';
+import { CORRECTION_STATUSES } from '../attendance/attendanceCorrection.model';
 import {
   INTEGRATION_EMPLOYEE_MAPPING_STATUSES,
   INTEGRATION_WEBHOOK_DELIVERY_STATUSES,
@@ -37,6 +39,8 @@ export const oauthLoginBodySchema = z
     email: z.string().trim().email().max(254),
     password: z.string().min(1).max(1024),
     authorization_request_id: z.string().uuid(),
+    // Login CSRF token, bound to the authorisation request and the binding cookie.
+    _csrf: z.string().min(1).max(256),
   })
   .strict();
 
@@ -169,6 +173,54 @@ export type IntegrationSessionHistoryQuery = z.infer<
 >;
 export type IntegrationSummaryQuery = z.infer<typeof integrationSummaryQuerySchema>;
 export type IntegrationIdleQuery = z.infer<typeof integrationIdleQuerySchema>;
+
+// externalEmployeeId is required (not optional, unlike the attendance queries above): this phase
+// only reads one explicitly mapped employee's own leave data, never an organisation-wide listing.
+export const integrationLeaveBalanceQuerySchema = z.object({
+  externalEmployeeId: externalId,
+  leaveTypeId: z.string().uuid().optional(),
+});
+
+export const integrationLeaveRequestListQuerySchema = paginationSchema.extend({
+  externalEmployeeId: externalId,
+  leaveTypeId: z.string().uuid().optional(),
+  status: z.enum(LEAVE_REQUEST_STATUSES).optional(),
+  from: dateOnlySchema.optional(),
+  to: dateOnlySchema.optional(),
+});
+
+export type IntegrationLeaveBalanceQuery = z.infer<typeof integrationLeaveBalanceQuerySchema>;
+export type IntegrationLeaveRequestListQuery = z.infer<
+  typeof integrationLeaveRequestListQuerySchema
+>;
+
+// Required externalEmployeeId, same reasoning as the leave queries above: this phase only reads one
+// explicitly mapped employee's own applicable holiday calendar, never an organisation-wide listing
+// that could include holidays scoped to other employees.
+export const integrationHolidayListQuerySchema = dateRangeSchema(366).and(
+  z.object({
+    externalEmployeeId: externalId,
+  }),
+);
+
+export type IntegrationHolidayListQuery = z.infer<typeof integrationHolidayListQuerySchema>;
+
+// Required externalEmployeeId, same reasoning as the other self-only queries above. from/to are
+// optional filters (not a mandatory range) to mirror WorkZen's own attendanceCorrectionListQuerySchema.
+export const integrationCorrectionListQuerySchema = paginationSchema
+  .extend({
+    externalEmployeeId: externalId,
+    status: z.enum(CORRECTION_STATUSES).optional(),
+    from: dateOnlySchema.optional(),
+    to: dateOnlySchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.from && value.to && value.to < value.from) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['to'], message: 'to must be on or after from' });
+    }
+  });
+
+export type IntegrationCorrectionListQuery = z.infer<typeof integrationCorrectionListQuerySchema>;
 
 export const integrationConnectionListQuerySchema = paginationSchema.extend({
   status: z.enum(['ACTIVE', 'DISCONNECTED', 'REVOKED']).optional(),

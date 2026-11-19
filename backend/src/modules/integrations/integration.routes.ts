@@ -8,6 +8,9 @@ import {
   matchIntegrationEmployees,
   sessionHistory,
 } from './integration.attendance.controller';
+import { corrections } from './integration.correction.controller';
+import { holidays } from './integration.holiday.controller';
+import { leaveBalances, leaveRequests } from './integration.leave.controller';
 import {
   createIntegrationWebhook,
   deleteIntegrationWebhook,
@@ -22,7 +25,11 @@ import {
   createWebhookSubscriptionSchema,
   integrationEmployeeListQuerySchema,
   integrationEmployeeMatchBatchSchema,
+  integrationCorrectionListQuerySchema,
+  integrationHolidayListQuerySchema,
   integrationIdleQuerySchema,
+  integrationLeaveBalanceQuerySchema,
+  integrationLeaveRequestListQuerySchema,
   integrationSessionHistoryQuerySchema,
   integrationStatusQuerySchema,
   integrationSummaryQuerySchema,
@@ -83,6 +90,40 @@ export function createIntegrationDataRouter(): Router {
     requireIntegrationAuth(['attendance:read']),
     validate({ query: integrationIdleQuerySchema }),
     idleSummary,
+  );
+
+  // Read-only leave data for one explicitly mapped employee. Never a listing across employees,
+  // never catalog/policy data, and never apply/cancel/approve/reject.
+  router.get(
+    '/leave/balances',
+    requireIntegrationAuth(['leave:read']),
+    validate({ query: integrationLeaveBalanceQuerySchema }),
+    leaveBalances,
+  );
+
+  router.get(
+    '/leave/requests',
+    requireIntegrationAuth(['leave:read']),
+    validate({ query: integrationLeaveRequestListQuerySchema }),
+    leaveRequests,
+  );
+
+  // Read-only holiday calendar for one explicitly mapped employee, scoped to published holidays
+  // applicable to them. Never a cross-employee listing, never create/edit/delete.
+  router.get(
+    '/holidays',
+    requireIntegrationAuth(['holidays:read']),
+    validate({ query: integrationHolidayListQuerySchema }),
+    holidays,
+  );
+
+  // Read-only attendance correction history for one explicitly mapped employee. Never a
+  // cross-employee listing, never evidence files, never approve/reject (no write endpoint exists).
+  router.get(
+    '/corrections',
+    requireIntegrationAuth(['corrections:read']),
+    validate({ query: integrationCorrectionListQuerySchema }),
+    corrections,
   );
 
   // Webhook configuration is optional and gated behind its own scope. It never

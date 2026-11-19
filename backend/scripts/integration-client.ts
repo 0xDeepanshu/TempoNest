@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { connectDatabase, disconnectDatabase, IntegrationClient } from '../src/database';
+import { generateOpaqueToken } from '../src/utils/crypto';
 import {
   assertIntegrationRedirectUri,
-  generateOpaqueToken,
   hashIntegrationValue,
 } from '../src/modules/integrations/integration.crypto';
 import {
@@ -19,11 +19,16 @@ const USAGE = [
   '  npm run integration:client -- rotate <clientId>',
   '  npm run integration:client -- disable <clientId>',
   '  npm run integration:client -- enable <clientId>',
+  '  npm run integration:client -- allow-scopes <clientId> --add leave:read[,<more>]',
   '',
   'Creates the OAuth client that Flowtrium authenticates with. The client',
   'secret is printed exactly once and only its keyed hash is stored. This is a',
   'trusted server-side operation: the integration API stays dark until',
   'INTEGRATION_ENABLED=true and a client exists.',
+  '',
+  'allow-scopes is additive only: it unions --add onto the client\'s existing',
+  'allowedScopes and never removes a scope already there. Prints the before',
+  'and after list so the change is auditable from the command output alone.',
 ].join('\n');
 
 type CreateOptions = {
@@ -148,6 +153,73 @@ async function setStatus(clientId: string | undefined, status: 'ACTIVE' | 'DISAB
   console.log(`Integration client ${client.clientId} is now ${status}`);
 }
 
+/**
+ * Additive only: unions --add onto the client's existing allowedScopes. Never removes a scope that
+ * was already there, so a mistaken run cannot narrow access. Every scope must already be in
+ * INTEGRATION_SCOPES (the OAuth authorize and token-issuance paths reject anything else anyway).
+ */
+async function allowScopes(clientId: string | undefined, args: string[]): Promise<void> {
+  const addIndex = args.indexOf('--add');
+  const addValue = addIndex >= 0 ? args[addIndex + 1] : undefined;
+  if (!addValue) throw new Error('--add <scope>[,<more>] is required');
+
+  const additions = addValue
+    .split(',')
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+  const known = new Set<string>(INTEGRATION_SCOPES);
+  const unknown = additions.filter((scope) => !known.has(scope));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unsupported scope(s): ${unknown.join(', ')}. Allowed: ${INTEGRATION_SCOPES.join(', ')}`,
+    );
+  }
+
+  const client = await loadClient(clientId);
+  const before = [...client.allowedScopes];
+  const after = [...new Set([...before, ...additions])];
+
+  console.log(`Client:         ${client.clientId} (${client.name})`);
+  console.log(`Scopes before:  [${before.join(', ')}]`);
+  console.log(`Scopes after:   [${after.join(', ')}]`);
+
+  if (after.length === before.length && before.every((scope) => after.includes(scope))) {
+    console.log('No change: every requested scope is already allowed. Nothing written.');
+    return;
+  }
+
+  await client.update({ allowedScopes: after });
+  console.log(`Updated allowedScopes for ${client.clientId}.`);
+  console.log(
+    `Rollback: npm run integration:client -- disallow-scopes ${client.clientId} --remove ${additions.join(',')}`,
+  );
+}
+
+/** The exact inverse of allowScopes: removes only the named scopes, leaves every other one untouched. */
+async function disallowScopes(clientId: string | undefined, args: string[]): Promise<void> {
+  const removeIndex = args.indexOf('--remove');
+  const removeValue = removeIndex >= 0 ? args[removeIndex + 1] : undefined;
+  if (!removeValue) throw new Error('--remove <scope>[,<more>] is required');
+
+  const removals = new Set(removeValue.split(',').map((scope) => scope.trim()).filter(Boolean));
+
+  const client = await loadClient(clientId);
+  const before = [...client.allowedScopes];
+  const after = before.filter((scope) => !removals.has(scope));
+
+  console.log(`Client:         ${client.clientId} (${client.name})`);
+  console.log(`Scopes before:  [${before.join(', ')}]`);
+  console.log(`Scopes after:   [${after.join(', ')}]`);
+
+  if (after.length === before.length) {
+    console.log('No change: none of the requested scopes were present. Nothing written.');
+    return;
+  }
+
+  await client.update({ allowedScopes: after });
+  console.log(`Updated allowedScopes for ${client.clientId}.`);
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === 'help' || command === '--help') {
@@ -172,6 +244,12 @@ async function main(): Promise<void> {
         break;
       case 'enable':
         await setStatus(args[0], 'ACTIVE');
+        break;
+      case 'allow-scopes':
+        await allowScopes(args[0], args.slice(1));
+        break;
+      case 'disallow-scopes':
+        await disallowScopes(args[0], args.slice(1));
         break;
       default:
         throw new Error(`Unknown command: ${command}`);

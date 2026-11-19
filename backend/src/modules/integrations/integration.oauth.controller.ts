@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { config } from '../../config/env';
 import { CSRF_COOKIE, setAuthCookies } from '../../utils/cookies';
+import { hashOpaqueToken, safeEqualStrings } from '../../utils/crypto';
 import { normalizeEmail } from '../../utils/email';
 import { AppError } from '../../utils/errors';
 import { asyncHandler } from '../../utils/asyncHandler';
@@ -31,6 +32,28 @@ import {
 } from './integration.schemas';
 import type { AuditContext } from '../screenshots/audit.service';
 
+/**
+ * Content-Security-Policy for the consent page. It matches the default policy except form-action, which
+ * also allows the origin of the partner's registered redirect URI. The consent form redirects there
+ * after approval, and Chrome checks that redirect against form-action.
+ */
+function consentFormActionCsp(redirectUri: string): string {
+  const redirectOrigin = new URL(redirectUri).origin;
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "font-src 'self' https: data:",
+    `form-action 'self' ${redirectOrigin}`,
+    "frame-ancestors 'self'",
+    "img-src 'self' data:",
+    "object-src 'none'",
+    "script-src 'self'",
+    "script-src-attr 'none'",
+    "style-src 'self' https: 'unsafe-inline'",
+    'upgrade-insecure-requests',
+  ].join('; ');
+}
+
 function sendHtml(res: Response, status: number, html: string): void {
   res.status(status);
   res.set({
@@ -60,6 +83,17 @@ function auditContext(req: Request): AuditContext {
 function bindingFrom(req: Request): string | undefined {
   const value: unknown = req.cookies?.[config.integrations.bindingCookie];
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * CSRF token for the hosted sign-in form. It is an HMAC, keyed with the server's token pepper, over the
+ * authorisation request id and the HTTP-only binding cookie value. Nothing is stored, so it needs no
+ * session. Only a page served to this browser can know it, because a cross-site page cannot read the
+ * binding cookie or the form. It is not a session token: the consent form still uses the session CSRF
+ * token, and the two derivations are different.
+ */
+function hostedLoginCsrfToken(requestId: string, rawBinding: string): string {
+  return hashOpaqueToken(`hosted-login-csrf|${requestId}|${rawBinding}`, config.auth.tokenPepper);
 }
 
 /**
@@ -117,7 +151,11 @@ export const authorize = asyncHandler(async (req: Request, res: Response) => {
     sendHtml(
       res,
       200,
-      renderLoginPage({ request: created.request, client: created.client }),
+      renderLoginPage({
+        request: created.request,
+        client: created.client,
+        csrfToken: hostedLoginCsrfToken(created.request.id, created.bindingToken),
+      }),
     );
     return;
   }
@@ -137,6 +175,7 @@ export const authorize = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const csrfToken: unknown = req.cookies?.[CSRF_COOKIE];
+  res.set('Content-Security-Policy', consentFormActionCsp(created.request.redirectUri));
   sendHtml(
     res,
     200,
@@ -160,6 +199,23 @@ export const authorizeLogin = asyncHandler(async (req: Request, res: Response) =
       renderErrorPage({
         title: 'Invalid sign-in request',
         message: parsed.error.issues.map((issue) => issue.message).join('. '),
+      }),
+    );
+    return;
+  }
+
+  // Login CSRF check. It runs before any password is read, and a mismatch changes nothing.
+  const binding = bindingFrom(req);
+  const expectedCsrf = binding
+    ? hostedLoginCsrfToken(parsed.data.authorization_request_id, binding)
+    : null;
+  if (!expectedCsrf || !safeEqualStrings(expectedCsrf, parsed.data._csrf)) {
+    sendHtml(
+      res,
+      403,
+      renderErrorPage({
+        title: 'Sign-in form expired',
+        message: 'Reload the page and sign in again.',
       }),
     );
     return;
@@ -206,6 +262,7 @@ export const authorizeLogin = asyncHandler(async (req: Request, res: Response) =
       return;
     }
 
+    res.set('Content-Security-Policy', consentFormActionCsp(loaded.request.redirectUri));
     sendHtml(
       res,
       200,
@@ -223,7 +280,12 @@ export const authorizeLogin = asyncHandler(async (req: Request, res: Response) =
     sendHtml(
       res,
       error instanceof AppError && error.statusCode === 429 ? 429 : 401,
-      renderLoginPage({ request: loaded.request, client: loaded.client, error: message }),
+      renderLoginPage({
+        request: loaded.request,
+        client: loaded.client,
+        csrfToken: expectedCsrf,
+        error: message,
+      }),
     );
   }
 });

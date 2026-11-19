@@ -8,6 +8,18 @@
 export const INTEGRATION_SCOPES = [
   'attendance:read',
   'employees:read',
+  // Read-only leave data, scoped the same way as attendance:read: only the
+  // explicitly mapped employee's own balances and requests, never another
+  // employee's and never catalog/policy administration.
+  'leave:read',
+  // Read-only holiday calendar, scoped the same way: only holidays published and applicable to the
+  // one explicitly mapped employee (organisation-wide or on their own applicable-employee list),
+  // never unpublished drafts, never holiday creation/edit/delete.
+  'holidays:read',
+  // Read-only attendance correction history for one explicitly mapped employee. Scoped by the same
+  // self-only rule listAttendanceCorrections already applies to non-reviewers: never another
+  // employee's requests, never evidence files, never approve/reject (no write endpoint exists).
+  'corrections:read',
   // Managing the webhook endpoint is integration configuration, not access to
   // additional WorkZen business data. It is optional and separate from the two
   // read scopes above.
@@ -15,13 +27,25 @@ export const INTEGRATION_SCOPES = [
 ] as const;
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number];
 
-export const INTEGRATION_READ_SCOPES = ['attendance:read', 'employees:read'] as const;
+export const INTEGRATION_READ_SCOPES = [
+  'attendance:read',
+  'employees:read',
+  'leave:read',
+  'holidays:read',
+  'corrections:read',
+] as const;
 
 export const INTEGRATION_SCOPE_DESCRIPTIONS: Record<IntegrationScope, string> = {
   'attendance:read':
     'Read attendance status, work sessions, breaks, daily/monthly summaries and idle time for mapped employees.',
   'employees:read':
     'Read the minimum employee identity needed to match accounts (WorkZen user id, name and email) for employees in the connected organisation.',
+  'leave:read':
+    'Read leave balances and leave request history for one explicitly mapped employee. Never exposes another employee’s leave data, and never allows applying, cancelling, approving or rejecting leave.',
+  'holidays:read':
+    'Read the published holiday calendar applicable to one explicitly mapped employee. Never exposes unpublished holidays, and never allows creating, editing or deleting holidays.',
+  'corrections:read':
+    'Read attendance correction request history (type, requested times, reason, status) for one explicitly mapped employee. Never exposes evidence files or another employee’s requests, and never allows submitting, approving or rejecting a correction.',
   'webhooks:manage':
     'Create, update, rotate and inspect this integration’s webhook subscriptions and delivery logs.',
 };

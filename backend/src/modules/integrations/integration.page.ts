@@ -70,9 +70,10 @@ function layout(title: string, body: string): string {
 export function renderLoginPage(options: {
   request: IntegrationAuthorizationRequest;
   client: IntegrationClient;
+  csrfToken: string;
   error?: string;
 }): string {
-  const { request, client, error } = options;
+  const { request, client, csrfToken, error } = options;
   return layout(
     'Connect an integration',
     `<h1>Sign in to connect ${escapeHtml(client.name)}</h1>
@@ -80,6 +81,7 @@ export function renderLoginPage(options: {
      ${error ? `<div class="error" role="alert">${escapeHtml(error)}</div>` : ''}
      <form method="post" action="/api/v1/integrations/oauth/authorize/login" autocomplete="on">
        <input type="hidden" name="authorization_request_id" value="${escapeHtml(request.id)}">
+       <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
        <label for="email">Email</label>
        <input id="email" name="email" type="email" required autocomplete="username">
        <label for="password">Password</label>

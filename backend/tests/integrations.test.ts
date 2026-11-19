@@ -678,6 +678,108 @@ describe('integration token lifecycle', () => {
     expect(response.status).toBe(401);
   });
 
+  it('revoking a token closes the connection: the record is kept, API access and webhooks stop, and a repeat revoke changes nothing', async () => {
+    const { owner } = await createTeam();
+    const client = await createTestClient();
+    const connection = await connectOrganization({ owner, client });
+    const subscription = await integrationPost(connection.accessToken, '/webhooks', {
+      url: 'https://flowtrium.test/api/workzen/webhooks',
+      eventTypes: ['attendance.started'],
+    });
+    expect(subscription.status).toBe(201);
+
+    const revokeWith = (token: string) => request(app).post(`${API}/integrations/oauth/revoke`).send({
+      token,
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
+    });
+    const first = await revokeWith(connection.accessToken);
+    expect(first.status).toBe(200);
+
+    const row = await IntegrationConnection.findByPk(connection.connectionId);
+    expect(row?.status).toBe('REVOKED');
+    expect(row?.revokedAt).toBeInstanceOf(Date);
+    const revokedAt = row!.revokedAt!.getTime();
+
+    const sub = await IntegrationWebhookSubscription.findByPk(subscription.body.data.subscription.id);
+    expect(sub?.status).toBe('DISABLED');
+    expect((await integrationGet(connection.accessToken, '/employees')).status).toBe(401);
+
+    // Revoking again is safe and keeps the first timestamp and audit entry.
+    const second = await revokeWith(connection.accessToken);
+    expect(second.status).toBe(200);
+    const again = await IntegrationConnection.findByPk(connection.connectionId);
+    expect(again?.status).toBe('REVOKED');
+    expect(again?.revokedAt?.getTime()).toBe(revokedAt);
+  });
+
+  it('closes the connection when only the refresh token is revoked, which is how a rejected binding is cleaned up', async () => {
+    const { owner } = await createTeam();
+    const client = await createTestClient();
+    const connection = await connectOrganization({ owner, client });
+
+    const revoke = await request(app).post(`${API}/integrations/oauth/revoke`).send({
+      token: connection.refreshToken,
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
+    });
+    expect(revoke.status).toBe(200);
+
+    const row = await IntegrationConnection.findByPk(connection.connectionId);
+    expect(row?.status).toBe('REVOKED');
+    const refresh = await exchangeToken({
+      grant_type: 'refresh_token',
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
+      refresh_token: connection.refreshToken,
+    });
+    expect(refresh.status).toBe(400);
+  });
+
+  it('refresh token reuse closes the connection, so no credential stays active', async () => {
+    const { owner } = await createTeam();
+    const client = await createTestClient();
+    const connection = await connectOrganization({ owner, client });
+    const rotated = await exchangeToken({
+      grant_type: 'refresh_token',
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
+      refresh_token: connection.refreshToken,
+    });
+    expect(rotated.status).toBe(200);
+
+    const reuse = await exchangeToken({
+      grant_type: 'refresh_token',
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
+      refresh_token: connection.refreshToken,
+    });
+    expect(reuse.status).toBe(401);
+    expect(reuse.body.error.code).toBe('REFRESH_TOKEN_REUSED');
+
+    const row = await IntegrationConnection.findByPk(connection.connectionId);
+    expect(row?.status).toBe('REVOKED');
+    const access = await integrationGet(rotated.body.access_token as string, '/employees');
+    expect(access.status).toBe(401);
+  });
+
+  it('a revoked connection is reactivated in place when the same organisation authorises again', async () => {
+    const { owner } = await createTeam();
+    const client = await createTestClient();
+    const connection = await connectOrganization({ owner, client });
+    await request(app).post(`${API}/integrations/oauth/revoke`).send({
+      token: connection.accessToken,
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
+    });
+
+    const reconnected = await connectOrganization({ owner, client });
+    expect(reconnected.connectionId).toBe(connection.connectionId);
+    const row = await IntegrationConnection.findByPk(connection.connectionId);
+    expect(row?.status).toBe('ACTIVE');
+    expect(row?.revokedAt).toBeNull();
+  });
+
   it('revokes the whole credential family when a rotated-out refresh token is revoked', async () => {
     const { owner } = await createTeam();
     const client = await createTestClient();

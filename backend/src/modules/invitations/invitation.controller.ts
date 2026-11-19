@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { config } from '../../config/env';
 import { setAuthCookies } from '../../utils/cookies';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { getClientIp, getUserAgent } from '../../utils/pagination';
@@ -43,7 +44,8 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
       invitation: toInvitationSummary(invitation),
       // The invitation is e-mailed. The token is also returned once to the
       // authorized inviter as a delivery fallback when SMTP is not configured.
-      token,
+      // Never returned in production: the raw token is only ever delivered by e-mail there.
+      ...(config.isProduction ? {} : { token }),
       expiresAt: invitation.expiresAt,
       emailSent,
     },
@@ -65,7 +67,8 @@ export const resend = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({
     data: {
       invitation: toInvitationSummary(invitation),
-      token,
+      // Omitted in production (see create above).
+      ...(config.isProduction ? {} : { token }),
       expiresAt: invitation.expiresAt,
       emailSent,
     },

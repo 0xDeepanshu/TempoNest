@@ -12,6 +12,23 @@ const CSRF_EXEMPT_PATHS = new Set([
   `${config.apiPrefix}/integrations/oauth/revoke`,
 ]);
 
+/** The only server-rendered consent form endpoints that may receive Origin: null (same-origin only). */
+const HOSTED_CONSENT_PATHS = new Set([
+  `${config.apiPrefix}/integrations/oauth/authorize/login`,
+  `${config.apiPrefix}/integrations/oauth/authorize/decision`,
+]);
+
+/**
+ * The hosted login POST is pre-authentication: no account has been resolved yet, so it is checked
+ * against its own token (hostedLoginCsrfToken, bound to the one-time binding cookie), not a session.
+ * It must never fall through to the session double-submit check below: a stale ACCESS_COOKIE left over
+ * from an unrelated, possibly-expired WorkZen session in the same browser is still sent here (its path
+ * is "/"), which would make that check compare this endpoint's distinct token against an unrelated
+ * session's CSRF cookie and always fail. The decision endpoint is authenticated and deliberately keeps
+ * using the session check below, since its form's token already is the real session CSRF cookie value.
+ */
+const HOSTED_LOGIN_PATH = `${config.apiPrefix}/integrations/oauth/authorize/login`;
+
 /**
  * An unsafe cookie-authenticated request must come from an allowlisted origin
  * or from the same origin that served the request (the hosted integration
@@ -71,7 +88,16 @@ export function csrfProtection(req: Request, _res: Response, next: NextFunction)
   if (CSRF_EXEMPT_PATHS.has(path)) return next();
 
   const origin = req.get('origin');
-  if (origin) {
+  // Chrome sends Origin: null for these same-origin form posts, because the consent pages use
+  // Referrer-Policy: no-referrer. Accept null only for these exact POST endpoints and only when the
+  // browser reports Sec-Fetch-Site: same-origin. The token checks below and in the handlers still apply.
+  const hostedSameOriginPost = req.method === 'POST'
+    && origin === 'null'
+    && HOSTED_CONSENT_PATHS.has(path)
+    && req.get('sec-fetch-site') === 'same-origin';
+  if (hostedSameOriginPost) {
+    // Allowed: validated by the login token (login) or the session CSRF token (decision).
+  } else if (origin) {
     if (!isOriginAllowed(origin, req)) {
       return next(AppError.forbidden('Request origin is not allowed', 'ORIGIN_NOT_ALLOWED'));
     }
@@ -83,6 +109,10 @@ export function csrfProtection(req: Request, _res: Response, next: NextFunction)
       return next(AppError.forbidden('Request origin is not allowed', 'ORIGIN_NOT_ALLOWED'));
     }
   }
+
+  // Checked by its own token above (via authorizeLogin), never by a session that may not exist yet
+  // or may be a stale leftover from an unrelated account in the same browser.
+  if (path === HOSTED_LOGIN_PATH) return next();
 
   const hasSessionCookie =
     Boolean(req.cookies?.[ACCESS_COOKIE]) || Boolean(req.cookies?.[REFRESH_COOKIE]);
