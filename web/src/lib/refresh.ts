@@ -6,6 +6,20 @@ export interface RefreshOutcome {
   status: number;
   setCookies: string[];
   code?: string;
+  retryAfter?: string | null;
+}
+
+/**
+ * 401/403 mean the refresh token is genuinely unusable, so the session must end.
+ * Anything else (429, 5xx, network) is transient and must not sign the user out.
+ */
+export function isDefinitiveRefreshFailure(outcome: RefreshOutcome): boolean {
+  return !outcome.ok && (outcome.status === 401 || outcome.status === 403);
+}
+
+/** Maps a transient refresh failure to the status returned to the browser. */
+export function transientRefreshStatus(outcome: RefreshOutcome): 429 | 503 {
+  return outcome.status === 429 ? 429 : 503;
 }
 
 export async function performRefresh(
@@ -39,7 +53,13 @@ export async function performRefresh(
       } catch {
         code = undefined;
       }
-      return { ok: false, status: response.status, setCookies, code };
+      return {
+        ok: false,
+        status: response.status,
+        setCookies,
+        code,
+        retryAfter: response.headers.get("retry-after"),
+      };
     }
 
     return { ok: true, status: response.status, setCookies };

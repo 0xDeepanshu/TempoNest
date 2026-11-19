@@ -75,6 +75,7 @@ function makeType(overrides: Partial<LeaveType> = {}): LeaveType {
     isPaid: true,
     requiresBalance: true,
     allowNegativeBalance: false,
+    allowHalfDay: true,
     maxConsecutiveDays: 10,
     minNoticeDays: 0,
     requiresDocumentation: false,
@@ -129,7 +130,9 @@ function makeBalance(overrides: Partial<LeaveBalance> = {}): LeaveBalance {
     approvedConsumed: 0,
     pendingReserved: 5,
     availableBalance: 17,
+    assignedBalance: 22,
     breakdown: {
+      assigned: 22,
       entitled: 20,
       accrued: 0,
       adjustments: 2,
@@ -368,10 +371,19 @@ describe("MyLeaveView", () => {
     renderView();
 
     expect(await screen.findByText("Available balances")).toBeInTheDocument();
-    expect(screen.getByText("Entitled")).toBeInTheDocument();
-    expect(screen.getByText("Accrued")).toBeInTheDocument();
+    expect(screen.getByText("Assigned")).toBeInTheDocument();
+    expect(screen.getByText("Used")).toBeInTheDocument();
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_content, element) =>
+          element?.tagName === "P" &&
+          element.textContent ===
+            "22 days assigned − 0 days used − 5 days pending = 17 days available",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("17 days").length).toBeGreaterThan(0);
-    expect(screen.getByText("+2")).toBeInTheDocument();
 
     const table = await screen.findByRole("table");
     expect(within(table).getByText("Rejected")).toBeInTheDocument();

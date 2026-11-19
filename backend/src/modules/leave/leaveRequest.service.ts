@@ -277,6 +277,12 @@ export async function applyForLeave(options: {
       if (!policy.isActive) {
         throw AppError.conflict('The leave policy is inactive', 'LEAVE_POLICY_INACTIVE');
       }
+      if (!type.allowHalfDay && (input.startHalfDay || input.endHalfDay)) {
+        throw AppError.unprocessable(
+          'This leave type does not allow half days',
+          'LEAVE_HALF_DAY_NOT_ALLOWED',
+        );
+      }
 
       const today = todayInTimezone(organization.timezone);
       if (input.startDate < today) {

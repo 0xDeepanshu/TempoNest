@@ -10,10 +10,14 @@ import type {
   LeaveBalancesResponse,
   LeaveBulkAdjustmentPreviewResponse,
   LeaveBulkAdjustmentResultResponse,
+  LeaveCreditAssignmentInput,
+  LeaveCreditAssignmentPreviewResponse,
+  LeaveCreditAssignmentResponse,
   LeaveEmployeeBalancesResponse,
   LeaveHolidayResponse,
   LeaveHolidaysResponse,
   LeaveLedgerResponse,
+  LeaveOverviewResponse,
   LeavePolicyResponse,
   LeavePoliciesResponse,
   LeaveReconciliationRepairResponse,
@@ -32,6 +36,7 @@ export type CreateLeaveTypeInput = {
   isPaid?: boolean;
   requiresBalance?: boolean;
   allowNegativeBalance?: boolean;
+  allowHalfDay?: boolean;
   maxConsecutiveDays?: number | null;
   minNoticeDays?: number;
   requiresDocumentation?: boolean;
@@ -73,6 +78,7 @@ export type LeaveBalanceListQuery = {
   employeeId?: string;
   leaveTypeId?: string;
   periodStart?: string;
+  search?: string;
 };
 
 export type LeaveAdjustmentInput = {
@@ -281,6 +287,35 @@ export function listLeaveBalances(
   return apiRequest<LeaveBalancesResponse>(leavePath(organizationId, "/balances"), {
     signal: options.signal,
     query: asQuery(query),
+  });
+}
+
+export function getLeaveOverview(
+  organizationId: string,
+  options: RequestOptions = {},
+) {
+  return apiRequest<LeaveOverviewResponse>(leavePath(organizationId, "/overview"), {
+    signal: options.signal,
+  });
+}
+
+export function previewLeaveCredits(
+  organizationId: string,
+  input: LeaveCreditAssignmentInput,
+) {
+  return apiRequest<LeaveCreditAssignmentPreviewResponse>(
+    leavePath(organizationId, "/credits/preview"),
+    { method: "POST", body: input },
+  );
+}
+
+export function assignLeaveCredits(
+  organizationId: string,
+  input: LeaveCreditAssignmentInput,
+) {
+  return apiRequest<LeaveCreditAssignmentResponse>(leavePath(organizationId, "/credits"), {
+    method: "POST",
+    body: { ...input, confirm: true },
   });
 }
 

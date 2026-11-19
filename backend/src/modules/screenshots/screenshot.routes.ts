@@ -27,6 +27,7 @@ import {
   listAuditEvents,
   listEmployeeRequests,
   listRequests,
+  listScheduledCapture,
   listScreenshots,
   updateEmployeeMonitoringPolicyHandler,
   updatePolicy,
@@ -140,7 +141,7 @@ export function createAdminScreenshotRouter(): Router {
     '/employees/:employeeId/monitoring-policy',
     requireAuth,
     resolveCurrentOrganization,
-    requirePermission('screenshot:policy'),
+    requirePermission('screenshot:monitoring'),
     validate({ params: employeeIdParamsSchema }),
     getEmployeeMonitoringPolicy,
   );
@@ -149,10 +150,18 @@ export function createAdminScreenshotRouter(): Router {
     '/employees/:employeeId/monitoring-policy',
     requireAuth,
     resolveCurrentOrganization,
-    requirePermission('screenshot:policy'),
+    requirePermission('screenshot:monitoring'),
     validate({ params: employeeIdParamsSchema }),
     validate({ body: screenshotEmployeeMonitoringPolicySchema }),
     updateEmployeeMonitoringPolicyHandler,
+  );
+
+  router.get(
+    '/scheduled-capture',
+    requireAuth,
+    resolveCurrentOrganization,
+    requirePermission('screenshot:monitoring'),
+    listScheduledCapture,
   );
 
   router.get(

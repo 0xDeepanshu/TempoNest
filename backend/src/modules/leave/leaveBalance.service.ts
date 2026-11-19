@@ -131,7 +131,7 @@ function addUnits(current: unknown, delta: number): number {
   return roundUnits(toUnits(current) + delta);
 }
 
-function capForAutomaticCredit(
+export function capForAutomaticCredit(
   balance: LeaveBalanceModel,
   amount: number,
   maxBalance: number | null,
@@ -665,24 +665,52 @@ export async function getEmployeeLeaveBalances(options: {
   };
 }
 
-export async function listOrganizationLeaveBalances(options: {
+/**
+ * Resolves the canonical current-period balances for the active organization
+ * directory. Both the paginated balance table and the admin overview read
+ * through this helper so they agree on which rows are current.
+ */
+export async function collectOrganizationLeaveBalances(options: {
   organization: OrganizationModel;
-  query: LeaveBalanceListQuery;
+  employeeId?: string;
+  leaveTypeId?: string;
+  periodStart?: string;
+  search?: string;
 }) {
-  const { organization, query } = options;
-  const types = await currentBalanceTypes(organization.id, query.leaveTypeId);
+  const { organization } = options;
+  const types = await currentBalanceTypes(organization.id, options.leaveTypeId);
 
+  const search = options.search?.trim();
+  const like = sequelize.getDialect() === 'postgres' ? Op.iLike : Op.like;
   const memberships = await Membership.findAll({
     where: {
       organizationId: organization.id,
       status: 'ACTIVE',
-      ...(query.employeeId ? { userId: query.employeeId } : {}),
+      ...(options.employeeId ? { userId: options.employeeId } : {}),
     },
-    include: [{ model: User, as: 'user', required: true, where: { status: 'ACTIVE' } }],
+    include: [
+      {
+        model: User,
+        as: 'user',
+        required: true,
+        where: {
+          status: 'ACTIVE',
+          ...(search
+            ? {
+                [Op.or]: [
+                  { name: { [like]: `%${search}%` } },
+                  { email: { [like]: `%${search}%` } },
+                ],
+              }
+            : {}),
+        },
+        attributes: ['id', 'name', 'email'],
+      },
+    ],
     order: [['createdAt', 'ASC']],
   });
 
-  const anchorDate = query.periodStart ?? todayInTimezone(organization.timezone);
+  const anchorDate = options.periodStart ?? todayInTimezone(organization.timezone);
 
   // Resolve exactly one canonical balance period per employee/type for the
   // selected date. Legacy rows from an earlier policy period may still overlap
@@ -764,6 +792,27 @@ export async function listOrganizationLeaveBalances(options: {
           canonical.has(`${balance.employeeId}:${balance.leaveTypeId}:${balance.periodStart}`),
         );
 
+  return {
+    balances,
+    types,
+    employeeIds: memberships.map((membership) => membership.userId),
+    anchorDate,
+  };
+}
+
+export async function listOrganizationLeaveBalances(options: {
+  organization: OrganizationModel;
+  query: LeaveBalanceListQuery;
+}) {
+  const { organization, query } = options;
+  const { balances } = await collectOrganizationLeaveBalances({
+    organization,
+    employeeId: query.employeeId,
+    leaveTypeId: query.leaveTypeId,
+    periodStart: query.periodStart,
+    search: query.search,
+  });
+
   const total = balances.length;
   const offset = (query.page - 1) * query.limit;
   const pageRows = balances.slice(offset, offset + query.limit);
@@ -779,13 +828,15 @@ export async function listOrganizationLeaveBalances(options: {
   };
 }
 
-type AdjustmentOutcome = {
+export type AdjustmentOutcome = {
   balance: LeaveBalanceModel;
   balanceId: string;
   typeName: string;
   amount: number;
   availableBefore: number;
   availableAfter: number;
+  assignedBefore: number;
+  assignedAfter: number;
   adjustmentBefore: number;
   adjustmentAfter: number;
   periodStart: string;
@@ -793,7 +844,7 @@ type AdjustmentOutcome = {
   createdBalance: boolean;
 };
 
-async function applyAdjustmentInTransaction(options: {
+export async function applyAdjustmentInTransaction(options: {
   organization: OrganizationModel;
   employeeId: string;
   actorUserId: string;
@@ -803,6 +854,8 @@ async function applyAdjustmentInTransaction(options: {
   now?: Date;
   audit: boolean;
   batchId?: string | null;
+  auditAction?: 'LEAVE_BALANCE_ADJUSTED' | 'LEAVE_CREDITS_ADDED' | 'LEAVE_CREDITS_SET';
+  auditMetadata?: Record<string, unknown>;
 }): Promise<AdjustmentOutcome> {
   const { organization, employeeId, actorUserId, input, context, transaction, audit } = options;
   const now = options.now ?? new Date();
@@ -880,6 +933,12 @@ async function applyAdjustmentInTransaction(options: {
   }
 
   const availableBefore = availableOf(balance);
+  const assignedBefore = roundUnits(
+    toUnits(balance.entitledBalance) +
+      toUnits(balance.accruedBalance) +
+      toUnits(balance.adjustmentBalance) +
+      toUnits(balance.carriedForwardBalance),
+  );
   const nextAvailable = roundUnits(availableBefore + amount);
   if (amount < 0 && !type.allowNegativeBalance && nextAvailable < 0) {
     throw AppError.conflict(
@@ -906,6 +965,7 @@ async function applyAdjustmentInTransaction(options: {
         periodStart: period.periodStart,
         periodEnd: period.periodEnd,
         ...(options.batchId ? { batchId: options.batchId } : {}),
+        ...(options.auditMetadata ? options.auditMetadata : {}),
       },
     },
     transaction,
@@ -917,7 +977,7 @@ async function applyAdjustmentInTransaction(options: {
         organizationId: organization.id,
         actorUserId,
         targetEmployeeId: employeeId,
-        action: 'LEAVE_BALANCE_ADJUSTED',
+        action: options.auditAction ?? 'LEAVE_BALANCE_ADJUSTED',
         entityType: 'LEAVE_BALANCE',
         entityId: balance.id,
         metadata: {
@@ -929,6 +989,7 @@ async function applyAdjustmentInTransaction(options: {
           periodStart: balance.periodStart,
           periodEnd: balance.periodEnd,
           ...(options.batchId ? { batchId: options.batchId, bulk: true } : {}),
+          ...(options.auditMetadata ? options.auditMetadata : {}),
         },
       },
       { transaction, context },
@@ -942,6 +1003,8 @@ async function applyAdjustmentInTransaction(options: {
     amount,
     availableBefore,
     availableAfter: toUnits(balance.availableBalance),
+    assignedBefore,
+    assignedAfter: roundUnits(assignedBefore + amount),
     adjustmentBefore,
     adjustmentAfter: toUnits(balance.adjustmentBalance),
     periodStart: balance.periodStart,
@@ -957,7 +1020,7 @@ class PreviewRollback<T> extends Error {
   }
 }
 
-async function inRolledBackTransaction<T>(
+export async function inRolledBackTransaction<T>(
   run: (transaction: Transaction) => Promise<T>,
 ): Promise<T> {
   try {

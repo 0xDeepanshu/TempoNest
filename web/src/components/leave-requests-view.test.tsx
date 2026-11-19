@@ -71,6 +71,7 @@ const leaveType: LeaveType = {
   isPaid: true,
   requiresBalance: true,
   allowNegativeBalance: false,
+  allowHalfDay: true,
   maxConsecutiveDays: 10,
   minNoticeDays: 0,
   requiresDocumentation: false,
@@ -163,7 +164,9 @@ const balance: LeaveBalance = {
   approvedConsumed: 0,
   pendingReserved: 5,
   availableBalance: 15,
+  assignedBalance: 20,
   breakdown: {
+    assigned: 20,
     entitled: 20,
     accrued: 0,
     adjustments: 0,

@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { apiRequest } from "@/lib/api-client";
-import { errorMessage } from "@/lib/api-error";
+import { errorMessage, isApiError } from "@/lib/api-error";
 import {
   hasAnyPermission,
   hasPermission,
@@ -54,6 +54,12 @@ function serverOrganizationId(): string | null {
 }
 
 const PERMISSION_REFRESH_THROTTLE_MS = 5_000;
+// Permission events arrive in bursts (one per denied request), so even an
+// event-driven refresh coalesces within a short window.
+const FORCED_REFRESH_COOLDOWN_MS = 2_000;
+// A rate-limited or failing backend must not be hammered by focus/permission
+// events, so pause session refreshes until the window has a chance to reset.
+const PERMISSION_REFRESH_BACKOFF_MS = 30_000;
 
 export function WorkspaceProvider({
   session,
@@ -78,11 +84,16 @@ export function WorkspaceProvider({
     let disposed = false;
     let inFlight = false;
     let lastFetchAt = 0;
+    let blockedUntil = 0;
 
     async function refresh(force: boolean) {
       if (disposed || inFlight) return;
       const now = Date.now();
-      if (!force && now - lastFetchAt < PERMISSION_REFRESH_THROTTLE_MS) return;
+      if (now < blockedUntil) return;
+      const minInterval = force
+        ? FORCED_REFRESH_COOLDOWN_MS
+        : PERMISSION_REFRESH_THROTTLE_MS;
+      if (now - lastFetchAt < minInterval) return;
       inFlight = true;
       lastFetchAt = now;
       try {
@@ -94,9 +105,12 @@ export function WorkspaceProvider({
           if (JSON.stringify(previous.value) === JSON.stringify(next)) return previous;
           return { source: session, value: next };
         });
-      } catch {
+      } catch (error) {
         // Keep the last known permissions. Authentication expiry is handled by
         // the API client's global 401 event.
+        if (isApiError(error) && (error.status === 429 || error.status >= 500)) {
+          blockedUntil = Date.now() + PERMISSION_REFRESH_BACKOFF_MS;
+        }
       } finally {
         inFlight = false;
       }

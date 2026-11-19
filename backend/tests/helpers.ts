@@ -150,8 +150,9 @@ export async function registerAgent(
 }
 
 /**
- * Test setup: per-employee monitoring defaults to disabled by design. Existing
- * screenshot/live tests are about capture mechanics, so they explicitly opt in.
+ * Test setup shortcut for capture-mechanics tests. New employees are enrolled
+ * with general monitoring enabled and scheduled capture disabled, so these
+ * tests only need to make sure the policy row exists and is enabled.
  */
 export async function enableEmployeeMonitoring(
   organizationId: string,
@@ -164,6 +165,8 @@ export async function enableEmployeeMonitoring(
       organizationId,
       employeeId,
       enabled: true,
+      scheduledCaptureEnabled: false,
+      nextCaptureAt: null,
       updatedByUserId: updatedByUserId ?? null,
     },
   }).then(async ([policy, created]) => {
@@ -171,6 +174,22 @@ export async function enableEmployeeMonitoring(
       await policy.update({ enabled: true, updatedByUserId: updatedByUserId ?? null });
     }
   });
+}
+
+/** Explicitly opts an employee in to scheduled capture for scheduler tests. */
+export async function enableScheduledCapture(
+  organizationId: string,
+  employeeId: string,
+  intervalMinutes = 30,
+): Promise<void> {
+  await EmployeeMonitoringPolicy.update(
+    {
+      scheduledCaptureEnabled: true,
+      captureIntervalMinutes: intervalMinutes,
+      nextCaptureAt: new Date(Date.now() + intervalMinutes * 60_000),
+    },
+    { where: { organizationId, employeeId } },
+  );
 }
 
 export async function createAccount(email = uniqueEmail(), name = 'Test User') {  const registerResponse = await registerUser(email, name);

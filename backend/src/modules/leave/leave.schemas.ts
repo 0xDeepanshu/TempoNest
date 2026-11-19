@@ -52,6 +52,7 @@ export const createLeaveTypeSchema = z
     isPaid: z.boolean().optional(),
     requiresBalance: z.boolean().optional(),
     allowNegativeBalance: z.boolean().optional(),
+    allowHalfDay: z.boolean().optional(),
     maxConsecutiveDays: z.number().int().min(1).max(365).nullable().optional(),
     minNoticeDays: z.number().int().min(0).max(365).optional(),
     requiresDocumentation: z.boolean().optional(),
@@ -121,6 +122,7 @@ export const leaveBalanceListQuerySchema = paginationSchema.extend({
   employeeId: z.string().uuid().optional(),
   leaveTypeId: z.string().uuid().optional(),
   periodStart: dateOnlySchema.optional(),
+  search: z.string().trim().max(120).optional(),
 });
 
 export const leaveBalanceDetailQuerySchema = z.object({
@@ -150,6 +152,47 @@ export const bulkLeaveAdjustmentSchema = leaveAdjustmentSchema
 export const bulkLeaveAdjustmentConfirmSchema = bulkLeaveAdjustmentSchema
   .extend({ confirm: z.literal(true) })
   .strict();
+
+const leaveCreditAssignmentFields = z
+  .object({
+    leaveTypeId: z.string().uuid(),
+    mode: z.enum(['ADD', 'SET']),
+    credits: z.number().finite().min(0).max(3650),
+    employeeIds: employeeIdListSchema.optional(),
+    allActive: z.boolean().optional(),
+    effectiveDate: dateOnlySchema.optional(),
+    reason: z.string().trim().min(3).max(500),
+  })
+  .strict();
+
+function refineCreditScope(
+  value: { mode: 'ADD' | 'SET'; credits: number; employeeIds?: string[]; allActive?: boolean },
+  ctx: z.RefinementCtx,
+) {
+  const hasEmployees = Array.isArray(value.employeeIds) && value.employeeIds.length > 0;
+  if (hasEmployees === Boolean(value.allActive)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['employeeIds'],
+      message: 'Choose either specific employees or all active employees',
+    });
+  }
+  if (value.mode === 'ADD' && value.credits <= 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['credits'],
+      message: 'Credits to add must be greater than zero',
+    });
+  }
+}
+
+export const leaveCreditAssignmentSchema =
+  leaveCreditAssignmentFields.superRefine(refineCreditScope);
+
+export const leaveCreditAssignmentConfirmSchema = leaveCreditAssignmentFields
+  .extend({ confirm: z.literal(true) })
+  .strict()
+  .superRefine(refineCreditScope);
 
 export const leaveBalanceBackfillQuerySchema = z
   .object({
@@ -325,6 +368,10 @@ export type LeaveAdjustmentInput = z.infer<typeof leaveAdjustmentSchema>;
 export type BulkLeaveAdjustmentInput = z.infer<typeof bulkLeaveAdjustmentSchema>;
 export type BulkLeaveAdjustmentConfirmInput = z.infer<
   typeof bulkLeaveAdjustmentConfirmSchema
+>;
+export type LeaveCreditAssignmentInput = z.infer<typeof leaveCreditAssignmentSchema>;
+export type LeaveCreditAssignmentConfirmInput = z.infer<
+  typeof leaveCreditAssignmentConfirmSchema
 >;
 export type LeaveBalanceBackfillQuery = z.infer<typeof leaveBalanceBackfillQuerySchema>;
 export type LeaveBalanceBackfillInput = z.infer<typeof leaveBalanceBackfillSchema>;

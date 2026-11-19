@@ -649,10 +649,21 @@ export interface ScreenshotPolicyDisclosureResponse {
   serverTime: string;
 }
 
-/** Per-employee monitoring switch. Independent of the member role. */
+/**
+ * Per-employee monitoring switch. Independent of the member role.
+ *
+ * `enabled` covers manual screenshot requests and live screen viewing;
+ * `scheduledCaptureEnabled` only covers automatic periodic capture and
+ * requires `enabled` to have any effect.
+ */
 export interface EmployeeMonitoringPolicy {
   employeeId: string;
   enabled: boolean;
+  scheduledCaptureEnabled: boolean;
+  scheduledCaptureActive: boolean;
+  captureIntervalMinutes: number;
+  nextCaptureAt: string | null;
+  lastCaptureAt: string | null;
   organizationEnabled: boolean;
   effectiveEnabled: boolean;
   updatedAt: string | null;
@@ -661,6 +672,22 @@ export interface EmployeeMonitoringPolicy {
 
 export interface EmployeeMonitoringPolicyResponse {
   data: { policy: EmployeeMonitoringPolicy };
+  serverTime: string;
+}
+
+export interface ScheduledCaptureEmployeeSummary {
+  employeeId: string;
+  name: string;
+  email: string;
+  scheduledCaptureEnabled: boolean;
+  scheduledCaptureActive: boolean;
+  captureIntervalMinutes: number;
+  nextCaptureAt: string | null;
+  lastCaptureAt: string | null;
+}
+
+export interface ScheduledCaptureOverviewResponse {
+  data: { employees: ScheduledCaptureEmployeeSummary[] };
   serverTime: string;
 }
 
@@ -884,6 +911,7 @@ export interface LeaveType {
   isPaid: boolean;
   requiresBalance: boolean;
   allowNegativeBalance: boolean;
+  allowHalfDay: boolean;
   maxConsecutiveDays: number | null;
   minNoticeDays: number;
   requiresDocumentation: boolean;
@@ -1168,7 +1196,9 @@ export interface LeaveBalance {
   approvedConsumed: number;
   pendingReserved: number;
   availableBalance: number;
+  assignedBalance: number;
   breakdown: {
+    assigned: number;
     entitled: number;
     accrued: number;
     adjustments: number;
@@ -1277,6 +1307,109 @@ export interface LeaveAdjustmentPreview {
 
 export interface LeaveAdjustmentPreviewResponse {
   data: LeaveAdjustmentPreview;
+  serverTime: string;
+}
+
+export type LeaveCreditMode = "ADD" | "SET";
+export type LeaveCreditScope = "SELECTED" | "ALL_ACTIVE";
+
+export interface LeaveCreditAssignmentInput {
+  leaveTypeId: string;
+  mode: LeaveCreditMode;
+  credits: number;
+  employeeIds?: string[];
+  allActive?: boolean;
+  effectiveDate?: string;
+  reason: string;
+}
+
+export interface LeaveCreditAssignmentSuccessItem {
+  employeeId: string;
+  employeeName: string;
+  ok: true;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  mode: LeaveCreditMode;
+  amount: number;
+  unchanged: boolean;
+  assignedBefore: number;
+  assignedAfter: number;
+  used: number;
+  pending: number;
+  availableBefore: number;
+  availableAfter: number;
+  periodStart: string;
+  periodEnd: string;
+}
+
+export interface LeaveCreditAssignmentFailureItem {
+  employeeId: string;
+  employeeName: string;
+  ok: false;
+  message: string;
+  code: string;
+}
+
+export type LeaveCreditAssignmentItem =
+  | LeaveCreditAssignmentSuccessItem
+  | LeaveCreditAssignmentFailureItem;
+
+export interface LeaveCreditAssignmentPreview {
+  mode: LeaveCreditMode;
+  scope: LeaveCreditScope;
+  leaveType: { id: string; name: string };
+  periodStart: string;
+  periodEnd: string;
+  summary: {
+    selected: number;
+    previewed: number;
+    unchanged: number;
+    failed: number;
+  };
+  items: LeaveCreditAssignmentItem[];
+}
+
+export interface LeaveCreditAssignmentResult {
+  batchId: string;
+  mode: LeaveCreditMode;
+  scope: LeaveCreditScope;
+  leaveType: { id: string; name: string };
+  summary: {
+    requested: number;
+    applied: number;
+    unchanged: number;
+    failed: number;
+  };
+  items: LeaveCreditAssignmentItem[];
+}
+
+export interface LeaveCreditAssignmentPreviewResponse {
+  data: LeaveCreditAssignmentPreview;
+  serverTime: string;
+}
+
+export interface LeaveCreditAssignmentResponse {
+  data: LeaveCreditAssignmentResult;
+  serverTime: string;
+}
+
+export interface LeaveOverview {
+  timezone: string;
+  anchorDate: string;
+  leaveTypes: number;
+  activeEmployees: number;
+  employeesWithBalances: number;
+  totalCreditsAssigned: number;
+  approvedConsumed: number;
+  pendingReserved: number;
+  availableCredits: number;
+  pendingApplications: number;
+  pendingCancellations: number;
+  accrualConfigured: boolean;
+}
+
+export interface LeaveOverviewResponse {
+  data: LeaveOverview;
   serverTime: string;
 }
 

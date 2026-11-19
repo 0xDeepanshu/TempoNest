@@ -3,6 +3,7 @@ import { DateTime } from 'luxon';
 import {
   AuditEvent,
   DesktopAgent,
+  EmployeeMonitoringPolicy,
   Membership,
   Organization,
   Screenshot,
@@ -48,9 +49,11 @@ import {
 } from './screenshotPolicy.service';
 import {
   assertEmployeeMonitoringEnabled,
+  assertEmployeeScheduledCaptureEnabled,
   isEmployeeMonitoringEnabled,
   listEmployeesWithMonitoringEnabled,
 } from './employeeMonitoringPolicy.service';
+import { SCHEDULED_CAPTURE_IDEMPOTENCY_PREFIX } from './employeeMonitoringPolicy.model';
 import {
   toScreenshotAuditEventSummary,
   toScreenshotPendingSummary,
@@ -387,6 +390,8 @@ export async function createScreenshotRequest(options: {
   actorUserId: string;
   actorRole: Role;
   idempotencyKey?: string | null;
+  /** Internal scheduler capture. Skips the administrator role/cooldown gates. */
+  scheduled?: boolean;
   context?: AuditContext;
 }): Promise<{
   request: ScreenshotRequestModel;
@@ -463,8 +468,21 @@ export async function createScreenshotRequest(options: {
         }
 
         const policy = await getOrCreateScreenshotPolicy(organizationId, transaction);
-        assertScreenshotRequestAllowed(policy, actorRole);
+        if (!options.scheduled) {
+          assertScreenshotRequestAllowed(policy, actorRole);
+        } else if (!policy.enabled) {
+          throw AppError.forbidden(
+            'Admin-initiated screenshots are disabled by this organization',
+            'SCREENSHOT_POLICY_DISABLED',
+          );
+        }
         await assertEmployeeMonitoringEnabled(organizationId, employeeId, transaction);
+        if (options.scheduled) {
+          // Defense in depth: the scheduler filters on this switch, but a
+          // request must never be created for an employee whose scheduled
+          // capture was disabled between the claim and this insert.
+          await assertEmployeeScheduledCaptureEnabled(organizationId, employeeId, transaction);
+        }
         await assertEmployeePolicyAcknowledgement(policy, employeeId, transaction);
 
         const activeForEmployee = await ScreenshotRequest.findOne({
@@ -483,7 +501,7 @@ export async function createScreenshotRequest(options: {
           );
         }
 
-        if (policy.requestCooldownSeconds > 0) {
+        if (!options.scheduled && policy.requestCooldownSeconds > 0) {
           const cooldownStart = new Date(
             now.getTime() - policy.requestCooldownSeconds * 1000,
           );
@@ -492,6 +510,16 @@ export async function createScreenshotRequest(options: {
               organizationId,
               requestingAdminId: actorUserId,
               requestedAt: { [Op.gt]: cooldownStart },
+              // Server-scheduled captures are attributed to the employee and
+              // must never consume an administrator's manual-request cooldown.
+              [Op.or]: [
+                { idempotencyKey: null },
+                {
+                  idempotencyKey: {
+                    [Op.notLike]: `${SCHEDULED_CAPTURE_IDEMPOTENCY_PREFIX}%`,
+                  },
+                },
+              ],
             },
             transaction,
             attributes: ['id'],
@@ -575,6 +603,7 @@ export async function createScreenshotRequest(options: {
               desktopAgentId: agent.id,
               expiresAt: request.expiresAt.toISOString(),
               policyVersion: policy.disclosureVersion,
+              scheduled: options.scheduled === true,
             },
           },
           { transaction, context: options.context },
@@ -1444,6 +1473,22 @@ export async function completeScreenshotRequest(options: {
         uploadExpiresAt: null,
       },
       { transaction },
+    );
+
+    // The scheduler reads this value so the admin UI can show the last capture
+    // without joining request history.
+    await EmployeeMonitoringPolicy.update(
+      { lastCaptureAt: captureTimestamp },
+      {
+        where: {
+          organizationId: request.organizationId,
+          employeeId: request.employeeId,
+        },
+        // A capture is not a policy edit: keep the policy's updatedAt and audit
+        // trail meaningful for actual configuration changes.
+        silent: true,
+        transaction,
+      },
     );
 
     await recordAuditEvent(

@@ -11,6 +11,7 @@ import {
 } from './screenshotPolicy.service';
 import {
   getEmployeeMonitoringPolicyView,
+  listScheduledCaptureOverview,
   updateEmployeeMonitoringPolicy,
 } from './employeeMonitoringPolicy.service';
 import {
@@ -249,7 +250,7 @@ export const getEmployeeMonitoringPolicy = asyncHandler(
     const policy = await getEmployeeMonitoringPolicyView({
       organizationId: req.organization!.organization.id,
       employeeId: req.params.employeeId!,
-      actorRole: req.organization!.membership.role,
+      actor: req.organization!.effective,
     });
     res.status(200).json({ data: { policy }, serverTime: now() });
   },
@@ -257,13 +258,19 @@ export const getEmployeeMonitoringPolicy = asyncHandler(
 
 export const updateEmployeeMonitoringPolicyHandler = asyncHandler(
   async (req: Request, res: Response) => {
-    const body = req.body as { enabled: boolean };
+    const body = req.body as {
+      enabled?: boolean;
+      scheduledCaptureEnabled?: boolean;
+      captureIntervalMinutes?: number;
+    };
     const policy = await updateEmployeeMonitoringPolicy({
       organizationId: req.organization!.organization.id,
       employeeId: req.params.employeeId!,
       actorUserId: req.auth!.user.id,
-      actorRole: req.organization!.membership.role,
+      actor: req.organization!.effective,
       enabled: body.enabled,
+      scheduledCaptureEnabled: body.scheduledCaptureEnabled,
+      captureIntervalMinutes: body.captureIntervalMinutes,
       context: auditContext(req),
     });
 
@@ -280,6 +287,15 @@ export const updateEmployeeMonitoringPolicyHandler = asyncHandler(
     res.status(200).json({ data: { policy }, serverTime: now() });
   },
 );
+
+/** Owner/admin dashboard list of every employee's scheduled-capture state. */
+export const listScheduledCapture = asyncHandler(async (req: Request, res: Response) => {
+  const employees = await listScheduledCaptureOverview({
+    organizationId: req.organization!.organization.id,
+    actor: req.organization!.effective,
+  });
+  res.status(200).json({ data: { employees }, serverTime: now() });
+});
 
 export const getMyPolicy = asyncHandler(async (req: Request, res: Response) => {
   const policy = await getEmployeeScreenshotPolicyDisclosure(

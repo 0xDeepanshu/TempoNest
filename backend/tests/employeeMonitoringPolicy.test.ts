@@ -156,7 +156,7 @@ describe('per-employee screen monitoring policy', () => {
     await resetDatabase();
   });
 
-  it('defaults every employee to disabled, including when the organization policy is enabled', async () => {
+  it('enables monitoring by default and leaves scheduled capture on Never', async () => {
     const team = await createTeam();
     await enableOrganizationPolicy(team.ownerAuth, team.orgId);
 
@@ -164,36 +164,45 @@ describe('per-employee screen monitoring policy', () => {
     expect(response.status).toBe(200);
     expect(response.body.data.policy).toMatchObject({
       employeeId: team.employee.user.id,
-      enabled: false,
+      enabled: true,
+      scheduledCaptureEnabled: false,
+      scheduledCaptureActive: false,
+      captureIntervalMinutes: 30,
+      nextCaptureAt: null,
       organizationEnabled: true,
-      effectiveEnabled: false,
-      updatedAt: null,
+      effectiveEnabled: true,
+      lastCaptureAt: null,
       updatedBy: null,
     });
-    expect(
-      await EmployeeMonitoringPolicy.count({ where: { organizationId: team.orgId } }),
-    ).toBe(0);
+    const row = await EmployeeMonitoringPolicy.findOne({
+      where: { organizationId: team.orgId, employeeId: team.employee.user.id },
+    });
+    expect(row?.enabled).toBe(true);
+    expect(row?.scheduledCaptureEnabled).toBe(false);
+    expect(row?.captureIntervalMinutes).toBe(30);
+    expect(row?.nextCaptureAt).toBeNull();
 
     const disclosure = await request(app)
       .get(`${API}/screenshot-policy`)
       .set(headers(team.employeeAuth, team.orgId));
     expect(disclosure.status).toBe(200);
-    expect(disclosure.body.data.policy.enabled).toBe(false);
+    expect(disclosure.body.data.policy.enabled).toBe(true);
   });
 
-  it('lets an owner enable monitoring and records the actor, target, organization, and change', async () => {
+  it('lets an owner enable scheduled capture and records the actor, target, organization, and change', async () => {
     const team = await createTeam();
     await enableOrganizationPolicy(team.ownerAuth, team.orgId);
 
-    const updated = await setEmployeePolicy(
-      team.ownerAuth,
-      team.orgId,
-      team.employee.user.id,
-      true,
-    );
+    const updated = await request(app)
+      .patch(`${API}/admin/employees/${team.employee.user.id}/monitoring-policy`)
+      .set(headers(team.ownerAuth, team.orgId))
+      .send({ scheduledCaptureEnabled: true, captureIntervalMinutes: 15 });
     expect(updated.status).toBe(200);
     expect(updated.body.data.policy).toMatchObject({
       enabled: true,
+      scheduledCaptureEnabled: true,
+      scheduledCaptureActive: true,
+      captureIntervalMinutes: 15,
       organizationEnabled: true,
       effectiveEnabled: true,
       updatedBy: {
@@ -202,6 +211,7 @@ describe('per-employee screen monitoring policy', () => {
       },
     });
     expect(updated.body.data.policy.updatedAt).toBeTruthy();
+    expect(updated.body.data.policy.nextCaptureAt).toBeTruthy();
 
     const audit = await AuditEvent.findOne({
       where: {
@@ -215,23 +225,42 @@ describe('per-employee screen monitoring policy', () => {
     expect(audit?.entityType).toBe('EMPLOYEE_MONITORING_POLICY');
     expect(audit?.metadata).toMatchObject({
       employeeId: team.employee.user.id,
-      previousValue: false,
+      previousValue: true,
       newValue: true,
+      previousScheduledCaptureEnabled: false,
+      scheduledCaptureEnabled: true,
+      previousCaptureIntervalMinutes: 30,
+      captureIntervalMinutes: 15,
       updatedByUserId: team.owner.user.id,
     });
     expect(typeof audit?.metadata.timestamp).toBe('string');
 
+    const disabled = await setEmployeePolicy(
+      team.ownerAuth,
+      team.orgId,
+      team.employee.user.id,
+      false,
+    );
+    expect(disabled.body.data.policy).toMatchObject({
+      enabled: false,
+      nextCaptureAt: null,
+    });
+
     const disclosure = await request(app)
       .get(`${API}/screenshot-policy`)
       .set(headers(team.employeeAuth, team.orgId));
-    expect(disclosure.body.data.policy.enabled).toBe(true);
+    expect(disclosure.body.data.policy.enabled).toBe(false);
   });
 
   it('does not duplicate the audit row when the value is unchanged', async () => {
     const team = await createTeam();
     await enableOrganizationPolicy(team.ownerAuth, team.orgId);
-    await setEmployeePolicy(team.ownerAuth, team.orgId, team.employee.user.id, true);
-    await setEmployeePolicy(team.ownerAuth, team.orgId, team.employee.user.id, true);
+    for (let index = 0; index < 2; index += 1) {
+      await request(app)
+        .patch(`${API}/admin/employees/${team.employee.user.id}/monitoring-policy`)
+        .set(headers(team.ownerAuth, team.orgId))
+        .send({ captureIntervalMinutes: 15 });
+    }
 
     expect(
       await AuditEvent.count({
@@ -244,7 +273,7 @@ describe('per-employee screen monitoring policy', () => {
     ).toBe(1);
   });
 
-  it('allows administrators to read but only owners to change the policy', async () => {
+  it('lets authorized administrators and managers change the policy but never employees', async () => {
     const team = await createTeam();
     await enableOrganizationPolicy(team.ownerAuth, team.orgId);
     const admin = await inviteAndAccept(team.owner, {
@@ -261,16 +290,13 @@ describe('per-employee screen monitoring policy', () => {
     const managerAuth = await desktopAuth(manager.email);
 
     expect((await getEmployeePolicy(adminAuth, team.orgId, team.employee.user.id)).status).toBe(200);
+    expect(
+      (await setEmployeePolicy(adminAuth, team.orgId, team.employee.user.id, false)).status,
+    ).toBe(200);
 
-    const adminAttempt = await setEmployeePolicy(
-      adminAuth,
-      team.orgId,
-      team.employee.user.id,
-      true,
+    expect((await getEmployeePolicy(managerAuth, team.orgId, team.employee.user.id)).status).toBe(
+      403,
     );
-    expect(adminAttempt.status).toBe(403);
-    expect(adminAttempt.body.error.code).toBe('PERMISSION_DENIED');
-
     const managerAttempt = await setEmployeePolicy(
       managerAuth,
       team.orgId,
@@ -287,11 +313,24 @@ describe('per-employee screen monitoring policy', () => {
     );
     expect(employeeAttempt.status).toBe(403);
 
-    expect(
-      await EmployeeMonitoringPolicy.findOne({
-        where: { organizationId: team.orgId, employeeId: team.employee.user.id },
-      }),
-    ).toBeNull();
+    // The owner can delegate only this monitoring capability to MANAGER
+    // without granting the organization-wide policy permission.
+    const grant = await team.owner.agent
+      .patch(`${API}/organizations/${team.orgId}/roles/MANAGER`)
+      .set('x-csrf-token', team.owner.csrf)
+      .send({
+        permissions: ['organization:read', 'screenshot:read', 'screenshot:monitoring'],
+      });
+    expect(grant.status).toBe(200);
+
+    const authorizedManager = await setEmployeePolicy(
+      managerAuth,
+      team.orgId,
+      team.employee.user.id,
+      true,
+    );
+    expect(authorizedManager.status).toBe(200);
+    expect(authorizedManager.body.data.policy.enabled).toBe(true);
   });
 
   it('never changes roles, account status, or membership status', async () => {
@@ -317,6 +356,7 @@ describe('per-employee screen monitoring policy', () => {
   it('blocks screenshot requests for a disabled employee', async () => {
     const team = await createTeam();
     await enableOrganizationPolicy(team.ownerAuth, team.orgId);
+    await setEmployeePolicy(team.ownerAuth, team.orgId, team.employee.user.id, false);
 
     const blocked = await createRequest(team.ownerAuth, team.orgId, team.employee.user.id);
     expect(blocked.status).toBe(403);
@@ -475,23 +515,28 @@ describe('per-employee screen monitoring policy', () => {
     await enableOrganizationPolicy(first.ownerAuth, first.orgId);
     await enableOrganizationPolicy(second.ownerAuth, second.orgId);
 
-    await setEmployeePolicy(first.ownerAuth, first.orgId, first.employee.user.id, true);
-    await setEmployeePolicy(first.ownerAuth, first.orgId, first.secondEmployee!.user.id, true);
-
-    const secondPolicy = await getEmployeePolicy(
-      second.ownerAuth,
-      second.orgId,
-      second.employee.user.id,
+    const firstDefault = await getEmployeePolicy(
+      first.ownerAuth,
+      first.orgId,
+      first.employee.user.id,
     );
-    expect(secondPolicy.body.data.policy.enabled).toBe(false);
+    expect(firstDefault.body.data.policy.enabled).toBe(true);
 
     await setEmployeePolicy(first.ownerAuth, first.orgId, first.employee.user.id, false);
+
     const other = await getEmployeePolicy(
       first.ownerAuth,
       first.orgId,
       first.secondEmployee!.user.id,
     );
     expect(other.body.data.policy.enabled).toBe(true);
+
+    const secondPolicy = await getEmployeePolicy(
+      second.ownerAuth,
+      second.orgId,
+      second.employee.user.id,
+    );
+    expect(secondPolicy.body.data.policy.enabled).toBe(true);
 
     const crossOrganization = await getEmployeePolicy(
       second.ownerAuth,
@@ -514,6 +559,7 @@ describe('per-employee screen monitoring policy', () => {
     const team = await createTeam({ extraEmployee: true });
     await enableOrganizationPolicy(team.ownerAuth, team.orgId);
     await setEmployeePolicy(team.ownerAuth, team.orgId, team.employee.user.id, true);
+    await setEmployeePolicy(team.ownerAuth, team.orgId, team.secondEmployee!.user.id, false);
 
     const response = await request(app)
       .get(`${API}/organizations/${team.orgId}/reports/tracking-status`)
@@ -530,14 +576,14 @@ describe('per-employee screen monitoring policy', () => {
     expect(secondRow?.monitoringEnabled).toBe(false);
   });
 
-  it('keeps the organization policy effective state false when no row exists', async () => {
+  it('leaves the organization policy disabled until an owner enables it', async () => {
     const team = await createTeam();
-    await enableOrganizationPolicy(team.ownerAuth, team.orgId);
-    const policy = await ScreenshotPolicy.findOne({ where: { organizationId: team.orgId } });
-    expect(policy?.enabled).toBe(true);
+    expect(await ScreenshotPolicy.findOne({ where: { organizationId: team.orgId } })).toBeNull();
 
     const response = await getEmployeePolicy(team.ownerAuth, team.orgId, team.employee.user.id);
-    expect(response.body.data.policy.organizationEnabled).toBe(true);
+    expect(response.body.data.policy.enabled).toBe(true);
+    expect(response.body.data.policy.scheduledCaptureEnabled).toBe(false);
+    expect(response.body.data.policy.organizationEnabled).toBe(false);
     expect(response.body.data.policy.effectiveEnabled).toBe(false);
   });
 

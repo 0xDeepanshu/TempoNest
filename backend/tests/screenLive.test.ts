@@ -247,6 +247,12 @@ describe('admin live screen viewing', () => {
   it('fails closed when the policy is disabled or the role is not live-capable', async () => {
     const team = await createTeam();
 
+    const disabledPolicy = await request(app)
+      .patch(`${API}/admin/screenshot-policy`)
+      .set({ ...team.ownerAuth.headers, 'x-organization-id': team.orgId })
+      .send({ enabled: false });
+    expect(disabledPolicy.status).toBe(200);
+
     const disabled = await startLive(team.ownerAuth, team.orgId, team.employee.user.id);
     expect(disabled.status).toBe(403);
     expect(disabled.body.error.code).toBe('SCREEN_LIVE_POLICY_DISABLED');

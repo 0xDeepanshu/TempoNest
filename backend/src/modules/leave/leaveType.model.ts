@@ -12,6 +12,7 @@ export interface LeaveTypeAttributes {
   isPaid: boolean;
   requiresBalance: boolean;
   allowNegativeBalance: boolean;
+  allowHalfDay: boolean;
   maxConsecutiveDays: number | null;
   minNoticeDays: number;
   requiresDocumentation: boolean;
@@ -29,6 +30,7 @@ export type LeaveTypeCreationAttributes = Optional<
   | 'isPaid'
   | 'requiresBalance'
   | 'allowNegativeBalance'
+  | 'allowHalfDay'
   | 'maxConsecutiveDays'
   | 'minNoticeDays'
   | 'requiresDocumentation'
@@ -55,6 +57,7 @@ export class LeaveType
   declare isPaid: boolean;
   declare requiresBalance: boolean;
   declare allowNegativeBalance: boolean;
+  declare allowHalfDay: boolean;
   declare maxConsecutiveDays: number | null;
   declare minNoticeDays: number;
   declare requiresDocumentation: boolean;
@@ -115,6 +118,12 @@ export function initLeaveType(sequelize: Sequelize): typeof LeaveType {
         allowNull: false,
         field: 'allow_negative_balance',
         defaultValue: false,
+      },
+      allowHalfDay: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        field: 'allow_half_day',
+        defaultValue: true,
       },
       maxConsecutiveDays: {
         type: DataTypes.INTEGER,

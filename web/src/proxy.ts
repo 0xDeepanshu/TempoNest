@@ -66,7 +66,9 @@ async function accessCookieWorks(accessToken: string): Promise<"valid" | "expire
     });
     if (response.ok) return "valid";
     if (response.status === 401) return "expired";
-    return "expired";
+    // A rate-limited or failing backend says nothing about the token, so do not
+    // start a refresh (and a token rotation) on the strength of it.
+    return "unreachable";
   } catch {
     return "unreachable";
   }

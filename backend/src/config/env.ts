@@ -87,6 +87,12 @@ const envSchema = z
     SCREENSHOT_UPLOAD_TTL_SECONDS: z.coerce.number().int().min(10).max(3600).default(120),
     SCREENSHOT_DOWNLOAD_TTL_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
     SCREENSHOT_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(86_400).default(300),
+    SCREENSHOT_SCHEDULE_SWEEP_INTERVAL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(5)
+      .max(3_600)
+      .default(30),
     SCREENSHOT_MAX_BYTES: z.coerce.number().int().min(1024).max(52_428_800).default(10_485_760),
     SCREENSHOT_ALLOWED_CONTENT_TYPES: z
       .string()
@@ -497,6 +503,7 @@ export const config = {
     uploadTtlSeconds: env.SCREENSHOT_UPLOAD_TTL_SECONDS,
     downloadTtlSeconds: env.SCREENSHOT_DOWNLOAD_TTL_SECONDS,
     cleanupIntervalMs: env.SCREENSHOT_CLEANUP_INTERVAL_SECONDS * 1000,
+    scheduleSweepIntervalMs: env.SCREENSHOT_SCHEDULE_SWEEP_INTERVAL_SECONDS * 1000,
     maxBytes: env.SCREENSHOT_MAX_BYTES,
     allowedContentTypes: env.SCREENSHOT_ALLOWED_CONTENT_TYPES,
     s3: {

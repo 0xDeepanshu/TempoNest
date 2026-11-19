@@ -23,7 +23,9 @@ function balance(overrides: Partial<LeaveBalance> = {}): LeaveBalance {
     approvedConsumed: 0,
     pendingReserved: 0,
     availableBalance: 20,
+    assignedBalance: 20,
     breakdown: {
+      assigned: 20,
       entitled: 20,
       accrued: 0,
       adjustments: 0,

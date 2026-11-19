@@ -284,7 +284,7 @@ export function EmployeeDetailView({
         </Card>
       </div>
 
-      {membership && hasPermission(membership, "screenshot:policy") ? (
+      {membership && hasPermission(membership, "screenshot:monitoring") ? (
         <ScreenMonitoringPolicyCard
           organizationId={organization.id}
           employeeId={employee.userId}

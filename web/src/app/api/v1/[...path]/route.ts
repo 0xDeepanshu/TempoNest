@@ -10,7 +10,12 @@ import {
   mergeCookieHeader,
   rewriteAuthCookies,
 } from "@/lib/cookies";
-import { refreshOnce } from "@/lib/refresh";
+import {
+  isDefinitiveRefreshFailure,
+  refreshOnce,
+  transientRefreshStatus,
+  type RefreshOutcome,
+} from "@/lib/refresh";
 
 interface RouteContext {
   params: Promise<{ path: string[] }>;
@@ -80,6 +85,27 @@ function responseHeaders(upstream: Response, setCookies: string[]): Headers {
   headers.set("cache-control", "no-store");
   for (const cookie of setCookies) headers.append("set-cookie", cookie);
   return headers;
+}
+
+function transientRefreshResponse(outcome: RefreshOutcome): Response {
+  const status = transientRefreshStatus(outcome);
+  const headers = new Headers({
+    "content-type": "application/json",
+    "cache-control": "no-store",
+  });
+  if (outcome.retryAfter) headers.set("retry-after", outcome.retryAfter);
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: status === 429 ? "RATE_LIMITED" : "SESSION_REFRESH_UNAVAILABLE",
+        message:
+          status === 429
+            ? "Too many requests. Wait a moment, then try again."
+            : "Your session could not be refreshed right now. Try again shortly.",
+      },
+    }),
+    { status, headers },
+  );
 }
 
 async function respond(upstream: Response, setCookies: string[]): Promise<Response> {
@@ -159,10 +185,14 @@ async function handle(request: NextRequest, context: RouteContext): Promise<Resp
           { status: 502, headers: { "cache-control": "no-store" } },
         );
       }
-    } else if (outcome.status === 401 || outcome.status === 403) {
+    } else if (isDefinitiveRefreshFailure(outcome)) {
       const secure =
         isSecureCookie(cookieHeader ?? "") || process.env.NODE_ENV === "production";
       setCookies.push(...clearAuthCookieHeaders(secure));
+    } else {
+      // A rate-limited or unreachable backend is not an authentication failure.
+      // Returning the original 401 would make the client discard a valid session.
+      return transientRefreshResponse(outcome);
     }
   }
 

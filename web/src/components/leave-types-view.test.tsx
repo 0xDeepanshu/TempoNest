@@ -91,6 +91,7 @@ const leaveType: LeaveType = {
   isPaid: true,
   requiresBalance: true,
   allowNegativeBalance: false,
+  allowHalfDay: true,
   maxConsecutiveDays: 10,
   minNoticeDays: 0,
   requiresDocumentation: false,
@@ -176,7 +177,7 @@ describe("LeaveTypesView", () => {
     expect(within(table).getByText("Paid")).toBeInTheDocument();
     expect(within(table).getByText("Balance required")).toBeInTheDocument();
     expect(within(table).getByText("Up to 10 consecutive days")).toBeInTheDocument();
-    expect(within(table).getByText(/20 days initial/)).toBeInTheDocument();
+    expect(within(table).getByText(/20 days starting credits/)).toBeInTheDocument();
   });
 
   it("validates a new leave type before creating it", async () => {
@@ -216,13 +217,14 @@ describe("LeaveTypesView", () => {
             requiresBalance: true,
             isPaid: true,
             isActive: true,
+            allowHalfDay: true,
           }),
         }),
       );
     });
     expect(
       await screen.findByText(
-        "Sick Leave was created with a default policy. Review its policy to set entitlement, accrual, and working days.",
+        "Sick Leave was created with a default policy. Review its policy to set starting credits, carry-forward, and working days.",
       ),
     ).toBeInTheDocument();
   });

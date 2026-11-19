@@ -12,6 +12,54 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("apiRequest session expiry events", () => {
+  it("emits tn:auth-expired only for a 401 response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(401, {
+          error: { code: "UNAUTHENTICATED", message: "Sign in to continue." },
+        }),
+      ),
+    );
+    const listener = vi.fn();
+    window.addEventListener("tn:auth-expired", listener);
+
+    try {
+      await expect(apiRequest("/auth/me")).rejects.toMatchObject({ status: 401 });
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("tn:auth-expired", listener);
+    }
+  });
+
+  it("does not treat rate limiting as an authentication failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(429, {
+          error: {
+            code: "RATE_LIMITED",
+            message: "Too many requests. Please try again later.",
+          },
+        }),
+      ),
+    );
+    const listener = vi.fn();
+    window.addEventListener("tn:auth-expired", listener);
+
+    try {
+      await expect(apiRequest("/auth/me")).rejects.toMatchObject({
+        status: 429,
+        code: "RATE_LIMITED",
+      });
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("tn:auth-expired", listener);
+    }
+  });
+});
+
 describe("apiRequest permission events", () => {
   it("emits tn:permission-denied for a PERMISSION_DENIED response", async () => {
     vi.stubGlobal(

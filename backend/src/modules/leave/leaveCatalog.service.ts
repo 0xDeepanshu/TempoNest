@@ -122,6 +122,7 @@ export async function createLeaveType(options: {
         isPaid: input.isPaid ?? true,
         requiresBalance: input.requiresBalance ?? true,
         allowNegativeBalance: input.allowNegativeBalance ?? false,
+        allowHalfDay: input.allowHalfDay ?? true,
         maxConsecutiveDays: input.maxConsecutiveDays ?? null,
         minNoticeDays: input.minNoticeDays ?? 0,
         requiresDocumentation: input.requiresDocumentation ?? false,
@@ -197,6 +198,7 @@ export async function updateLeaveType(options: {
       isPaid: current.isPaid,
       requiresBalance: current.requiresBalance,
       allowNegativeBalance: current.allowNegativeBalance,
+      allowHalfDay: current.allowHalfDay,
       maxConsecutiveDays: current.maxConsecutiveDays,
       minNoticeDays: current.minNoticeDays,
       requiresDocumentation: current.requiresDocumentation,
@@ -214,6 +216,7 @@ export async function updateLeaveType(options: {
         ...(input.allowNegativeBalance !== undefined
           ? { allowNegativeBalance: input.allowNegativeBalance }
           : {}),
+        ...(input.allowHalfDay !== undefined ? { allowHalfDay: input.allowHalfDay } : {}),
         ...(input.maxConsecutiveDays !== undefined
           ? { maxConsecutiveDays: input.maxConsecutiveDays }
           : {}),

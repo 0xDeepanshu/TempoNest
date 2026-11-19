@@ -5,7 +5,6 @@ import { formatDateRange, formatDateTime, formatDay } from "@/lib/format";
 import {
   balancePeriodLabel,
   formatLeaveUnits,
-  formatSignedLeaveUnits,
   isCurrentBalancePeriod,
   leaveDurationLabel,
 } from "@/lib/leave";
@@ -150,7 +149,7 @@ export function MyLeaveView() {
       <Card>
         <CardHeader
           title="Available balances"
-          description="Balances for the current period and any future period with active requests."
+          description="1 credit equals 1 day. Available = assigned − used − pending. Balances are shown for the current period and any future period with active requests."
         />
         {balances.error ? (
           <div className="p-4">
@@ -284,6 +283,7 @@ function BalanceRow({
     timezone,
   );
   const zero = balance.availableBalance <= 0;
+  const assigned = balance.assignedBalance;
 
   return (
     <li className="px-4 py-3.5">
@@ -312,23 +312,19 @@ function BalanceRow({
         </div>
       </div>
 
-      <dl className="mt-2.5 grid grid-cols-2 gap-1.5 text-[11px] sm:grid-cols-3 xl:grid-cols-6">
-        <BalanceFigure label="Entitled" value={formatLeaveUnits(balance.entitledBalance)} />
-        <BalanceFigure label="Accrued" value={formatLeaveUnits(balance.accruedBalance)} />
-        <BalanceFigure
-          label="Adjusted"
-          value={formatSignedLeaveUnits(balance.adjustmentBalance)}
-        />
-        <BalanceFigure
-          label="Carried forward"
-          value={formatLeaveUnits(balance.carriedForwardBalance)}
-        />
-        <BalanceFigure label="Approved" value={formatLeaveUnits(balance.approvedConsumed)} />
-        <BalanceFigure
-          label="Pending approval"
-          value={formatLeaveUnits(balance.pendingReserved)}
-        />
+      <dl className="mt-2.5 grid grid-cols-2 gap-1.5 text-[11px] sm:grid-cols-4">
+        <BalanceFigure label="Assigned" value={formatLeaveUnits(assigned)} />
+        <BalanceFigure label="Used" value={formatLeaveUnits(balance.approvedConsumed)} />
+        <BalanceFigure label="Pending" value={formatLeaveUnits(balance.pendingReserved)} />
+        <BalanceFigure label="Available" value={formatLeaveUnits(balance.availableBalance)} />
       </dl>
+      <p className="mt-2 text-[11px] leading-5 text-muted">
+        {formatLeaveUnits(assigned)} assigned − {formatLeaveUnits(balance.approvedConsumed)} used −{" "}
+        {formatLeaveUnits(balance.pendingReserved)} pending ={" "}
+        <span className="font-medium text-ink-secondary">
+          {formatLeaveUnits(balance.availableBalance)} available
+        </span>
+      </p>
     </li>
   );
 }

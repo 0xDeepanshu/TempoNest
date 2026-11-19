@@ -50,6 +50,7 @@ describe("visibleNavigationGroups", () => {
     expect(visible).not.toContain("People");
     expect(visible).not.toContain("App tracking");
     expect(visible).not.toContain("Screenshot review");
+    expect(visible).not.toContain("Scheduled screenshots");
     expect(visible).not.toContain("Monitoring settings");
     expect(visible).not.toContain("Organization");
   });
@@ -83,6 +84,9 @@ describe("visibleNavigationGroups", () => {
     expect(labels(membership(["role:read"]))).toContain("Roles & permissions");
     expect(labels(membership(["screenshot:read"]))).toContain("Screenshot review");
     expect(labels(membership(["screenshot:policy"]))).toContain("Monitoring settings");
+    expect(labels(membership(["screenshot:monitoring"]))).toContain("Scheduled screenshots");
+    expect(labels(membership(["screenshot:read"]))).not.toContain("Scheduled screenshots");
+    expect(labels(membership(["screenshot:policy"]))).not.toContain("Scheduled screenshots");
   });
 
   it("gates holiday navigation by view and management permissions", () => {

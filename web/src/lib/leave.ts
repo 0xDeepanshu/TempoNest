@@ -35,14 +35,14 @@ const ACCRUAL_LABELS: Record<LeaveAccrualFrequency, string> = {
 };
 
 const LEDGER_LABELS: Record<LeaveLedgerEntryKind, string> = {
-  INITIAL_ENTITLEMENT: "Initial entitlement",
-  ACCRUAL: "Accrual",
-  CARRY_FORWARD: "Carry forward",
-  ADJUSTMENT: "Balance adjustment",
-  RESERVATION: "Pending request reserved",
-  RESERVATION_RELEASE: "Reservation released",
+  INITIAL_ENTITLEMENT: "Starting credits",
+  ACCRUAL: "Scheduled credits",
+  CARRY_FORWARD: "Carried-forward credits",
+  ADJUSTMENT: "Credits assigned",
+  RESERVATION: "Request submitted",
+  RESERVATION_RELEASE: "Reserved credits released",
   CONSUMPTION: "Leave approved",
-  CONSUMPTION_RESTORE: "Approved leave restored",
+  CONSUMPTION_RESTORE: "Approved leave cancelled",
 };
 
 function unitValue(value: number): string {

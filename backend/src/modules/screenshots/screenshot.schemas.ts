@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { paginationSchema } from '../../utils/pagination';
 import { ROLES } from '../memberships/roles';
 import { SCREENSHOT_AUDIT_ACTIONS } from './auditEvent.model';
+import { SUPPORTED_CAPTURE_INTERVALS } from './employeeMonitoringPolicy.model';
 import { SCREENSHOT_REQUEST_STATUSES } from './screenshotRequest.model';
 
 export const employeeIdParamsSchema = z.object({
@@ -112,9 +113,28 @@ export const screenshotPolicyUpdateSchema = z
 
 export const screenshotEmployeeMonitoringPolicySchema = z
   .object({
-    enabled: z.boolean(),
+    enabled: z.boolean().optional(),
+    scheduledCaptureEnabled: z.boolean().optional(),
+    captureIntervalMinutes: z
+      .union([
+        z.literal(SUPPORTED_CAPTURE_INTERVALS[0]),
+        z.literal(SUPPORTED_CAPTURE_INTERVALS[1]),
+        z.literal(SUPPORTED_CAPTURE_INTERVALS[2]),
+        z.literal(SUPPORTED_CAPTURE_INTERVALS[3]),
+        z.literal(SUPPORTED_CAPTURE_INTERVALS[4]),
+        z.literal(SUPPORTED_CAPTURE_INTERVALS[5]),
+        z.literal(SUPPORTED_CAPTURE_INTERVALS[6]),
+      ])
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      value.enabled !== undefined ||
+      value.scheduledCaptureEnabled !== undefined ||
+      value.captureIntervalMinutes !== undefined,
+    { message: 'At least one policy field must be provided' },
+  );
 
 export type ScreenshotClaimInput = z.infer<typeof screenshotClaimSchema>;
 export type ScreenshotCompleteInput = z.infer<typeof screenshotCompleteSchema>;

@@ -18,6 +18,7 @@ import { hashPassword } from '../../utils/password';
 import { hasPermission, assertInvitableRole } from '../memberships/permissions';
 import { toMembershipSummary, toOrganizationSummary } from '../memberships/membership.mapper';
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
+import { createDefaultEmployeeMonitoringPolicy } from '../screenshots/employeeMonitoringPolicy.service';
 import {
   getManagerRoleOverride,
   toManagerRoleOverrideAccess,
@@ -695,6 +696,12 @@ export async function acceptInvitation(
 
     membership.organization = invitation.organization;
     membership.customRole = invitedCustomRole;
+
+    await createDefaultEmployeeMonitoringPolicy({
+      organizationId: invitation.organizationId,
+      employeeId: user.id,
+      transaction,
+    });
 
     await recordAuditEvent(
       {

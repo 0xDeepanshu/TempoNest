@@ -114,7 +114,7 @@ export function LeaveOverviewView() {
       <PageHeader
         eyebrow={`${organization.name} · ${organization.timezone}`}
         title="Leave"
-        description="Review pending requests, track accruals, and keep leave policies and the organization holiday calendar up to date."
+        description="Review pending requests, keep an eye on balances, and maintain the leave catalog and holiday calendar."
         actions={
           <Button variant="secondary" onClick={retryAll}>
             Refresh

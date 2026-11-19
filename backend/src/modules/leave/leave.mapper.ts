@@ -40,6 +40,7 @@ export function toLeaveTypeSummary(type: LeaveTypeModel) {
     isPaid: type.isPaid,
     requiresBalance: type.requiresBalance,
     allowNegativeBalance: type.allowNegativeBalance,
+    allowHalfDay: type.allowHalfDay,
     maxConsecutiveDays: type.maxConsecutiveDays,
     minNoticeDays: type.minNoticeDays,
     requiresDocumentation: type.requiresDocumentation,
@@ -108,6 +109,15 @@ export function toLeaveLedgerEntrySummary(entry: LeaveLedgerEntryModel) {
 }
 
 export function toLeaveBalanceSummary(balance: LeaveBalanceModel) {
+  // "Assigned" is the credits the organization has given for this period,
+  // regardless of how they were granted (starting credits, schedule, manual).
+  const assignedBalance = toUnits(
+    toUnits(balance.entitledBalance) +
+      toUnits(balance.accruedBalance) +
+      toUnits(balance.adjustmentBalance) +
+      toUnits(balance.carriedForwardBalance),
+  );
+
   return {
     id: balance.id,
     organizationId: balance.organizationId,
@@ -122,7 +132,9 @@ export function toLeaveBalanceSummary(balance: LeaveBalanceModel) {
     approvedConsumed: toUnits(balance.approvedConsumed),
     pendingReserved: toUnits(balance.pendingReserved),
     availableBalance: toUnits(balance.availableBalance),
+    assignedBalance,
     breakdown: {
+      assigned: assignedBalance,
       entitled: toUnits(balance.entitledBalance),
       accrued: toUnits(balance.accruedBalance),
       adjustments: toUnits(balance.adjustmentBalance),

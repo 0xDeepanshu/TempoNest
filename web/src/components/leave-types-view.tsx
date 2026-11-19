@@ -80,6 +80,7 @@ const NEW_TYPE_DEFAULTS = {
   isPaid: true,
   requiresBalance: true,
   allowNegativeBalance: false,
+  allowHalfDay: true,
   maxConsecutiveDays: "",
   minNoticeDays: "0",
   requiresDocumentation: false,
@@ -341,6 +342,7 @@ function TypeBadges({ type }: { type: LeaveType }) {
       {type.requiresBalance && type.allowNegativeBalance ? (
         <Badge tone="warning">Negative allowed</Badge>
       ) : null}
+      {!type.allowHalfDay ? <Badge tone="neutral">Full days only</Badge> : null}
       {type.requiresDocumentation ? <Badge tone="info">Documentation</Badge> : null}
       {type.policy && !type.policy.isActive ? (
         <Badge tone="warning">Policy inactive</Badge>
@@ -353,7 +355,7 @@ function policySummary(type: LeaveType): string {
   if (!type.policy) return "No policy loaded";
   const parts: string[] = [];
   if (type.requiresBalance) {
-    parts.push(`${formatLeaveUnits(type.policy.initialEntitlement)} initial`);
+    parts.push(`${formatLeaveUnits(type.policy.initialEntitlement)} starting credits`);
     if (type.policy.accrualFrequency !== "NONE") {
       parts.push(
         `${accrualFrequencyLabel(type.policy.accrualFrequency)} · ${formatLeaveUnits(type.policy.accrualAmount)}`,
@@ -509,6 +511,7 @@ function TypeFormModal({
           isPaid: type.isPaid,
           requiresBalance: type.requiresBalance,
           allowNegativeBalance: type.allowNegativeBalance,
+          allowHalfDay: type.allowHalfDay,
           maxConsecutiveDays:
             type.maxConsecutiveDays === null ? "" : String(type.maxConsecutiveDays),
           minNoticeDays: String(type.minNoticeDays),
@@ -564,6 +567,7 @@ function TypeFormModal({
       isPaid: form.isPaid,
       requiresBalance: form.requiresBalance,
       allowNegativeBalance: form.requiresBalance && form.allowNegativeBalance,
+      allowHalfDay: form.allowHalfDay,
       maxConsecutiveDays,
       minNoticeDays,
       requiresDocumentation: form.requiresDocumentation,
@@ -580,7 +584,7 @@ function TypeFormModal({
       } else {
         await createLeaveType(organizationId, payload);
         onSaved(
-          `${name} was created with a default policy. Review its policy to set entitlement, accrual, and working days.`,
+          `${name} was created with a default policy. Review its policy to set starting credits, carry-forward, and working days.`,
         );
       }
     } catch (error) {
@@ -697,6 +701,12 @@ function TypeFormModal({
             checked={form.requiresBalance && form.allowNegativeBalance}
             disabled={!form.requiresBalance}
             onChange={(value) => update("allowNegativeBalance", value)}
+          />
+          <CheckField
+            label="Allow half days"
+            description="Employees can request a half day on the first and/or last day."
+            checked={form.allowHalfDay}
+            onChange={(value) => update("allowHalfDay", value)}
           />
           <CheckField
             label="Requires documentation"
@@ -919,8 +929,11 @@ function PolicyFormModal({
             id="leave-policy-amounts"
             className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted"
           >
-            Entitlement and accrual
+            Credits
           </h3>
+          <p className="text-xs leading-5 text-muted">
+            Owners can also assign credits directly to employees at any time. 1 credit equals 1 day.
+          </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field
               label="Initial entitlement (days)"
@@ -935,67 +948,6 @@ function PolicyFormModal({
                 step="any"
                 value={form.initialEntitlement}
                 onChange={(event) => update("initialEntitlement", event.target.value)}
-              />
-            </Field>
-            <Field
-              label="Accrual frequency"
-              htmlFor="leave-policy-frequency"
-              hint="Tranches credit once their date is on or before today."
-            >
-              <Select
-                id="leave-policy-frequency"
-                value={form.accrualFrequency}
-                onChange={(event) =>
-                  update("accrualFrequency", event.target.value as LeaveAccrualFrequency)
-                }
-              >
-                {LEAVE_ACCRUAL_FREQUENCIES.map((frequency) => (
-                  <option key={frequency} value={frequency}>
-                    {accrualFrequencyLabel(frequency)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field
-              label="Accrual amount (days)"
-              htmlFor="leave-policy-accrual"
-              hint="Amount credited per tranche when accrual is enabled."
-            >
-              <Input
-                id="leave-policy-accrual"
-                type="number"
-                min={0}
-                max={3650}
-                step="any"
-                value={form.accrualAmount}
-                onChange={(event) => update("accrualAmount", event.target.value)}
-              />
-            </Field>
-            <Field
-              label="Accrual day of month"
-              htmlFor="leave-policy-accrual-day"
-              hint="Day of the month each tranche credits, evaluated in the organization timezone."
-            >
-              <Input
-                id="leave-policy-accrual-day"
-                type="number"
-                min={1}
-                max={31}
-                step={1}
-                value={form.accrualDayOfMonth}
-                onChange={(event) => update("accrualDayOfMonth", event.target.value)}
-              />
-            </Field>
-            <Field
-              label="Accrual effective from"
-              htmlFor="leave-policy-accrual-effective"
-              hint="No accrual is granted before this date. Leave blank to use today when accrual is first enabled."
-            >
-              <Input
-                id="leave-policy-accrual-effective"
-                type="date"
-                value={form.accrualEffectiveFrom}
-                onChange={(event) => update("accrualEffectiveFrom", event.target.value)}
               />
             </Field>
             <Field
@@ -1029,6 +981,98 @@ function PolicyFormModal({
               />
             </Field>
           </div>
+          <CheckField
+            label="Prorate initial entitlement"
+            description="Applies a proportional entitlement for employees who joined mid-period."
+            checked={form.prorateInitialEntitlement}
+            onChange={(value) => update("prorateInitialEntitlement", value)}
+          />
+        </section>
+
+        <section className="space-y-3" aria-labelledby="leave-policy-accrual">
+          <h3
+            id="leave-policy-accrual"
+            className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted"
+          >
+            Automatic accrual (optional)
+          </h3>
+          <p className="text-xs leading-5 text-muted">
+            Leave this off to manage credits manually. When enabled, tranches credit
+            automatically once their date is on or before today.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="Accrual frequency"
+              htmlFor="leave-policy-frequency"
+              hint="Tranches credit once their date is on or before today."
+            >
+              <Select
+                id="leave-policy-frequency"
+                value={form.accrualFrequency}
+                onChange={(event) =>
+                  update("accrualFrequency", event.target.value as LeaveAccrualFrequency)
+                }
+              >
+                {LEAVE_ACCRUAL_FREQUENCIES.map((frequency) => (
+                  <option key={frequency} value={frequency}>
+                    {accrualFrequencyLabel(frequency)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field
+              label="Accrual amount (days)"
+              htmlFor="leave-policy-accrual"
+              hint="Amount credited per tranche when accrual is enabled."
+            >
+              <Input
+                id="leave-policy-accrual"
+                type="number"
+                min={0}
+                max={3650}
+                step="any"
+                value={form.accrualAmount}
+                disabled={form.accrualFrequency === "NONE"}
+                onChange={(event) => update("accrualAmount", event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Accrual day of month"
+              htmlFor="leave-policy-accrual-day"
+              hint="Day of the month each tranche credits, evaluated in the organization timezone."
+            >
+              <Input
+                id="leave-policy-accrual-day"
+                type="number"
+                min={1}
+                max={31}
+                step={1}
+                value={form.accrualDayOfMonth}
+                disabled={form.accrualFrequency === "NONE"}
+                onChange={(event) => update("accrualDayOfMonth", event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Accrual effective from"
+              htmlFor="leave-policy-accrual-effective"
+              hint="No accrual is granted before this date. Leave blank to use today when accrual is first enabled."
+            >
+              <Input
+                id="leave-policy-accrual-effective"
+                type="date"
+                value={form.accrualEffectiveFrom}
+                disabled={form.accrualFrequency === "NONE"}
+                onChange={(event) => update("accrualEffectiveFrom", event.target.value)}
+              />
+            </Field>
+          </div>
+          <CheckField
+            label="Prorate accrual for mid-month joiners"
+            description="Credits the first accrual tranche in proportion to the days remaining in the month the employee joined."
+            checked={form.accrualFrequency !== "NONE" && form.prorateAccrual}
+            disabled={form.accrualFrequency === "NONE"}
+            onChange={(value) => update("prorateAccrual", value)}
+          />
         </section>
 
         <section className="space-y-3" aria-labelledby="leave-policy-period">
@@ -1113,18 +1157,6 @@ function PolicyFormModal({
         </section>
 
         <div className="grid gap-2">
-          <CheckField
-            label="Prorate initial entitlement"
-            description="Applies a proportional entitlement for employees who joined mid-period."
-            checked={form.prorateInitialEntitlement}
-            onChange={(value) => update("prorateInitialEntitlement", value)}
-          />
-          <CheckField
-            label="Prorate accrual for mid-month joiners"
-            description="Credits the first accrual tranche in proportion to the days remaining in the month the employee joined."
-            checked={form.prorateAccrual}
-            onChange={(value) => update("prorateAccrual", value)}
-          />
           <CheckField
             label="Policy active"
             description="Inactive policies block new requests and balance adjustments for this type. Existing balances and requests are retained."

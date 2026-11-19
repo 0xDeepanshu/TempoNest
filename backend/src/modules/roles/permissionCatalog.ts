@@ -179,6 +179,12 @@ const ENTRIES: Array<Omit<PermissionCatalogEntry, 'grantableToCustomRole' | 'gra
     description: 'Change screenshot and live-viewing policy.',
   },
   {
+    id: 'screenshot:monitoring',
+    group: 'monitoring',
+    label: 'Manage employee monitoring',
+    description: 'Enable or disable scheduled screenshot monitoring per employee.',
+  },
+  {
     id: 'leave:read',
     group: 'leave',
     label: 'View leave',

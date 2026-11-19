@@ -26,6 +26,7 @@ import {
 } from './leaveCalendar';
 import {
   adjustLeaveBalance,
+  collectOrganizationLeaveBalances,
   ensureBalance,
   loadLeaveTypeWithPolicy,
   previewLeaveBalanceAdjustment,
@@ -1083,6 +1084,72 @@ export async function getLeaveAccrualPreview(options: {
     },
     items: items.slice(0, maxItems),
     truncated: items.length > maxItems,
+  };
+}
+
+/**
+ * Organization-wide totals for the admin leave dashboard. Reads through the
+ * same canonical balance collection as the balance table so the headline
+ * numbers always match the rows underneath them.
+ */
+export async function getLeaveManagementOverview(organization: OrganizationModel) {
+  const { balances, types, employeeIds, anchorDate } =
+    await collectOrganizationLeaveBalances({ organization });
+
+  let totalCreditsAssigned = 0;
+  let approvedConsumed = 0;
+  let pendingReserved = 0;
+  let availableCredits = 0;
+  const employeesWithCredits = new Set<string>();
+
+  for (const balance of balances) {
+    const assigned = roundUnits(
+      toUnits(balance.entitledBalance) +
+        toUnits(balance.accruedBalance) +
+        toUnits(balance.adjustmentBalance) +
+        toUnits(balance.carriedForwardBalance),
+    );
+    const used = toUnits(balance.approvedConsumed);
+    const pending = toUnits(balance.pendingReserved);
+
+    totalCreditsAssigned = roundUnits(totalCreditsAssigned + assigned);
+    approvedConsumed = roundUnits(approvedConsumed + used);
+    pendingReserved = roundUnits(pendingReserved + pending);
+    availableCredits = roundUnits(availableCredits + toUnits(balance.availableBalance));
+
+    if (assigned !== 0 || used !== 0 || pending !== 0) {
+      employeesWithCredits.add(balance.employeeId);
+    }
+  }
+
+  const [pendingApplications, pendingCancellations, accrualPolicies] = await Promise.all([
+    LeaveRequest.count({ where: { organizationId: organization.id, status: 'PENDING' } }),
+    LeaveRequest.count({
+      where: { organizationId: organization.id, status: 'CANCELLATION_REQUESTED' },
+    }),
+    LeavePolicy.count({
+      where: {
+        organizationId: organization.id,
+        isActive: true,
+        accrualFrequency: { [Op.ne]: 'NONE' },
+      },
+      include: [{ model: LeaveType, as: 'leaveType', required: true, where: { isActive: true } }],
+    }),
+  ]);
+
+  return {
+    timezone: organization.timezone,
+    anchorDate,
+    leaveTypes: types.length,
+    activeEmployees: employeeIds.length,
+    employeesWithBalances: employeesWithCredits.size,
+    totalCreditsAssigned,
+    approvedConsumed,
+    pendingReserved,
+    availableCredits,
+    pendingApplications,
+    pendingCancellations,
+    accrualConfigured: accrualPolicies > 0,
   };
 }
 

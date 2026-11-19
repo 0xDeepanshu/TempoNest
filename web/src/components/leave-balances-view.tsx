@@ -13,17 +13,23 @@ import {
   LOW_BALANCE_THRESHOLD,
 } from "@/lib/leave";
 import {
-  adjustLeaveBalance,
+  assignLeaveCredits,
   getEmployeeLeaveBalances,
+  getLeaveOverview,
   listLeaveBalances,
   listLeaveLedger,
   listLeaveTypes,
-  previewLeaveBalanceAdjustment,
+  previewLeaveCredits,
 } from "@/lib/leave-api";
 import { leaveErrorMessage } from "@/lib/leave-errors";
-import type { LeaveAdjustmentPreview, LeaveBalance, LeaveLedgerEntry } from "@/lib/types";
+import type {
+  LeaveBalance,
+  LeaveCreditAssignmentPreview,
+  LeaveCreditMode,
+  LeaveLedgerEntry,
+} from "@/lib/types";
 import { useApi } from "@/lib/use-api";
-import { SearchIcon } from "./icons";
+import { PlusIcon, SearchIcon, UsersIcon } from "./icons";
 import { EmployeePicker } from "./employee-picker";
 import {
   AccrualPreviewCard,
@@ -31,6 +37,7 @@ import {
   BulkAdjustmentModal,
   ReconciliationModal,
 } from "./leave-balance-tools";
+import { LeaveCreditsModal } from "./leave-credits-modal";
 import { LeaveTabs } from "./leave-tabs";
 import { Modal } from "./modal";
 import {
@@ -49,6 +56,7 @@ import {
   PageHeader,
   Pagination,
   Select,
+  StatCard,
   TableShell,
   Td,
   Textarea,
@@ -58,12 +66,14 @@ import {
 import { NoOrganization, useWorkspace } from "./workspace";
 
 type Filters = {
+  search: string;
   employeeId: string;
   leaveTypeId: string;
   periodStart: string;
 };
 
 const EMPTY_FILTERS: Filters = {
+  search: "",
   employeeId: "",
   leaveTypeId: "",
   periodStart: "",
@@ -79,11 +89,19 @@ export function LeaveBalancesView() {
   const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS);
   const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
   const [selected, setSelected] = useState<SelectedBalance | null>(null);
   const [tool, setTool] = useState<BalanceTool>(null);
+  const [creditsOpen, setCreditsOpen] = useState(false);
 
   const types = useApi(
     (signal) => listLeaveTypes(organizationId, { signal }),
+    [organizationId],
+    { enabled: Boolean(organizationId) && canManage },
+  );
+
+  const overview = useApi(
+    (signal) => getLeaveOverview(organizationId, { signal }),
     [organizationId],
     { enabled: Boolean(organizationId) && canManage },
   );
@@ -95,6 +113,7 @@ export function LeaveBalancesView() {
         {
           page,
           limit: 20,
+          search: applied.search || undefined,
           employeeId: applied.employeeId || undefined,
           leaveTypeId: applied.leaveTypeId || undefined,
           periodStart: applied.periodStart || undefined,
@@ -104,6 +123,7 @@ export function LeaveBalancesView() {
     [
       organizationId,
       page,
+      applied.search,
       applied.employeeId,
       applied.leaveTypeId,
       applied.periodStart,
@@ -112,12 +132,19 @@ export function LeaveBalancesView() {
     { enabled: Boolean(organizationId) && canManage },
   );
 
+  const history = useApi(
+    (signal) =>
+      listLeaveLedger(organizationId, { page: historyPage, limit: 15 }, { signal }),
+    [organizationId, historyPage],
+    { enabled: Boolean(organizationId) && canManage },
+  );
+
   if (!organization) return <NoOrganization />;
 
   const rows = balances.data?.data ?? [];
   const typeOptions = (types.data?.data ?? []).filter((type) => type.requiresBalance);
   const hasFilters = Boolean(
-    applied.employeeId || applied.leaveTypeId || applied.periodStart,
+    applied.search || applied.employeeId || applied.leaveTypeId || applied.periodStart,
   );
 
   function applyFilters(event: React.FormEvent) {
@@ -132,16 +159,28 @@ export function LeaveBalancesView() {
     setPage(1);
   }
 
-  function reloadBalances() {
+  function refreshAll() {
     balances.reload();
+    overview.reload();
+    history.reload();
   }
+
+  const summary = overview.data?.data;
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization.name} · ${organization.timezone}`}
         title="Leave balances"
-        description="Inspect entitled, accrued, adjusted, carried-forward, consumed, and reserved balances. Adjustments are audited, require a reason, and are recalculated by the server."
+        description="Give employees leave credits, review what they have used, and see every change in one place. 1 credit equals 1 day."
+        actions={
+          canManage ? (
+            <Button onClick={() => setCreditsOpen(true)}>
+              <PlusIcon className="h-3.5 w-3.5" />
+              Assign leave credits
+            </Button>
+          ) : undefined
+        }
       />
 
       <LeaveTabs current="balances" />
@@ -149,15 +188,68 @@ export function LeaveBalancesView() {
       {!canManage ? (
         <EmptyState
           title="Balance management requires leave:manage"
-          description="Ask an owner or administrator to review organization-wide leave balances."
+          description="Ask an owner or administrator to assign leave credits and review organization-wide balances."
         />
       ) : (
         <>
+          {overview.error ? (
+            <ErrorState message={overview.error} onRetry={overview.reload} />
+          ) : null}
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              label="Active employees"
+              value={summary ? summary.activeEmployees : "—"}
+              hint={summary ? `${summary.leaveTypes} balance-based leave types` : "Loading"}
+              icon={<UsersIcon className="h-4 w-4" />}
+            />
+            <StatCard
+              label="Employees with credits"
+              value={summary ? summary.employeesWithBalances : "—"}
+              hint={
+                summary ? `${summary.availableCredits} days available in total` : "Loading"
+              }
+              icon={<UsersIcon className="h-4 w-4" />}
+            />
+            <StatCard
+              label="Credits assigned"
+              value={summary ? summary.totalCreditsAssigned : "—"}
+              hint={
+                summary
+                  ? `${summary.approvedConsumed} used · ${summary.pendingReserved} reserved`
+                  : "Loading"
+              }
+            />
+            <StatCard
+              label="Pending applications"
+              value={summary ? summary.pendingApplications : "—"}
+              hint={
+                summary && summary.pendingCancellations > 0
+                  ? `${summary.pendingCancellations} cancellation${summary.pendingCancellations === 1 ? "" : "s"} to review`
+                  : "Waiting for a decision"
+              }
+            />
+          </div>
+
           <Card>
             <form
               onSubmit={applyFilters}
-              className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.2fr)_200px_190px_auto] xl:items-end"
+              className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-[minmax(200px,1.2fr)_minmax(200px,1fr)_190px_190px_auto] xl:items-end"
             >
+              <Field label="Search" htmlFor="leave-balance-search">
+                <div className="relative">
+                  <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                  <Input
+                    id="leave-balance-search"
+                    value={draft.search}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, search: event.target.value }))
+                    }
+                    placeholder="Name or email"
+                    className="pl-9"
+                  />
+                </div>
+              </Field>
               <Field label="Employee" htmlFor="leave-balance-employee">
                 <EmployeePicker
                   id="leave-balance-employee"
@@ -176,7 +268,7 @@ export function LeaveBalancesView() {
                     setDraft((current) => ({ ...current, leaveTypeId: event.target.value }))
                   }
                 >
-                  <option value="">All balance types</option>
+                  <option value="">All leave types</option>
                   {typeOptions.map((type) => (
                     <option key={type.id} value={type.id}>
                       {type.name}
@@ -187,7 +279,7 @@ export function LeaveBalancesView() {
               <Field
                 label="Period date"
                 htmlFor="leave-balance-period"
-                hint="Any date inside the balance period. Empty uses today."
+                hint="Any date inside the period. Empty uses today."
               >
                 <Input
                   id="leave-balance-period"
@@ -206,6 +298,7 @@ export function LeaveBalancesView() {
                   onClick={clearFilters}
                   disabled={
                     !hasFilters &&
+                    !draft.search &&
                     !draft.employeeId &&
                     !draft.leaveTypeId &&
                     !draft.periodStart
@@ -223,18 +316,24 @@ export function LeaveBalancesView() {
 
           <Card>
             <CardHeader
-              title="Balances"
+              title="Employee balances"
               description={
                 balances.data
                   ? `${balances.data.meta.total} balance record${balances.data.meta.total === 1 ? "" : "s"}${hasFilters ? " match these filters" : ""}`
                   : "Loading balances…"
               }
               actions={
-                hasFilters ? (
-                  <Button variant="ghost" size="sm" onClick={clearFilters}>
-                    Clear filters
+                <>
+                  {hasFilters ? (
+                    <Button variant="ghost" size="sm" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  ) : null}
+                  <Button variant="secondary" size="sm" onClick={() => setCreditsOpen(true)}>
+                    <PlusIcon className="h-3.5 w-3.5" />
+                    Assign credits
                   </Button>
-                ) : undefined
+                </>
               }
             />
 
@@ -248,11 +347,11 @@ export function LeaveBalancesView() {
               <LoadingBlock label="Loading leave balances" rows={5} />
             ) : rows.length === 0 ? (
               <EmptyState
-                title={hasFilters ? "No balances match" : "No balance records"}
+                title={hasFilters ? "No balances match" : "No employee balances yet"}
                 description={
                   hasFilters
-                    ? "Try a different employee, leave type, or period date."
-                    : "Balances appear for active employees and active balance-based leave types. Use “Initialize balances” below to create the current period for everyone eligible."
+                    ? "Try a different search, leave type, or period date."
+                    : "Assign leave credits to create a balance for an employee and leave type. Choose all active employees to credit everyone at once."
                 }
                 icon={<SearchIcon className="h-5 w-5" />}
                 action={
@@ -261,8 +360,8 @@ export function LeaveBalancesView() {
                       Clear filters
                     </Button>
                   ) : (
-                    <Button variant="secondary" size="sm" onClick={() => setTool("backfill")}>
-                      Initialize balances
+                    <Button size="sm" onClick={() => setCreditsOpen(true)}>
+                      Assign leave credits
                     </Button>
                   )
                 }
@@ -293,37 +392,80 @@ export function LeaveBalancesView() {
             )}
           </Card>
 
-          <AccrualPreviewCard
-            organizationId={organization.id}
-            types={typeOptions}
-          />
-
           <Card>
             <CardHeader
-              title="Balance operations"
-              description="Preview and confirm changes. Every operation is permission-checked, organization-scoped, and audited."
+              title="Credit history"
+              description="Every credit assignment, reservation, approval, rejection, and correction across the organization."
+              actions={
+                <Button variant="ghost" size="sm" onClick={history.reload}>
+                  Refresh
+                </Button>
+              }
             />
-            <div className="grid gap-3 p-4 md:grid-cols-3">
-              <OperationTile
-                title="Bulk adjustment"
-                description="Credit or debit the same leave type for several employees, with a per-employee preview before confirmation."
-                actionLabel="Bulk adjust"
-                onAction={() => setTool("bulk")}
+            {history.error ? (
+              <div className="p-4">
+                <ErrorState message={history.error} onRetry={history.reload} />
+              </div>
+            ) : history.loading && !history.data ? (
+              <LoadingBlock label="Loading credit history" rows={4} />
+            ) : (history.data?.data ?? []).length === 0 ? (
+              <EmptyState
+                title="No balance history yet"
+                description="Credit assignments and leave decisions will be recorded here."
               />
-              <OperationTile
-                title="Initialize balances"
-                description="Create the current balance period for active employees and active balance-based leave types. Existing history is preserved."
-                actionLabel="Preview backfill"
-                onAction={() => setTool("backfill")}
-              />
-              <OperationTile
-                title="Reconcile periods"
-                description="Find overlapping or incorrectly sized periods and remove only empty rows with no ledger history or requests."
-                actionLabel="Scan balances"
-                onAction={() => setTool("reconcile")}
-              />
-            </div>
+            ) : (
+              <>
+                <div className="hidden md:block">
+                  <HistoryTable rows={history.data?.data ?? []} timezone={organization.timezone} />
+                </div>
+                <ul className="divide-y divide-line md:hidden">
+                  {(history.data?.data ?? []).map((entry) => (
+                    <HistoryRow key={entry.id} entry={entry} timezone={organization.timezone} />
+                  ))}
+                </ul>
+                <Pagination
+                  page={history.data?.meta.page ?? historyPage}
+                  totalPages={history.data?.meta.totalPages ?? 1}
+                  onPageChange={setHistoryPage}
+                />
+              </>
+            )}
           </Card>
+
+          <details className="rounded-xl border border-line bg-surface">
+            <summary className="cursor-pointer px-4 py-3 text-[13px] font-semibold text-ink">
+              Advanced maintenance
+            </summary>
+            <div className="space-y-3 border-t border-line p-4">
+              <p className="text-xs leading-5 text-muted">
+                These tools exist for edge cases. Daily work uses “Assign leave credits”
+                above; these operations never delete balances or history.
+              </p>
+              <div className="grid gap-3 md:grid-cols-3">
+                <OperationTile
+                  title="Bulk adjustment"
+                  description="Apply the same signed adjustment to several employees. Use Assign credits for normal allocations."
+                  actionLabel="Bulk adjust"
+                  onAction={() => setTool("bulk")}
+                />
+                <OperationTile
+                  title="Initialize balances"
+                  description="Create the current balance period for active employees and active balance-based leave types. Existing rows are preserved."
+                  actionLabel="Preview backfill"
+                  onAction={() => setTool("backfill")}
+                />
+                <OperationTile
+                  title="Reconcile periods"
+                  description="Find overlapping or incorrectly sized periods and remove only empty rows with no history or requests."
+                  actionLabel="Scan balances"
+                  onAction={() => setTool("reconcile")}
+                />
+              </div>
+              {summary?.accrualConfigured ? (
+                <AccrualPreviewCard organizationId={organization.id} types={typeOptions} />
+              ) : null}
+            </div>
+          </details>
         </>
       )}
 
@@ -333,18 +475,26 @@ export function LeaveBalancesView() {
         timezone={organization.timezone}
         selected={selected}
         onClose={() => setSelected(null)}
-        onAdjusted={reloadBalances}
+        onChanged={refreshAll}
       />
 
       {canManage ? (
         <>
+          {creditsOpen ? (
+            <LeaveCreditsModal
+              organizationId={organization.id}
+              types={typeOptions}
+              onClose={() => setCreditsOpen(false)}
+              onCompleted={refreshAll}
+            />
+          ) : null}
           {tool === "bulk" ? (
             <BulkAdjustmentModal
               organizationId={organization.id}
               open
               types={typeOptions}
               onClose={() => setTool(null)}
-              onCompleted={reloadBalances}
+              onCompleted={refreshAll}
             />
           ) : null}
           {tool === "backfill" ? (
@@ -352,7 +502,7 @@ export function LeaveBalancesView() {
               organizationId={organization.id}
               open
               onClose={() => setTool(null)}
-              onCompleted={reloadBalances}
+              onCompleted={refreshAll}
             />
           ) : null}
           {tool === "reconcile" ? (
@@ -360,7 +510,7 @@ export function LeaveBalancesView() {
               organizationId={organization.id}
               open
               onClose={() => setTool(null)}
-              onCompleted={reloadBalances}
+              onCompleted={refreshAll}
             />
           ) : null}
         </>
@@ -403,19 +553,15 @@ function BalanceTable({
   onOpen: (balance: LeaveBalance) => void;
 }) {
   return (
-    <TableShell className="min-w-[1020px]">
+    <TableShell className="min-w-[820px]">
       <thead>
         <tr>
           <Th>Employee</Th>
           <Th>Leave type</Th>
-          <Th>Period</Th>
-          <Th className="text-right">Available</Th>
+          <Th className="text-right">Assigned</Th>
+          <Th className="text-right">Used</Th>
           <Th className="text-right">Pending</Th>
-          <Th className="text-right">Approved</Th>
-          <Th className="text-right">Entitled</Th>
-          <Th className="text-right">Accrued</Th>
-          <Th className="text-right">Adjusted</Th>
-          <Th className="text-right">Carried fwd</Th>
+          <Th className="text-right">Available</Th>
           <Th className="text-right"> </Th>
         </tr>
       </thead>
@@ -439,16 +585,18 @@ function BalanceTable({
               <span className="font-medium text-ink">
                 {balance.leaveType?.name ?? "Leave"}
               </span>
-              {balance.leaveType ? (
-                <div className="mt-1">
-                  <Badge tone={balance.leaveType.isPaid ? "success" : "neutral"}>
-                    {balance.leaveType.isPaid ? "Paid" : "Unpaid"}
-                  </Badge>
-                </div>
-              ) : null}
+              <p className="mt-0.5 text-xs text-muted">
+                {balancePeriodLabel(balance.periodStart, balance.periodEnd)}
+              </p>
             </Td>
-            <Td className="whitespace-nowrap text-xs">
-              {balancePeriodLabel(balance.periodStart, balance.periodEnd)}
+            <Td className="whitespace-nowrap text-right tnum">
+              {formatLeaveUnits(balance.assignedBalance)}
+            </Td>
+            <Td className="whitespace-nowrap text-right tnum">
+              {formatLeaveUnits(balance.approvedConsumed)}
+            </Td>
+            <Td className="whitespace-nowrap text-right tnum">
+              {formatLeaveUnits(balance.pendingReserved)}
             </Td>
             <Td className="whitespace-nowrap text-right">
               <span
@@ -465,12 +613,6 @@ function BalanceTable({
                 </p>
               ) : null}
             </Td>
-            <NumberCell value={balance.pendingReserved} />
-            <NumberCell value={balance.approvedConsumed} />
-            <NumberCell value={balance.entitledBalance} />
-            <NumberCell value={balance.accruedBalance} />
-            <NumberCell value={balance.adjustmentBalance} signed />
-            <NumberCell value={balance.carriedForwardBalance} />
             <Td className="text-right">
               <Button variant="secondary" size="sm" onClick={() => onOpen(balance)}>
                 View
@@ -480,14 +622,6 @@ function BalanceTable({
         ))}
       </tbody>
     </TableShell>
-  );
-}
-
-function NumberCell({ value, signed = false }: { value: number; signed?: boolean }) {
-  return (
-    <Td className="whitespace-nowrap text-right tnum">
-      {signed ? formatSignedLeaveUnits(value) : formatLeaveUnits(value)}
-    </Td>
   );
 }
 
@@ -522,13 +656,108 @@ function BalanceCard({
         </Badge>
       </div>
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+        <span>{formatLeaveUnits(balance.assignedBalance)} assigned</span>
         <span>{formatLeaveUnits(balance.pendingReserved)} pending</span>
-        <span>{formatLeaveUnits(balance.approvedConsumed)} approved</span>
-        <span className="text-ink-secondary">
-          {formatLeaveUnits(balance.entitledBalance + balance.accruedBalance)} entitled + accrued
-        </span>
+        <span>{formatLeaveUnits(balance.approvedConsumed)} used</span>
       </div>
     </button>
+  );
+}
+
+function HistoryTable({ rows, timezone }: { rows: LeaveLedgerEntry[]; timezone: string }) {
+  return (
+    <TableShell className="min-w-[880px]">
+      <thead>
+        <tr>
+          <Th>Date</Th>
+          <Th>Employee</Th>
+          <Th>Leave type</Th>
+          <Th>Operation</Th>
+          <Th className="text-right">Amount</Th>
+          <Th className="text-right">Available before → after</Th>
+          <Th>Recorded by</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((entry) => {
+          const before = entry.balanceAfter - entry.availableDelta;
+          return (
+            <tr key={entry.id} className="align-top hover:bg-surface-muted">
+              <Td className="whitespace-nowrap text-xs text-muted">
+                {formatDateTime(entry.createdAt, timezone)}
+              </Td>
+              <Td>
+                <p className="font-medium text-ink">
+                  {entry.employee?.name ?? "Unknown employee"}
+                </p>
+                <p className="text-xs text-muted">{entry.employee?.email ?? ""}</p>
+              </Td>
+              <Td className="text-xs">{entry.leaveType?.name ?? "Leave"}</Td>
+              <Td className="text-xs">
+                <span className="font-medium text-ink">{ledgerKindLabel(entry.kind)}</span>
+                {entry.reason ? (
+                  <p className="max-w-[240px] text-[11px] text-muted">{entry.reason}</p>
+                ) : null}
+              </Td>
+              <Td
+                className={cn(
+                  "whitespace-nowrap text-right tnum font-medium",
+                  entry.availableDelta === 0
+                    ? "text-muted"
+                    : entry.availableDelta > 0
+                      ? "text-success"
+                      : "text-danger",
+                )}
+              >
+                {formatSignedLeaveUnits(entry.availableDelta)}
+              </Td>
+              <Td className="whitespace-nowrap text-right tnum text-xs">
+                {formatLeaveUnits(before)} → {formatLeaveUnits(entry.balanceAfter)}
+              </Td>
+              <Td className="text-xs">{entry.actor ? entry.actor.name : "System"}</Td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </TableShell>
+  );
+}
+
+function HistoryRow({ entry, timezone }: { entry: LeaveLedgerEntry; timezone: string }) {
+  const before = entry.balanceAfter - entry.availableDelta;
+  return (
+    <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 px-4 py-3 text-[13px]">
+      <div className="min-w-0">
+        <p className="font-medium text-ink">
+          {entry.employee?.name ?? "Unknown employee"} ·{" "}
+          {entry.leaveType?.name ?? "Leave"}
+        </p>
+        <p className="text-xs text-muted">
+          {ledgerKindLabel(entry.kind)} · {formatDateTime(entry.createdAt, timezone)}
+        </p>
+        <p className="text-[11px] text-muted">
+          {entry.actor ? `Recorded by ${entry.actor.name}` : "Recorded by system"}
+          {entry.reason ? ` · ${entry.reason}` : ""}
+        </p>
+      </div>
+      <div className="text-right">
+        <p
+          className={cn(
+            "font-semibold tnum",
+            entry.availableDelta === 0
+              ? "text-muted"
+              : entry.availableDelta > 0
+                ? "text-success"
+                : "text-danger",
+          )}
+        >
+          {formatSignedLeaveUnits(entry.availableDelta)} days
+        </p>
+        <p className="text-xs text-muted tnum">
+          {formatLeaveUnits(before)} → {formatLeaveUnits(entry.balanceAfter)}
+        </p>
+      </div>
+    </li>
   );
 }
 
@@ -537,19 +766,19 @@ function BalanceDetailModal({
   timezone,
   selected,
   onClose,
-  onAdjusted,
+  onChanged,
 }: {
   organizationId: string;
   timezone: string;
   selected: SelectedBalance | null;
   onClose: () => void;
-  onAdjusted: () => void;
+  onChanged: () => void;
 }) {
-  const [updated, setUpdated] = useState<LeaveBalance | null>(null);
-  const [adjusting, setAdjusting] = useState(false);
-  const [amount, setAmount] = useState("");
+  const [assigning, setAssigning] = useState(false);
+  const [mode, setMode] = useState<LeaveCreditMode>("ADD");
+  const [credits, setCredits] = useState("");
   const [reason, setReason] = useState("");
-  const [preview, setPreview] = useState<LeaveAdjustmentPreview | null>(null);
+  const [preview, setPreview] = useState<LeaveCreditAssignmentPreview | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -597,7 +826,7 @@ function BalanceDetailModal({
       row.leaveTypeId === selected?.balance.leaveTypeId &&
       row.periodStart === selected?.balance.periodStart,
   );
-  const balance = updated ?? current ?? selected?.balance ?? null;
+  const balance = current ?? selected?.balance ?? null;
 
   if (!balance) return null;
 
@@ -607,35 +836,34 @@ function BalanceDetailModal({
     timezone,
   );
 
-  function beginAdjustment() {
-    setAdjusting(true);
-    setAmount("");
+  function beginAssignment() {
+    setAssigning(true);
+    setMode("ADD");
+    setCredits("");
     setReason("");
     setPreview(null);
     setFormError(null);
     setSuccess(null);
   }
 
-  function cancelAdjustment() {
+  function cancelAssignment() {
     if (submitting || previewing) return;
-    setAdjusting(false);
-    setAmount("");
+    setAssigning(false);
+    setCredits("");
     setReason("");
     setPreview(null);
     setFormError(null);
   }
 
   function validate(): string | null {
-    if (!balance) return "No balance selected.";
-    const parsedAmount = Number(amount);
-    if (!amount.trim() || !Number.isFinite(parsedAmount)) {
-      return "Enter an amount in days.";
+    const value = Number(credits);
+    if (!credits.trim() || !Number.isFinite(value)) {
+      return "Enter the number of credits.";
     }
-    if (parsedAmount === 0) {
-      return "The adjustment amount must not be zero.";
-    }
-    if (Math.abs(parsedAmount) > 3650) {
-      return "The adjustment must be between -3650 and 3650 days.";
+    if (value < 0) return "Credits cannot be negative.";
+    if (value > 3650) return "Credits must be 3650 or fewer.";
+    if (mode === "ADD" && value === 0) {
+      return "Add credits needs an amount greater than zero.";
     }
     if (reason.trim().length < 3) {
       return "Enter a reason with at least 3 characters.";
@@ -643,13 +871,15 @@ function BalanceDetailModal({
     return null;
   }
 
-  function adjustmentInput() {
+  function creditInput() {
     if (!balance) return null;
     return {
       leaveTypeId: balance.leaveTypeId,
-      amount: Number(amount),
+      mode,
+      credits: Number(credits),
+      employeeIds: [balance.employeeId],
+      effectiveDate: balance.periodStart,
       reason: reason.trim(),
-      periodStart: balance.periodStart,
     };
   }
 
@@ -664,13 +894,9 @@ function BalanceDetailModal({
     setSuccess(null);
     setPreviewing(true);
     try {
-      const input = adjustmentInput();
+      const input = creditInput();
       if (!input) return;
-      const response = await previewLeaveBalanceAdjustment(
-        organizationId,
-        balance.employeeId,
-        input,
-      );
+      const response = await previewLeaveCredits(organizationId, input);
       setPreview(response.data);
     } catch (caught) {
       setFormError(leaveErrorMessage(caught));
@@ -679,26 +905,23 @@ function BalanceDetailModal({
     }
   }
 
-  async function submitAdjustment() {
+  async function submitAssignment() {
     if (submitting || previewing || !balance || !preview) return;
     setFormError(null);
     setSuccess(null);
     setSubmitting(true);
     try {
-      const input = adjustmentInput();
+      const input = creditInput();
       if (!input) return;
-      const result = await adjustLeaveBalance(organizationId, balance.employeeId, input);
-      setUpdated(result.data.balance);
-      setAdjusting(false);
-      setAmount("");
+      await assignLeaveCredits(organizationId, input);
+      setAssigning(false);
+      setCredits("");
       setReason("");
       setPreview(null);
-      setSuccess(
-        "Balance adjustment recorded. The server recalculated the available balance, wrote the ledger entry, and updated this period only.",
-      );
+      setSuccess("Credits updated. The change is recorded in the balance history.");
       detail.reload();
       ledger.reload();
-      onAdjusted();
+      onChanged();
     } catch (caught) {
       setFormError(leaveErrorMessage(caught));
     } finally {
@@ -707,6 +930,7 @@ function BalanceDetailModal({
   }
 
   const ledgerRows = ledger.data?.data ?? [];
+  const previewItem = preview?.items.find((item) => item.ok);
 
   return (
     <Modal
@@ -721,11 +945,11 @@ function BalanceDetailModal({
       size="lg"
       dismissible={!submitting && !previewing}
       footer={
-        adjusting ? (
+        assigning ? (
           <>
             <Button
               variant="secondary"
-              onClick={cancelAdjustment}
+              onClick={cancelAssignment}
               disabled={submitting || previewing}
             >
               Back
@@ -736,14 +960,14 @@ function BalanceDetailModal({
               loading={previewing}
               disabled={submitting}
             >
-              Preview adjustment
+              Preview changes
             </Button>
             <Button
-              onClick={submitAdjustment}
+              onClick={submitAssignment}
               loading={submitting}
               disabled={!preview || previewing}
             >
-              Confirm adjustment
+              Confirm and save
             </Button>
           </>
         ) : (
@@ -751,14 +975,14 @@ function BalanceDetailModal({
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>
-            <Button onClick={beginAdjustment}>Adjust this period</Button>
+            <Button onClick={beginAssignment}>Assign credits</Button>
           </>
         )
       }
     >
       <div className="space-y-4">
         {success ? <Alert tone="success">{success}</Alert> : null}
-        {detail.error && !updated ? (
+        {detail.error ? (
           <ErrorState message={detail.error} onRetry={detail.reload} />
         ) : null}
         {formError ? <Alert tone="danger">{formError}</Alert> : null}
@@ -782,47 +1006,64 @@ function BalanceDetailModal({
             id="leave-balance-breakdown"
             className="mb-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted"
           >
-            Balance breakdown
+            How this balance is calculated
           </h3>
           <div className="grid gap-2 sm:grid-cols-2">
             <BalanceFigure
-              label="Available balance"
+              label="Available"
               value={balance.availableBalance}
-              hint="Entitled plus accrued, adjustments, and carried forward, minus approved and pending amounts."
+              hint="Assigned minus used and pending."
               emphasis
             />
             <BalanceFigure
-              label="Pending approval"
-              value={balance.pendingReserved}
-              hint="Reserved by pending leave requests."
+              label="Assigned"
+              value={balance.assignedBalance}
+              hint="Leave credits given for this period."
             />
             <BalanceFigure
-              label="Approved consumed"
+              label="Used"
               value={balance.approvedConsumed}
-              hint="Approved leave charged in this period."
+              hint="Approved leave that has already been taken."
             />
             <BalanceFigure
-              label="Entitled"
-              value={balance.entitledBalance}
-              hint="Initial entitlement after any proration."
-            />
-            <BalanceFigure
-              label="Accrued"
-              value={balance.accruedBalance}
-              hint="Scheduled accrual tranches credited to date."
-            />
-            <BalanceFigure
-              label="Adjustments"
-              value={balance.adjustmentBalance}
-              hint="Net administrator adjustments for this period."
-              signed
-            />
-            <BalanceFigure
-              label="Carried forward"
-              value={balance.carriedForwardBalance}
-              hint="Credited from the previous balance period."
+              label="Pending"
+              value={balance.pendingReserved}
+              hint="Reserved by requests still waiting for a decision."
             />
           </div>
+          <p className="mt-2 rounded-md bg-surface-muted px-3 py-2 text-[11px] leading-4 text-muted tnum">
+            {formatLeaveUnits(balance.assignedBalance)} assigned −{" "}
+            {formatLeaveUnits(balance.approvedConsumed)} used −{" "}
+            {formatLeaveUnits(balance.pendingReserved)} pending ={" "}
+            {formatLeaveUnits(balance.availableBalance)} available
+          </p>
+          <details className="mt-2 text-xs text-muted">
+            <summary className="cursor-pointer font-medium text-ink-secondary">
+              Credit sources
+            </summary>
+            <dl className="mt-1.5 grid gap-1 sm:grid-cols-2">
+              <div className="flex justify-between gap-3 sm:block">
+                <dt className="text-muted">Starting credits</dt>
+                <dd className="tnum text-ink">{formatLeaveUnits(balance.entitledBalance)}</dd>
+              </div>
+              <div className="flex justify-between gap-3 sm:block">
+                <dt className="text-muted">Scheduled credits</dt>
+                <dd className="tnum text-ink">{formatLeaveUnits(balance.accruedBalance)}</dd>
+              </div>
+              <div className="flex justify-between gap-3 sm:block">
+                <dt className="text-muted">Manual adjustments</dt>
+                <dd className="tnum text-ink">
+                  {formatSignedLeaveUnits(balance.adjustmentBalance)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3 sm:block">
+                <dt className="text-muted">Carried forward</dt>
+                <dd className="tnum text-ink">
+                  {formatLeaveUnits(balance.carriedForwardBalance)}
+                </dd>
+              </div>
+            </dl>
+          </details>
         </section>
 
         <section aria-labelledby="leave-balance-employee">
@@ -861,50 +1102,63 @@ function BalanceDetailModal({
           </dl>
         </section>
 
-        {adjusting ? (
+        {assigning ? (
           <section
-            aria-labelledby="leave-balance-adjust"
+            aria-labelledby="leave-balance-assign"
             className="rounded-lg border border-line bg-surface-muted p-3.5"
           >
-            <h3 id="leave-balance-adjust" className="text-[13px] font-semibold text-ink">
-              Adjust this balance period
+            <h3 id="leave-balance-assign" className="text-[13px] font-semibold text-ink">
+              Assign credits for this period
             </h3>
             <p className="mt-0.5 text-xs leading-5 text-muted">
-              The adjustment is recorded against{" "}
-              {balancePeriodLabel(balance.periodStart, balance.periodEnd)} only. Preview it
-              first; the server validates the policy cap and negative-balance rules before
-              anything is written.
+              Add credits on top of the assigned total, or set the assigned total exactly.
+              Preview first; the server validates the policy cap and negative-balance rules
+              before anything is written.
             </p>
-            <div className="mt-3 space-y-3">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Operation" htmlFor="leave-credit-mode">
+                <Select
+                  id="leave-credit-mode"
+                  value={mode}
+                  onChange={(event) => {
+                    setMode(event.target.value as LeaveCreditMode);
+                    setPreview(null);
+                  }}
+                >
+                  <option value="ADD">Add credits</option>
+                  <option value="SET">Set balance</option>
+                </Select>
+              </Field>
               <Field
-                label="Amount (days)"
-                htmlFor="leave-adjustment-amount"
+                label={mode === "ADD" ? "Credits to add" : "New assigned total"}
+                htmlFor="leave-credit-amount"
                 required
-                hint="Use a positive number to credit and a negative number to debit."
               >
                 <Input
-                  id="leave-adjustment-amount"
+                  id="leave-credit-amount"
                   type="number"
                   inputMode="decimal"
                   step="any"
-                  min={-3650}
+                  min={0}
                   max={3650}
-                  value={amount}
+                  value={credits}
                   onChange={(event) => {
-                    setAmount(event.target.value);
+                    setCredits(event.target.value);
                     setPreview(null);
                   }}
                   data-autofocus
                 />
               </Field>
+            </div>
+            <div className="mt-3">
               <Field
                 label="Reason"
-                htmlFor="leave-adjustment-reason"
+                htmlFor="leave-credit-reason"
                 required
-                hint="At least 3 characters. Stored with the adjustment and shown in history."
+                hint="At least 3 characters. Stored with the change and shown in history."
               >
                 <Textarea
-                  id="leave-adjustment-reason"
+                  id="leave-credit-reason"
                   value={reason}
                   onChange={(event) => {
                     setReason(event.target.value);
@@ -918,27 +1172,33 @@ function BalanceDetailModal({
             {preview ? (
               <div className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs">
                 <p className="font-medium text-ink">Preview</p>
-                <dl className="mt-1.5 grid gap-1 sm:grid-cols-2">
-                  <div className="flex justify-between gap-3 sm:block">
-                    <dt className="text-muted">Available</dt>
-                    <dd className="tnum text-ink">
-                      {formatLeaveUnits(preview.availableBefore)} →{" "}
-                      {formatLeaveUnits(preview.availableAfter)}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3 sm:block">
-                    <dt className="text-muted">Adjustment balance</dt>
-                    <dd className="tnum text-ink">
-                      {formatSignedLeaveUnits(preview.adjustmentBefore)} →{" "}
-                      {formatSignedLeaveUnits(preview.adjustmentAfter)}
-                    </dd>
-                  </div>
-                </dl>
+                {previewItem && previewItem.ok ? (
+                  <dl className="mt-1.5 grid gap-1 sm:grid-cols-2">
+                    <div className="flex justify-between gap-3 sm:block">
+                      <dt className="text-muted">Assigned</dt>
+                      <dd className="tnum text-ink">
+                        {formatLeaveUnits(previewItem.assignedBefore)} →{" "}
+                        {formatLeaveUnits(previewItem.assignedAfter)}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3 sm:block">
+                      <dt className="text-muted">Available</dt>
+                      <dd className="tnum text-ink">
+                        {formatLeaveUnits(previewItem.availableBefore)} →{" "}
+                        {formatLeaveUnits(previewItem.availableAfter)}
+                      </dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <p className="mt-1 text-danger">
+                    {preview.items.find((item) => !item.ok)?.message ??
+                      "This change cannot be applied."}
+                  </p>
+                )}
                 <p className="mt-1.5 text-[11px] text-muted">
-                  {preview.balanceExists
-                    ? "Applying now updates this existing balance."
-                    : "Applying now creates this balance period first."}{" "}
-                  Nothing has been written yet.
+                  {previewItem && previewItem.ok && previewItem.unchanged
+                    ? "This employee is already at the requested balance. Nothing will change."
+                    : "Nothing has been written yet."}
                 </p>
               </div>
             ) : null}
@@ -950,15 +1210,15 @@ function BalanceDetailModal({
             id="leave-balance-history"
             className="mb-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted"
           >
-            Ledger history
+            History for this period
           </h3>
           {ledger.error ? (
             <ErrorState message={ledger.error} onRetry={ledger.reload} />
           ) : ledger.loading && !ledger.data ? (
-            <LoadingBlock label="Loading ledger" rows={3} />
+            <LoadingBlock label="Loading history" rows={3} />
           ) : ledgerRows.length === 0 ? (
             <p className="text-xs leading-5 text-muted">
-              No ledger entries yet for this balance period.
+              No credit or leave activity yet for this period.
             </p>
           ) : (
             <div className="overflow-hidden rounded-lg border border-line">
@@ -984,13 +1244,11 @@ function BalanceFigure({
   label,
   value,
   hint,
-  signed = false,
   emphasis = false,
 }: {
   label: string;
   value: number;
   hint: string;
-  signed?: boolean;
   emphasis?: boolean;
 }) {
   return (
@@ -1004,7 +1262,7 @@ function BalanceFigure({
         {label}
       </p>
       <p className="mt-0.5 text-sm font-semibold text-ink tnum">
-        {signed ? formatSignedLeaveUnits(value) : formatLeaveUnits(value)}
+        {formatLeaveUnits(value)}
       </p>
       <p className="mt-0.5 text-[11px] leading-4 text-muted">{hint}</p>
     </div>

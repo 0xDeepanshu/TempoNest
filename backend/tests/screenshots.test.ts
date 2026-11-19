@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   AuditEvent,
   DesktopAgent,
+  EmployeeMonitoringPolicy,
   Screenshot,
   ScreenshotPolicy,
   ScreenshotRequest,
@@ -16,6 +17,7 @@ import {
   runScreenshotMaintenance,
 } from '../src/modules/screenshots/screenshot.service';
 import { updateScreenshotPolicy } from '../src/modules/screenshots/screenshotPolicy.service';
+import { runDueScheduledCaptures } from '../src/modules/screenshots/screenshot.scheduler';
 import { screenshotStorage } from '../src/modules/screenshots/storage';
 import {
   API,
@@ -216,6 +218,12 @@ describe('admin-initiated screenshots', () => {
 
   it('rejects capture when the policy is disabled and enforces roles and organization scope', async () => {
     const team = await createTeam({ manager: true });
+
+    const disabledPolicy = await request(app)
+      .patch(`${API}/admin/screenshot-policy`)
+      .set(adminHeaders(team.ownerAuth, team.orgId))
+      .send({ enabled: false });
+    expect(disabledPolicy.status).toBe(200);
 
     const disabled = await createRequest(team.ownerAuth, team.orgId, team.employee.user.id);
     expect(disabled.status).toBe(403);
@@ -1078,5 +1086,52 @@ describe('admin-initiated screenshots', () => {
     const badToken = await request(app).get(`${API}/screenshot-files/not-a-valid-signed-token`);
     expect(badToken.status).toBe(404);
     expect(badToken.body.error.code).toBe('SCREENSHOT_LINK_INVALID');
+  });
+
+  it('records the last capture time when a scheduled capture completes', async () => {
+    const team = await createTeam();
+    await enablePolicy(team.ownerAuth, team.orgId);
+
+    await EmployeeMonitoringPolicy.update(
+      { scheduledCaptureEnabled: true, nextCaptureAt: new Date(Date.now() - 60_000) },
+      {
+        where: {
+          organizationId: team.orgId,
+          employeeId: team.employee.user.id,
+        },
+      },
+    );
+
+    const sweep = await runDueScheduledCaptures();
+    expect(sweep.captured).toBe(1);
+
+    const scheduled = await ScreenshotRequest.findOne({
+      where: {
+        organizationId: team.orgId,
+        employeeId: team.employee.user.id,
+        status: 'PENDING',
+      },
+    });
+    expect(scheduled).not.toBeNull();
+
+    const claimed = await claim(team.agent, team.orgId, scheduled!.id);
+    expect(claimed.status).toBe(200);
+    const uploaded = await upload(
+      team.agent,
+      team.orgId,
+      claimed.body.data.upload.url as string,
+      PNG,
+    );
+    expect(uploaded.status).toBe(201);
+    const completed = await complete(team.agent, team.orgId, scheduled!.id);
+    expect(completed.status).toBe(200);
+
+    const policy = await EmployeeMonitoringPolicy.findOne({
+      where: {
+        organizationId: team.orgId,
+        employeeId: team.employee.user.id,
+      },
+    });
+    expect(policy?.lastCaptureAt).toBeTruthy();
   });
 });

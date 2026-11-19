@@ -10,7 +10,7 @@ import { leaveErrorMessage } from "@/lib/leave-errors";
 import type { LeaveBalance, LeaveRequest, LeaveType } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { Modal } from "./modal";
-import { Alert, Badge, Button, Field, Input, Select, Textarea } from "./ui";
+import { Alert, Badge, Button, Field, Input, Select, Textarea, cn } from "./ui";
 
 type DurationValue = "FULL" | "HALF_START" | "HALF_END" | "HALF_BOTH";
 
@@ -97,17 +97,20 @@ export function LeaveApplyModal({
     ? findLeaveBalanceForDate(balances, selectedType.id, startDate || today)
     : undefined;
 
-  const durationOptions: Array<{ value: DurationValue; label: string }> = sameDay
-    ? [
-        { value: "FULL", label: "Full day" },
-        { value: "HALF_START", label: "Half day" },
-      ]
-    : [
-        { value: "FULL", label: "Full days" },
-        { value: "HALF_START", label: "First day is a half day" },
-        { value: "HALF_END", label: "Last day is a half day" },
-        { value: "HALF_BOTH", label: "First and last days are half days" },
-      ];
+  const halfDayAllowed = selectedType?.allowHalfDay !== false;
+  const durationOptions: Array<{ value: DurationValue; label: string }> = !halfDayAllowed
+    ? [{ value: "FULL", label: sameDay ? "Full day" : "Full days" }]
+    : sameDay
+      ? [
+          { value: "FULL", label: "Full day" },
+          { value: "HALF_START", label: "Half day" },
+        ]
+      : [
+          { value: "FULL", label: "Full days" },
+          { value: "HALF_START", label: "First day is a half day" },
+          { value: "HALF_END", label: "Last day is a half day" },
+          { value: "HALF_BOTH", label: "First and last days are half days" },
+        ];
   const effectiveDuration = durationOptions.some((option) => option.value === duration)
     ? duration
     : "FULL";
@@ -376,13 +379,18 @@ export function LeaveApplyModal({
         <Field
           label="Duration"
           htmlFor="leave-apply-duration"
-          hint="Half days apply to the first and/or last day of the request."
+          hint={
+            halfDayAllowed
+              ? "Half days apply to the first and/or last day of the request."
+              : "This leave type does not allow half days."
+          }
           required
         >
           <Select
             id="leave-apply-duration"
             value={effectiveDuration}
             onChange={(event) => changeDuration(event.target.value)}
+            disabled={!halfDayAllowed}
           >
             {durationOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -396,7 +404,9 @@ export function LeaveApplyModal({
           <div className="rounded-lg border border-line px-3 py-2.5">
             <dl className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
               <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted">Estimated charge</dt>
+                <dt className="text-muted">
+                  {selectedType.requiresBalance ? "Credits required" : "Estimated days"}
+                </dt>
                 <dd className="tnum font-medium text-ink">
                   {estimate === null
                     ? datesValid && holidays.loading
@@ -408,12 +418,29 @@ export function LeaveApplyModal({
                 </dd>
               </div>
               {selectedType.requiresBalance ? (
-                <div className="flex items-center justify-between gap-2">
-                  <dt className="text-muted">Available balance</dt>
-                  <dd className="tnum font-medium text-ink">
-                    {balance ? formatLeaveUnits(balance.availableBalance) : "Not calculated"}
-                  </dd>
-                </div>
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="text-muted">Available before</dt>
+                    <dd className="tnum font-medium text-ink">
+                      {balance ? formatLeaveUnits(balance.availableBalance) : "Not calculated"}
+                    </dd>
+                  </div>
+                  {balance && estimate !== null ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <dt className="text-muted">Available after</dt>
+                      <dd
+                        className={cn(
+                          "tnum font-medium",
+                          balance.availableBalance - estimate < 0
+                            ? "text-warning"
+                            : "text-ink",
+                        )}
+                      >
+                        {formatLeaveUnits(balance.availableBalance - estimate)}
+                      </dd>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
             </dl>
             <p className="mt-1 text-[11px] leading-4 text-muted">

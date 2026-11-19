@@ -26,11 +26,16 @@ import {
   bulkAdjustLeaveBalances,
   getLeaveAccrualPreview,
   getLeaveBalanceReconciliation,
+  getLeaveManagementOverview,
   listLeaveLedger,
   previewBulkLeaveAdjustments,
   previewLeaveBalanceBackfill,
   repairLeaveBalanceReconciliation,
 } from './leaveBalanceAdmin.service';
+import {
+  assignLeaveCredits,
+  previewLeaveCreditAssignment,
+} from './leaveCredits.service';
 import {
   applyForLeave,
   approveLeaveRequest,
@@ -48,6 +53,8 @@ import type {
   CancelLeaveRequestInput,
   CreateLeaveHolidayInput,
   CreateLeaveTypeInput,
+  LeaveCreditAssignmentConfirmInput,
+  LeaveCreditAssignmentInput,
   LeaveAccrualPreviewQuery,
   LeaveAuditQuery,
   LeaveBalanceBackfillInput,
@@ -207,6 +214,30 @@ export const previewAdjustment = asyncHandler(async (req: Request, res: Response
     input: req.body,
   });
   res.status(200).json({ data: { preview, serverTime: now() } });
+});
+
+export const overview = asyncHandler(async (req: Request, res: Response) => {
+  const result = await getLeaveManagementOverview(req.organization!.organization);
+  res.status(200).json({ data: result, serverTime: now() });
+});
+
+export const previewCredits = asyncHandler(async (req: Request, res: Response) => {
+  const result = await previewLeaveCreditAssignment({
+    organization: req.organization!.organization,
+    actorUserId: actor(req).userId,
+    input: req.body as LeaveCreditAssignmentInput,
+  });
+  res.status(200).json({ data: result, serverTime: now() });
+});
+
+export const assignCredits = asyncHandler(async (req: Request, res: Response) => {
+  const result = await assignLeaveCredits({
+    organization: req.organization!.organization,
+    actorUserId: actor(req).userId,
+    input: req.body as LeaveCreditAssignmentConfirmInput,
+    context: auditContext(req),
+  });
+  res.status(200).json({ data: result, serverTime: now() });
 });
 
 export const previewBackfill = asyncHandler(async (req: Request, res: Response) => {

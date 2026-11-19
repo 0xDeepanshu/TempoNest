@@ -29,6 +29,7 @@ export const PERMISSIONS = [
   'screenshot:live',
   'screenshot:manage',
   'screenshot:policy',
+  'screenshot:monitoring',
   'leave:read',
   'leave:write',
   'leave:approve',
@@ -75,6 +76,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'screenshot:live',
     'screenshot:manage',
     'screenshot:policy',
+    'screenshot:monitoring',
     'leave:read',
     'leave:write',
     'leave:approve',
@@ -151,6 +153,7 @@ export type GrantablePermission = (typeof CUSTOM_ROLE_GRANTABLE_PERMISSIONS)[num
 export const MANAGER_OVERRIDE_GRANTABLE_PERMISSIONS = [
   ...CUSTOM_ROLE_GRANTABLE_PERMISSIONS,
   'screenshot:read',
+  'screenshot:monitoring',
 ] as const satisfies readonly Permission[];
 
 export function isManagerOverridePermission(value: string): value is Permission {

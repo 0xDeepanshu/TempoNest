@@ -149,6 +149,12 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
         permission: "screenshot:read",
       },
       {
+        href: "/admin/scheduled-capture",
+        label: "Scheduled screenshots",
+        icon: <CameraIcon className="h-4 w-4" />,
+        permission: "screenshot:monitoring",
+      },
+      {
         href: "/admin/monitoring",
         label: "Monitoring settings",
         icon: <ShieldIcon className="h-4 w-4" />,

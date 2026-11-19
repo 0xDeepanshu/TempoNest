@@ -21,6 +21,8 @@ import {
   leaveBalanceListQuerySchema,
   leaveBalanceReconciliationQuerySchema,
   leaveBalanceRepairSchema,
+  leaveCreditAssignmentConfirmSchema,
+  leaveCreditAssignmentSchema,
   leaveHolidayIdParamsSchema,
   leaveHolidayQuerySchema,
   leaveLedgerQuerySchema,
@@ -38,6 +40,7 @@ import {
   accrualPreview,
   adjustBalance,
   approveRequest,
+  assignCredits,
   backfillBalances,
   bulkAdjustment,
   cancelRequest,
@@ -55,9 +58,11 @@ import {
   listRequests,
   listTypes,
   myBalances,
+  overview,
   previewAdjustment,
   previewBackfill,
   previewBulkAdjustment,
+  previewCredits,
   reconciliation,
   rejectRequest,
   repairReconciliation,
@@ -149,6 +154,35 @@ export function createOrganizationLeaveRouter(): Router {
     loadOrganizationContext,
     requirePermission('leave:manage'),
     deleteHoliday,
+  );
+
+  router.get(
+    '/:organizationId/leave/overview',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('leave:manage'),
+    overview,
+  );
+
+  router.post(
+    '/:organizationId/leave/credits/preview',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('leave:manage'),
+    validate({ body: leaveCreditAssignmentSchema }),
+    previewCredits,
+  );
+
+  router.post(
+    '/:organizationId/leave/credits',
+    requireAuth,
+    validate({ params: organizationIdParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('leave:manage'),
+    validate({ body: leaveCreditAssignmentConfirmSchema }),
+    assignCredits,
   );
 
   router.get(

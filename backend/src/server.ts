@@ -8,6 +8,7 @@ import { attachAgentWebSocketServer } from './realtime/agentWebSocket';
 import { attachScreenLiveRelay, type ScreenLiveRelay } from './realtime/screenLiveRelay';
 import { agentHub } from './realtime/agentHub';
 import { startScreenshotMaintenance } from './modules/screenshots/screenshot.maintenance';
+import { startScreenshotScheduler } from './modules/screenshots/screenshot.scheduler.maintenance';
 import { startScreenLiveMaintenance } from './modules/screenshots/screenLive.maintenance';
 import { startAttendanceLocationMaintenance } from './modules/attendance/attendanceLocation.maintenance';
 import { startLeaveAccrualMaintenance } from './modules/leave/leaveAccrual.maintenance';
@@ -27,6 +28,7 @@ async function shutdown(
   stopLeaveAccrualMaintenance?: () => void,
   stopActivityMaintenance?: () => void,
   stopIntegrationWebhookMaintenance?: () => void,
+  stopScreenshotScheduler?: () => void,
 ): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -38,6 +40,7 @@ async function shutdown(
   stopLeaveAccrualMaintenance?.();
   stopActivityMaintenance?.();
   stopIntegrationWebhookMaintenance?.();
+  stopScreenshotScheduler?.();
   agentHub.closeAll(1001, 'Server shutting down');
   wss?.close();
   if (relay) {
@@ -91,6 +94,7 @@ async function main(): Promise<void> {
   const stopLeaveAccrualMaintenance = startLeaveAccrualMaintenance();
   const stopActivityMaintenance = startActivityMaintenance();
   const stopIntegrationWebhookMaintenance = startIntegrationWebhookMaintenance();
+  const stopScreenshotScheduler = startScreenshotScheduler();
 
   // Both realtime endpoints above ignore paths they do not own. Reject any
   // other upgrade request so unhandled sockets do not linger.
@@ -123,6 +127,7 @@ async function main(): Promise<void> {
       stopLeaveAccrualMaintenance,
       stopActivityMaintenance,
       stopIntegrationWebhookMaintenance,
+      stopScreenshotScheduler,
     ).then(() => process.exit(process.exitCode ?? 0));
   };
 
@@ -146,6 +151,7 @@ async function main(): Promise<void> {
       stopLeaveAccrualMaintenance,
       stopActivityMaintenance,
       stopIntegrationWebhookMaintenance,
+      stopScreenshotScheduler,
     ).then(() => process.exit(1));
   });
 }

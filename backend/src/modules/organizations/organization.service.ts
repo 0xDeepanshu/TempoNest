@@ -4,6 +4,7 @@ import { sequelize, CustomRole, Membership, Organization } from '../../database'
 import { AppError } from '../../utils/errors';
 import { slugify, slugWithSuffix } from '../../utils/slug';
 import { toOrganizationSummary } from '../memberships/membership.mapper';
+import { createDefaultEmployeeMonitoringPolicy } from '../screenshots/employeeMonitoringPolicy.service';
 import {
   resolvePermissionSubject,
   type ManagerRoleOverrideAccess,
@@ -49,6 +50,16 @@ export async function createOrganization(
           },
           { transaction },
         );
+
+        // General monitoring is enabled for every new employee (manual
+        // requests and live viewing), while automatic scheduled capture starts
+        // opt-in and disabled. The organization-wide policy keeps its existing
+        // lazily-created default and is not changed here.
+        await createDefaultEmployeeMonitoringPolicy({
+          organizationId: organization.id,
+          employeeId: userId,
+          transaction,
+        });
 
         return { organization, membership };
       });
