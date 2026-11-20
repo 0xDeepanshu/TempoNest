@@ -132,9 +132,7 @@ export function SuperadminShell({
         className="fixed inset-y-0 left-0 z-30 hidden w-56 flex-col border-r border-line bg-surface lg:flex"
       >
         <div className="flex h-14 items-center gap-2 border-b border-line px-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink text-xs font-semibold text-on-strong">
-            W
-          </span>
+          <img src="/logo/logo-nobg.png" alt="WorkZen" className="h-7 w-7 shrink-0 object-contain" />
           <div className="min-w-0">
             <p className="text-[13px] font-semibold tracking-tight text-ink">WorkZen</p>
             <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted">
@@ -168,9 +166,7 @@ export function SuperadminShell({
         <header className="sticky top-0 z-20 border-b border-line bg-surface/95 backdrop-blur lg:hidden">
           <div className="flex h-14 items-center justify-between gap-3 px-4">
             <div className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink text-[11px] font-semibold text-on-strong">
-                W
-              </span>
+              <img src="/logo/logo-nobg.png" alt="WorkZen" className="h-6 w-6 object-contain" />
               <div>
                 <p className="text-[13px] font-semibold leading-4 text-ink">WorkZen</p>
                 <p className="text-[9px] font-medium uppercase tracking-[0.12em] text-muted">

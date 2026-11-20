@@ -7,7 +7,7 @@ import {
   sequelize,
 } from '../../database';
 import { logger } from '../../config/logger';
-import { balancePeriodFor, localDate } from './leaveCalendar';
+import { balancePeriodFor, localDate, policyPeriodConfig } from './leaveCalendar';
 import { ensureBalance, withTransactionRetry } from './leaveBalance.service';
 
 const MEMBERSHIP_BATCH_SIZE = 200;
@@ -62,12 +62,6 @@ export async function runLeaveAccrualSweep(
     if (types.length === 0) continue;
 
     const today = localDate(now, organization.timezone);
-    const periods = new Map(
-      types.map((type) => [
-        type.id,
-        balancePeriodFor(today, type.policy!, organization.timezone),
-      ]),
-    );
 
     let offset = 0;
     for (;;) {
@@ -82,7 +76,7 @@ export async function runLeaveAccrualSweep(
             attributes: ['id'],
           },
         ],
-        attributes: ['userId'],
+        attributes: ['userId', 'createdAt'],
         order: [
           ['createdAt', 'ASC'],
           ['userId', 'ASC'],
@@ -94,10 +88,15 @@ export async function runLeaveAccrualSweep(
 
       for (const membership of memberships) {
         try {
+          const joinDate = localDate(membership.createdAt, organization.timezone);
           await withTransactionRetry(() =>
             sequelize.transaction(async (transaction) => {
               for (const type of types) {
-                const period = periods.get(type.id)!;
+                const period = balancePeriodFor(
+                  today,
+                  policyPeriodConfig(type.policy!, joinDate),
+                  organization.timezone,
+                );
                 await ensureBalance({
                   organization,
                   employeeId: membership.userId,

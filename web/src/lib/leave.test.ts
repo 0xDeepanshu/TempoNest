@@ -22,6 +22,7 @@ function balance(overrides: Partial<LeaveBalance> = {}): LeaveBalance {
     carriedForwardBalance: 0,
     approvedConsumed: 0,
     pendingReserved: 0,
+    expiredBalance: 0,
     availableBalance: 20,
     assignedBalance: 20,
     breakdown: {
@@ -32,6 +33,7 @@ function balance(overrides: Partial<LeaveBalance> = {}): LeaveBalance {
       carriedForward: 0,
       approvedConsumed: 0,
       pendingReserved: 0,
+      expired: 0,
       available: 20,
     },
     createdAt: "2026-01-01T00:00:00.000Z",

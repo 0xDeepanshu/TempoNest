@@ -130,7 +130,7 @@ export function EmployeesView() {
             members.data ? `${members.data.meta.total} membership${members.data.meta.total === 1 ? "" : "s"}` : "Loading…"
           }
           actions={
-            <Link href="/admin/organization" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
+            <Link href="/settings/general" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
               Manage members
             </Link>
           }

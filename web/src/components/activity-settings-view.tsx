@@ -7,7 +7,6 @@ import { formatDateTime } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
 import type { Organization, TrackingSettings } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
-import { ActivityTabs } from "./activity-tabs";
 import { InfoIcon, MonitorIcon, ShieldIcon } from "./icons";
 import {
   Alert,
@@ -42,7 +41,7 @@ function formFromSettings(settings: TrackingSettings): SettingsForm {
   };
 }
 
-export function ActivitySettingsView() {
+export function ActivitySettingsView({ embedded = false }: { embedded?: boolean } = {}) {
   const { organization, membership } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const canEdit = hasPermission(membership, "activity:policy");
@@ -65,14 +64,15 @@ export function ActivitySettingsView() {
   if (settings.loading && !current) {
     return (
       <div className="space-y-5">
-        <PageHeader
-          eyebrow={organization.name}
-          title="App tracking"
-          description="Loading the organization application tracking policy."
-        />
-        <ActivityTabs current="settings" />
+        {embedded ? null : (
+          <PageHeader
+            eyebrow={organization.name}
+            title="App tracking"
+            description="Loading app tracking rules."
+          />
+        )}
         <Card>
-          <LoadingBlock label="Loading tracking settings" rows={4} />
+          <LoadingBlock label="Loading app tracking rules" rows={4} />
         </Card>
       </div>
     );
@@ -81,8 +81,9 @@ export function ActivitySettingsView() {
   if (settings.error && !current) {
     return (
       <div className="space-y-5">
-        <PageHeader eyebrow={organization.name} title="App tracking" />
-        <ActivityTabs current="settings" />
+        {embedded ? null : (
+          <PageHeader eyebrow={organization.name} title="App tracking" />
+        )}
         <ErrorState message={settings.error} onRetry={settings.reload} />
       </div>
     );
@@ -96,6 +97,7 @@ export function ActivitySettingsView() {
       settings={current}
       organization={organization}
       canEdit={canEdit}
+      embedded={embedded}
       onSaved={(next) => setSavedSettings({ organizationId, settings: next })}
     />
   );
@@ -137,11 +139,13 @@ function ActivitySettingsForm({
   settings,
   organization,
   canEdit,
+  embedded = false,
   onSaved,
 }: {
   settings: TrackingSettings;
   organization: Organization;
   canEdit: boolean;
+  embedded?: boolean;
   onSaved: (settings: TrackingSettings) => void;
 }) {
   const [form, setForm] = useState<SettingsForm>(() => formFromSettings(settings));
@@ -152,11 +156,11 @@ function ActivitySettingsForm({
   function validate(next: SettingsForm): string | null {
     const threshold = Number(next.idleThresholdMinutes);
     if (!Number.isInteger(threshold) || threshold < 1 || threshold > 120) {
-      return "Idle threshold must be a whole number between 1 and 120 minutes.";
+      return "Idle time must be between 1 and 120 minutes.";
     }
     const retention = Number(next.activityRetentionDays);
     if (!Number.isInteger(retention) || retention < 7 || retention > 3650) {
-      return "Activity retention must be a whole number between 7 and 3650 days.";
+      return "Activity history must be kept between 7 and 3650 days.";
     }
     return null;
   }
@@ -191,40 +195,51 @@ function ActivitySettingsForm({
     }
   }
 
+  const statusBadge = (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-ink-secondary">
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full",
+          form.appTrackingEnabled ? "bg-success" : "bg-muted",
+        )}
+        aria-hidden
+      />
+      <MonitorIcon className="h-3.5 w-3.5" />
+      {form.appTrackingEnabled ? "App tracking on" : "App tracking off"}
+    </span>
+  );
+
   return (
     <div className="space-y-5">
-      <PageHeader
-        eyebrow={`${organization.name} · ${organization.timezone}`}
-        title="App tracking"
-        description="Control foreground application metadata, operating-system idle detection, and productivity classification for desktop agents in this organization."
-        actions={
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-ink-secondary">
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                form.appTrackingEnabled ? "bg-success" : "bg-muted",
-              )}
-              aria-hidden
-            />
-            <MonitorIcon className="h-3.5 w-3.5" />
-            {form.appTrackingEnabled ? "App tracking enabled" : "App tracking disabled"}
-          </span>
-        }
-      />
+      {embedded ? (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight text-ink">App tracking</h2>
+            <p className="mt-0.5 max-w-3xl text-[13px] leading-5 text-muted">
+              What the desktop agent records, when someone counts as idle, and how long the data
+              is kept.
+            </p>
+          </div>
+          {statusBadge}
+        </div>
+      ) : (
+        <PageHeader
+          eyebrow={`${organization.name} · ${organization.timezone}`}
+          title="App tracking"
+          description="What the desktop agent records, when someone counts as idle, and how long the data is kept."
+          actions={statusBadge}
+        />
+      )}
 
-      <ActivityTabs current="settings" />
-
-      <Alert tone={form.appTrackingEnabled ? "info" : "warning"} title="Foreground metadata only">
-        The desktop agent records which application is in the foreground and for how long, plus
-        operating-system idle intervals once the threshold is reached. It does not collect
-        keystrokes, clipboard contents, screenshots, browser URL history, full window titles, or
-        pointer content.
+      <Alert tone={form.appTrackingEnabled ? "info" : "warning"} title="App names and time only">
+        The desktop agent records which app is in front and for how long, plus idle time once the
+        threshold is reached. It never records keystrokes, clipboard contents, screenshots, browser
+        history, full window titles, or mouse content.
       </Alert>
 
       {!canEdit ? (
         <Alert tone="warning" title="Read-only view">
-          Your role can view the tracking policy but cannot change it. Organization owners and
-          administrators can edit these settings.
+          You can see these rules but cannot change them. Ask an owner or administrator.
         </Alert>
       ) : null}
 
@@ -232,32 +247,32 @@ function ActivitySettingsForm({
         <fieldset disabled={!canEdit || saving} className="space-y-5">
           <Card>
             <CardHeader
-              title="Collection controls"
-              description="These settings apply to every desktop agent in the organization. Employee-level overrides are not supported."
+              title="What the agent records"
+              description="These rules apply to everyone in the organization. There are no per-person overrides."
               actions={
                 <span className="text-[11px] text-muted">
-                  Policy v{settings.policyVersion}
+                  Version {settings.policyVersion}
                 </span>
               }
             />
             <CardBody className="space-y-5">
               <ToggleRow
-                title="Allow application tracking"
-                description="When on, agents report foreground application identifiers, names, and observed intervals. When off, agents stop sending new application events."
+                title="Record app activity"
+                description="When on, agents report which apps are used and for how long. When off, agents send nothing new."
                 checked={form.appTrackingEnabled}
                 onChange={(appTrackingEnabled) => setForm({ ...form, appTrackingEnabled })}
               />
               <ToggleRow
                 title="Detect idle time"
-                description="When on, agents report operating-system inactivity intervals so idle time can be separated from active time. When off, agents stop sending new idle intervals."
+                description="When on, agents report time without input so idle and active time can be told apart."
                 checked={form.idleDetectionEnabled}
                 onChange={(idleDetectionEnabled) =>
                   setForm({ ...form, idleDetectionEnabled })
                 }
               />
               <ToggleRow
-                title="Classify applications by productivity"
-                description="When on, reports group application time using the organization's current classification catalog. Unknown applications count as Unclassified, never Unproductive."
+                title="Sort apps into categories"
+                description="When on, reports group app time using your categories. Unknown apps stay Unclassified, never Unproductive."
                 checked={form.productivityClassificationEnabled}
                 onChange={(productivityClassificationEnabled) =>
                   setForm({ ...form, productivityClassificationEnabled })
@@ -266,9 +281,9 @@ function ActivitySettingsForm({
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field
-                  label="Idle threshold (minutes)"
+                  label="Idle after (minutes)"
                   htmlFor="activity-idle-threshold"
-                  hint="Minimum OS inactivity before an interval counts as idle. Allowed range: 1–120. Used when idle detection is on."
+                  hint="How long without input before time counts as idle. Allowed range: 1–120. Used when idle detection is on."
                 >
                   <Input
                     id="activity-idle-threshold"
@@ -283,9 +298,9 @@ function ActivitySettingsForm({
                   />
                 </Field>
                 <Field
-                  label="Raw activity retention (days)"
+                  label="Keep activity for (days)"
                   htmlFor="activity-retention"
-                  hint="Activity events and idle intervals older than this are deleted. Allowed range: 7–3650. Classifications are not deleted."
+                  hint="Older app activity and idle time are deleted. Allowed range: 7–3650. Categories are never deleted."
                 >
                   <Input
                     id="activity-retention"
@@ -304,14 +319,12 @@ function ActivitySettingsForm({
               <div className="rounded-lg border border-line bg-surface-muted p-4">
                 <p className="flex items-center gap-1.5 text-xs font-semibold text-ink">
                   <ShieldIcon className="h-3.5 w-3.5" />
-                  Disabling a feature never deletes historical data
+                  Turning a feature off never deletes history
                 </p>
                 <p className="mt-1 text-xs leading-5 text-muted">
-                  Turning off application tracking, idle detection, or classification only stops
-                  new collection for that feature. Existing activity, idle intervals, and
-                  classifications remain available according to the retention period. Missing
-                  data after a feature is disabled is not evidence that an employee was idle or
-                  unproductive.
+                  Turning off app tracking, idle detection, or categories only stops new data for
+                  that feature. Past data stays available for the retention period. Missing data
+                  after a feature is off is not proof that someone was idle or unproductive.
                 </p>
               </div>
             </CardBody>
@@ -319,28 +332,28 @@ function ActivitySettingsForm({
 
           <Card>
             <CardHeader
-              title="What the desktop agent does and does not collect"
-              description="Collected data is limited to what report categories and idle time require."
+              title="What is recorded"
+              description="Only what the reports and idle time need."
             />
             <CardBody className="grid gap-4 sm:grid-cols-2">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                  Collected
+                  Recorded
                 </p>
                 <ul className="mt-2 space-y-1.5 text-xs leading-5 text-ink-secondary">
-                  <li>Foreground application identifier and display name</li>
-                  <li>Platform label and observed foreground interval</li>
-                  <li>Operating-system idle intervals after the threshold</li>
+                  <li>Which app is in front, and its name</li>
+                  <li>Platform and how long it was in front</li>
+                  <li>Idle time after the threshold</li>
                 </ul>
               </div>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                  Not collected
+                  Never recorded
                 </p>
                 <ul className="mt-2 space-y-1.5 text-xs leading-5 text-ink-secondary">
-                  <li>Keystrokes or pointer content</li>
+                  <li>Keystrokes or mouse content</li>
                   <li>Clipboard data or screenshots</li>
-                  <li>Browser URL history or page contents</li>
+                  <li>Browser history or page contents</li>
                   <li>Full window titles</li>
                 </ul>
               </div>
@@ -349,22 +362,22 @@ function ActivitySettingsForm({
         </fieldset>
 
         {formError ? (
-          <Alert tone="danger" title="Settings not saved">
+          <Alert tone="danger" title="Not saved">
             {formError}
           </Alert>
         ) : null}
         {saved ? (
-          <Alert tone="success" title="Tracking settings saved">
-            Policy v{settings.policyVersion} applies to new agent activity immediately. Historical
-            data is unchanged.
+          <Alert tone="success" title="App tracking rules saved">
+            Version {settings.policyVersion} applies to new activity immediately. Past data is
+            unchanged.
           </Alert>
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="flex items-center gap-1.5 text-[11px] text-muted">
             <InfoIcon className="h-3.5 w-3.5" />
-            Policy last updated {formatDateTime(settings.policyUpdatedAt, organization.timezone)} ·
-            retention {settings.activityRetentionDays} days
+            Last updated {formatDateTime(settings.policyUpdatedAt, organization.timezone)} · keeps{" "}
+            {settings.activityRetentionDays} days
           </p>
           <div className="flex gap-2">
             <Button
@@ -380,7 +393,7 @@ function ActivitySettingsForm({
               Reset
             </Button>
             <Button type="submit" disabled={saving || !canEdit}>
-              {saving ? "Saving…" : "Save tracking settings"}
+              {saving ? "Saving…" : "Save app tracking rules"}
             </Button>
           </div>
         </div>

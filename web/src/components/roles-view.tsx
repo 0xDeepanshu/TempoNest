@@ -25,6 +25,7 @@ import { useApi } from "@/lib/use-api";
 import { ConfirmDialog } from "./confirm-dialog";
 import { KeyIcon, PlusIcon, SearchIcon, UsersIcon } from "./icons";
 import { Modal } from "./modal";
+import { SettingsTabs } from "./settings-tabs";
 import {
   Alert,
   Badge,
@@ -843,7 +844,7 @@ export function RolesView() {
       <PageHeader
         eyebrow={organization.name}
         title="Roles & permissions"
-        description="Owner, admin, and employee roles are protected. Owners can customize the Manager role for this organization, and owners or admins can create custom roles with explicit permissions."
+        description="Decide what each role can see and do. Built-in roles stay protected; you can adjust Manager and add your own roles."
         actions={
           canManage ? (
             <Button onClick={() => setCreating(true)} disabled={!catalog.data}>
@@ -854,6 +855,8 @@ export function RolesView() {
         }
       />
 
+      <SettingsTabs current="roles" />
+
       {notice ? (
         <Alert tone="success">
           {notice}
@@ -862,8 +865,8 @@ export function RolesView() {
 
       {!canManage ? (
         <Alert tone="info" title="Read-only access">
-          You can review roles. Only the organization owner can customize the Manager role;
-          owners and administrators can create, edit, assign, or delete custom roles.
+          You can look at roles but not change them. Owners can adjust Manager; owners and
+          administrators can create and edit custom roles.
         </Alert>
       ) : null}
 

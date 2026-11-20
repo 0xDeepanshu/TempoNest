@@ -44,6 +44,11 @@ interface NavItem {
   anyOf?: Permission[];
   /** Every listed permission is required. */
   allOf?: Permission[];
+  /**
+   * Extra path prefix that keeps this item highlighted when the workspace
+   * splits a surface across sibling routes (for example a hub with tabs).
+   */
+  activePrefix?: string;
 }
 
 const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
@@ -98,7 +103,7 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
       },
       {
         href: "/admin/leave/holidays",
-        label: "Holiday management",
+        label: "Holidays",
         icon: <CalendarIcon className="h-4 w-4" />,
         // The calendar itself requires read access; management permissions only
         // unlock the edit actions inside it.
@@ -122,29 +127,23 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
         icon: <PulseIcon className="h-4 w-4" />,
         permission: "report:read",
       },
-      {
-        href: "/admin/attendance",
-        label: "Attendance evidence",
-        icon: <MapPinIcon className="h-4 w-4" />,
-        permission: "report:read",
-      },
     ],
   },
   {
     label: "Monitoring",
     items: [
       {
-        href: "/admin/activity",
+        href: "/admin/activity/team",
         label: "App tracking",
         icon: <MonitorIcon className="h-4 w-4" />,
-        // The landing page reads tracking settings (time:read) and the team
-        // views read reports (report:read). General report access alone must
-        // not surface the monitoring area.
+        // The activity surfaces read tracking settings (time:read) and reports
+        // (report:read). General report access alone must not surface them.
         allOf: ["time:read", "report:read"],
+        activePrefix: "/admin/activity",
       },
       {
         href: "/admin/screenshots",
-        label: "Screenshot review",
+        label: "Screenshots",
         icon: <CameraIcon className="h-4 w-4" />,
         permission: "screenshot:read",
       },
@@ -155,36 +154,76 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
         permission: "screenshot:monitoring",
       },
       {
-        href: "/admin/monitoring",
-        label: "Monitoring settings",
-        icon: <ShieldIcon className="h-4 w-4" />,
-        permission: "screenshot:policy",
+        href: "/admin/attendance",
+        label: "Attendance logs",
+        icon: <MapPinIcon className="h-4 w-4" />,
+        permission: "report:read",
       },
     ],
   },
   {
-    label: "Workspace",
+    label: "Settings",
     items: [
       {
-        href: "/admin/roles",
-        label: "Roles & permissions",
-        icon: <KeyIcon className="h-4 w-4" />,
-        permission: "role:read",
-      },
-      {
-        href: "/admin/organization",
-        label: "Organization",
+        href: "/settings/general",
+        label: "General",
         icon: <BuildingIcon className="h-4 w-4" />,
         // The page lives under the admin layout and lists members, so both the
         // organization profile and the directory must be readable.
         allOf: ["organization:read", "member:read"],
       },
+      {
+        href: "/settings/roles",
+        label: "Roles & permissions",
+        icon: <KeyIcon className="h-4 w-4" />,
+        permission: "role:read",
+      },
+      {
+        href: "/settings/leave",
+        label: "Leave & holidays",
+        icon: <CalendarIcon className="h-4 w-4" />,
+        anyOf: ["leave:manage", "holiday:settings:manage"],
+      },
+      {
+        href: "/settings/monitoring",
+        label: "Monitoring",
+        icon: <ShieldIcon className="h-4 w-4" />,
+        anyOf: ["screenshot:policy", "activity:policy"],
+      },
     ],
   },
 ];
 
-function isActive(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(`${href}/`);
+function itemMatchesPath(item: NavItem, pathname: string): boolean {
+  const prefixes = item.activePrefix ? [item.href, item.activePrefix] : [item.href];
+  return prefixes.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+/**
+ * Only one sidebar item may be active at a time. The most specific (longest)
+ * matching route wins, so nested pages such as /admin/leave/holidays never also
+ * light up their parent (/admin/leave).
+ */
+export function activeNavigationHref(
+  pathname: string,
+  membership: MembershipSummary | undefined,
+): string | null {
+  const groups = visibleNavigationGroups(membership);
+  let best: { href: string; length: number } | null = null;
+
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (!itemMatchesPath(item, pathname)) continue;
+      const length = (item.activePrefix ?? item.href).length;
+      if (!best || length > best.length) {
+        best = { href: item.href, length };
+      }
+    }
+  }
+
+  return best?.href ?? null;
 }
 
 function navItemAllowed(
@@ -211,9 +250,15 @@ export function visibleNavigationGroups(membership: MembershipSummary | undefine
   })).filter((group) => group.items.length > 0);
 }
 
-function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
-  const pathname = usePathname();
-  const active = isActive(pathname, item.href);
+function NavLink({
+  item,
+  active,
+  onNavigate,
+}: {
+  item: NavItem;
+  active: boolean;
+  onNavigate?: () => void;
+}) {
   return (
     <Link
       href={item.href}
@@ -233,8 +278,10 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void 
 }
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
+  const pathname = usePathname();
   const { membership } = useWorkspace();
   const groups = visibleNavigationGroups(membership);
+  const activeHref = activeNavigationHref(pathname, membership);
 
   return (
     <nav aria-label="Primary" className="flex-1 space-y-5 overflow-y-auto px-2.5 py-4">
@@ -247,7 +294,12 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           ) : null}
           <div className="space-y-0.5">
             {group.items.map((item) => (
-              <NavLink key={item.href} item={item} onNavigate={onNavigate} />
+              <NavLink
+                key={item.href}
+                item={item}
+                active={item.href === activeHref}
+                onNavigate={onNavigate}
+              />
             ))}
           </div>
         </div>
@@ -363,9 +415,7 @@ function Shell({ children }: { children: ReactNode }) {
     return (
       <div className="flex h-full flex-col">
         <div className="flex h-14 items-center gap-2 border-b border-line px-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink text-xs font-semibold text-on-strong">
-            W
-          </span>
+          <img src="/logo/logo-nobg.png" alt="WorkZen" className="h-7 w-7 shrink-0 object-contain" />
           <div className="min-w-0">
             <p className="text-[13px] font-semibold tracking-tight text-ink">WorkZen</p>
             <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted">
@@ -432,9 +482,7 @@ function Shell({ children }: { children: ReactNode }) {
       <div className="lg:pl-60">
         <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-line bg-surface/95 px-4 backdrop-blur lg:hidden">
           <div className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink text-[11px] font-semibold text-on-strong">
-              W
-            </span>
+            <img src="/logo/logo-nobg.png" alt="WorkZen" className="h-6 w-6 object-contain" />
             <span className="text-[13px] font-semibold text-ink">WorkZen</span>
           </div>
           <div className="flex items-center gap-2">

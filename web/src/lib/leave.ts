@@ -2,8 +2,12 @@ import { formatDay, isDateOnly, todayInTimeZone } from "./format";
 import type {
   LeaveAccrualFrequency,
   LeaveBalance,
+  LeaveCarryForwardOrder,
+  LeaveCreditExpiryReason,
+  LeaveCreditSourceKind,
   LeaveLedgerEntryKind,
   LeaveRequestStatus,
+  LeaveResetPeriod,
 } from "./types";
 
 /** Low balance is a display threshold only; the API owns the real amounts. */
@@ -35,14 +39,44 @@ const ACCRUAL_LABELS: Record<LeaveAccrualFrequency, string> = {
 };
 
 const LEDGER_LABELS: Record<LeaveLedgerEntryKind, string> = {
-  INITIAL_ENTITLEMENT: "Starting credits",
-  ACCRUAL: "Scheduled credits",
-  CARRY_FORWARD: "Carried-forward credits",
-  ADJUSTMENT: "Credits assigned",
+  INITIAL_ENTITLEMENT: "Starting days",
+  ACCRUAL: "Scheduled days",
+  CARRY_FORWARD: "Carried-over days",
+  ADJUSTMENT: "Days added",
   RESERVATION: "Request submitted",
-  RESERVATION_RELEASE: "Reserved credits released",
+  RESERVATION_RELEASE: "Reserved days released",
   CONSUMPTION: "Leave approved",
   CONSUMPTION_RESTORE: "Approved leave cancelled",
+  EXPIRY: "Days expired",
+};
+
+const RESET_PERIOD_LABELS: Record<LeaveResetPeriod, string> = {
+  CALENDAR_YEAR: "Calendar year",
+  FINANCIAL_YEAR: "Financial year",
+  JOINING_ANNIVERSARY: "Work anniversary",
+  CUSTOM: "Custom date",
+  NEVER: "Never resets",
+};
+
+const CARRY_FORWARD_ORDER_LABELS: Record<LeaveCarryForwardOrder, string> = {
+  EXPIRY_FIRST: "Earliest expiry first",
+  CARRY_FORWARD_FIRST: "Carried-over days first",
+  NEW_FIRST: "Newest days first",
+};
+
+const CREDIT_EXPIRY_REASON_LABELS: Record<LeaveCreditExpiryReason, string> = {
+  NONE: "No expiry",
+  MONTHLY_RESET: "Monthly reset",
+  ANNUAL_RESET: "Annual reset",
+  CARRY_FORWARD: "Carry-forward expiry",
+};
+
+const CREDIT_SOURCE_LABELS: Record<LeaveCreditSourceKind, string> = {
+  INITIAL_ENTITLEMENT: "Starting days",
+  ACCRUAL: "Scheduled days",
+  CARRY_FORWARD: "Carried over",
+  ADJUSTMENT: "Added manually",
+  LEGACY: "Opening balance",
 };
 
 function unitValue(value: number): string {
@@ -72,6 +106,22 @@ export function accrualFrequencyLabel(frequency: LeaveAccrualFrequency): string 
 
 export function ledgerKindLabel(kind: LeaveLedgerEntryKind): string {
   return LEDGER_LABELS[kind] ?? kind;
+}
+
+export function resetPeriodLabel(period: LeaveResetPeriod): string {
+  return RESET_PERIOD_LABELS[period] ?? period;
+}
+
+export function carryForwardOrderLabel(order: LeaveCarryForwardOrder): string {
+  return CARRY_FORWARD_ORDER_LABELS[order] ?? order;
+}
+
+export function creditExpiryReasonLabel(reason: LeaveCreditExpiryReason): string {
+  return CREDIT_EXPIRY_REASON_LABELS[reason] ?? reason;
+}
+
+export function creditSourceLabel(kind: LeaveCreditSourceKind): string {
+  return CREDIT_SOURCE_LABELS[kind] ?? kind;
 }
 
 export function workingDaysLabel(days: number[]): string {

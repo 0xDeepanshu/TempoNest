@@ -342,7 +342,7 @@ describe("RolesView", () => {
 
     expect(
       await screen.findByText(
-        /only the organization owner can customize the Manager role/i,
+        /owners can adjust Manager/i,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create role" })).not.toBeInTheDocument();

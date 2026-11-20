@@ -83,6 +83,8 @@ export const {
   LeaveBalance,
   LeaveRequest,
   LeaveLedgerEntry,
+  LeaveCreditTranche,
+  LeaveRequestCreditAllocation,
   PasswordResetToken,
   IntegrationClient,
   IntegrationConnection,

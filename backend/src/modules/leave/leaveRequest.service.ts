@@ -13,7 +13,6 @@ import { hasPermission, type PermissionSubject } from '../memberships/permission
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
 import { toLeaveRequestSummary } from './leave.mapper';
 import {
-  balancePeriodFor,
   calendarDays,
   calculateLeaveUnits,
   roundUnits,
@@ -23,10 +22,18 @@ import {
 import {
   appendLedger,
   availableOf,
+  balancePeriodForEmployee,
   ensureActiveEmployee,
   ensureBalanceForDate,
   loadLeaveTypeWithPolicy,
 } from './leaveBalance.service';
+import {
+  allocateRequestCredits,
+  consumeRequestCredits,
+  releaseRequestCredits,
+  restoreRequestCredits,
+} from './leaveCredit.service';
+import { assertMonthlyUsage } from './leaveUsage.service';
 import { holidayUnitsForEmployee } from './holiday.service';
 import type { Organization as OrganizationModel } from '../organizations/organization.model';
 import type { LeaveBalance as LeaveBalanceModel } from './leaveBalance.model';
@@ -139,6 +146,7 @@ async function loadLockedBalance(
 async function releaseReservation(
   balance: LeaveBalanceModel,
   request: LeaveRequestModel,
+  today: string,
   transaction: Transaction,
 ): Promise<void> {
   const units = toUnits(request.units);
@@ -148,17 +156,33 @@ async function releaseReservation(
       'LEAVE_BALANCE_INCONSISTENT',
     );
   }
+  // Release the exact tranches that were reserved. Credits that expired while
+  // the request was pending are not resurrected; they become expired units.
+  const outcome = await releaseRequestCredits({ requestId: request.id, today, transaction });
+  const expired = Math.min(units, outcome.expired);
   balance.pendingReserved = roundUnits(toUnits(balance.pendingReserved) - units);
+  if (expired > 0) {
+    balance.expiredBalance = roundUnits(toUnits(balance.expiredBalance) + expired);
+  }
   balance.availableBalance = availableOf(balance);
   await balance.save({ transaction });
   await appendLedger(
     balance,
     {
       kind: 'RESERVATION_RELEASE',
-      deltas: { reservedDelta: -units, availableDelta: units },
+      deltas: {
+        reservedDelta: -units,
+        expiredDelta: expired,
+        availableDelta: roundUnits(units - expired),
+      },
       leaveRequestId: request.id,
       reason: 'Leave request no longer reserves balance',
-      metadata: { status: request.status, units },
+      metadata: {
+        status: request.status,
+        units,
+        trancheReleased: outcome.released,
+        trancheExpired: expired,
+      },
     },
     transaction,
   );
@@ -168,6 +192,7 @@ async function restoreConsumption(
   balance: LeaveBalanceModel,
   request: LeaveRequestModel,
   actorUserId: string,
+  today: string,
   transaction: Transaction,
 ): Promise<void> {
   const units = toUnits(request.units);
@@ -177,18 +202,27 @@ async function restoreConsumption(
       'LEAVE_BALANCE_INCONSISTENT',
     );
   }
+  const outcome = await restoreRequestCredits({ requestId: request.id, today, transaction });
+  const expired = Math.min(units, outcome.expiredOnRestore);
   balance.approvedConsumed = roundUnits(toUnits(balance.approvedConsumed) - units);
+  if (expired > 0) {
+    balance.expiredBalance = roundUnits(toUnits(balance.expiredBalance) + expired);
+  }
   balance.availableBalance = availableOf(balance);
   await balance.save({ transaction });
   await appendLedger(
     balance,
     {
       kind: 'CONSUMPTION_RESTORE',
-      deltas: { consumedDelta: -units, availableDelta: units },
+      deltas: {
+        consumedDelta: -units,
+        expiredDelta: expired,
+        availableDelta: roundUnits(units - expired),
+      },
       leaveRequestId: request.id,
       actorUserId,
       reason: 'Approved leave request cancelled',
-      metadata: { units },
+      metadata: { units, trancheRestored: outcome.consumed, trancheExpired: expired },
     },
     transaction,
   );
@@ -207,6 +241,7 @@ async function convertReservationToConsumption(
       'LEAVE_BALANCE_INCONSISTENT',
     );
   }
+  await consumeRequestCredits({ requestId: request.id, transaction });
   balance.pendingReserved = roundUnits(toUnits(balance.pendingReserved) - units);
   balance.approvedConsumed = roundUnits(toUnits(balance.approvedConsumed) + units);
   balance.availableBalance = availableOf(balance);
@@ -315,8 +350,20 @@ export async function applyForLeave(options: {
         );
       }
 
-      const startPeriod = balancePeriodFor(input.startDate, policy, organization.timezone);
-      const endPeriod = balancePeriodFor(input.endDate, policy, organization.timezone);
+      const startPeriod = await balancePeriodForEmployee({
+        organization,
+        employeeId,
+        policy,
+        dateIso: input.startDate,
+        transaction,
+      });
+      const endPeriod = await balancePeriodForEmployee({
+        organization,
+        employeeId,
+        policy,
+        dateIso: input.endDate,
+        transaction,
+      });
       if (startPeriod.periodStart !== endPeriod.periodStart) {
         throw AppError.unprocessable(
           'Leave requests cannot span two balance periods; submit each period separately',
@@ -349,6 +396,26 @@ export async function applyForLeave(options: {
         endDate: input.endDate,
       });
 
+      if (
+        policy.maxCreditsPerApplication !== null &&
+        units > toUnits(policy.maxCreditsPerApplication) + 0.001
+      ) {
+        throw AppError.unprocessable(
+          `This leave type allows at most ${toUnits(policy.maxCreditsPerApplication)} credit(s) per application`,
+          'LEAVE_MAX_CREDITS_PER_APPLICATION_EXCEEDED',
+        );
+      }
+
+      await assertMonthlyUsage({
+        organizationId: organization.id,
+        employeeId,
+        leaveTypeId: type.id,
+        policy,
+        chargedDates,
+        transaction,
+        leaveUnitLabel: `day${units === 1 ? '' : 's'}`,
+      });
+
       let balance: LeaveBalanceModel | null = null;
       if (type.requiresBalance) {
         const ensured = await ensureBalanceForDate({
@@ -366,9 +433,6 @@ export async function applyForLeave(options: {
             'INSUFFICIENT_LEAVE_BALANCE',
           );
         }
-        balance.pendingReserved = roundUnits(toUnits(balance.pendingReserved) + units);
-        balance.availableBalance = availableOf(balance);
-        await balance.save({ transaction });
       }
 
       const request = await LeaveRequest.create(
@@ -393,6 +457,9 @@ export async function applyForLeave(options: {
       );
 
       if (balance) {
+        balance.pendingReserved = roundUnits(toUnits(balance.pendingReserved) + units);
+        balance.availableBalance = availableOf(balance);
+        await balance.save({ transaction });
         await appendLedger(
           balance,
           {
@@ -405,6 +472,14 @@ export async function applyForLeave(options: {
           },
           transaction,
         );
+        await allocateRequestCredits({
+          balance,
+          request,
+          units,
+          policy,
+          today,
+          transaction,
+        });
       }
 
       await recordAuditEvent(
@@ -657,7 +732,14 @@ export async function rejectLeaveRequest(options: {
 
       if (request.leaveType?.requiresBalance) {
         const balance = await loadLockedBalance(transaction, organization.id, request);
-        if (balance) await releaseReservation(balance, request, transaction);
+        if (balance) {
+          await releaseReservation(
+            balance,
+            request,
+            todayInTimezone(organization.timezone),
+            transaction,
+          );
+        }
       }
 
       await request.update(
@@ -778,15 +860,16 @@ export async function cancelLeaveRequest(options: {
       }
 
       const wasApproved = request.status === 'APPROVED' || request.status === 'CANCELLATION_REQUESTED';
+      const today = todayInTimezone(organization.timezone);
 
       if (wasApproved && request.leaveType?.requiresBalance) {
         const balance = await loadLockedBalance(transaction, organization.id, request);
-        if (balance) await restoreConsumption(balance, request, actorUserId, transaction);
+        if (balance) await restoreConsumption(balance, request, actorUserId, today, transaction);
       }
 
       if (!wasApproved && request.leaveType?.requiresBalance) {
         const balance = await loadLockedBalance(transaction, organization.id, request);
-        if (balance) await releaseReservation(balance, request, transaction);
+        if (balance) await releaseReservation(balance, request, today, transaction);
       }
 
       await request.update(

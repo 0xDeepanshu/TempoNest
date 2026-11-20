@@ -15,13 +15,28 @@ import { toLeaveBalanceSummary } from './leave.mapper';
 import {
   accrualPeriodStart,
   accrualTrancheDates,
+  addMonthsClamped,
   balancePeriodFor,
+  laterDate,
   localDate,
   monthlyProrationRatio,
+  policyPeriodConfig,
   roundUnits,
+  subtractMonthsClamped,
   todayInTimezone,
   toUnits,
 } from './leaveCalendar';
+import type { BalancePeriod, PolicyPeriodConfig } from './leaveCalendar';
+import { balanceAvailable } from './leaveBalanceMath';
+import {
+  carryForwardEnabled,
+  creditExpiryFor,
+  expireCreditTranches,
+  recordCreditTranche,
+  reconcileCreditTranches,
+  trancheSnapshot,
+} from './leaveCredit.service';
+import { monthlySummary, monthlyUsageFor } from './leaveUsage.service';
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
 import type { Organization as OrganizationModel } from '../organizations/organization.model';
 import type { LeaveBalance as LeaveBalanceModel } from './leaveBalance.model';
@@ -142,20 +157,14 @@ export function capForAutomaticCredit(
     toUnits(balance.accruedBalance) +
     toUnits(balance.adjustmentBalance) +
     toUnits(balance.carriedForwardBalance) -
+    toUnits(balance.expiredBalance) -
     toUnits(balance.approvedConsumed);
   const remaining = roundUnits(maxBalance - earned);
   return Math.max(0, Math.min(amount, remaining));
 }
 
 export function availableOf(balance: LeaveBalanceModel): number {
-  return roundUnits(
-    toUnits(balance.entitledBalance) +
-      toUnits(balance.accruedBalance) +
-      toUnits(balance.adjustmentBalance) +
-      toUnits(balance.carriedForwardBalance) -
-      toUnits(balance.approvedConsumed) -
-      toUnits(balance.pendingReserved),
-  );
+  return balanceAvailable(balance);
 }
 
 function applyCredit(
@@ -181,6 +190,7 @@ type LedgerDeltas = {
   carriedForwardDelta?: number;
   reservedDelta?: number;
   consumedDelta?: number;
+  expiredDelta?: number;
   availableDelta?: number;
 };
 
@@ -213,6 +223,7 @@ export async function appendLedger(
       carriedForwardDelta: roundUnits(input.deltas.carriedForwardDelta ?? 0),
       reservedDelta: roundUnits(input.deltas.reservedDelta ?? 0),
       consumedDelta: roundUnits(input.deltas.consumedDelta ?? 0),
+      expiredDelta: roundUnits(input.deltas.expiredDelta ?? 0),
       availableDelta: roundUnits(input.deltas.availableDelta ?? 0),
       balanceAfter: availableOf(balance),
       reason: input.reason ?? null,
@@ -347,7 +358,7 @@ export async function ensureBalance(options: {
 
     const credit = capForAutomaticCredit(balance, entitlement, policy.maxBalance);
     applyCredit(balance, 'entitled', credit);
-    await appendLedger(
+    const entry = await appendLedger(
       balance,
       {
         kind: 'INITIAL_ENTITLEMENT',
@@ -358,10 +369,19 @@ export async function ensureBalance(options: {
       },
       transaction,
     );
+    await recordCreditTranche({
+      balance,
+      sourceKind: 'INITIAL_ENTITLEMENT',
+      ledgerEntryId: entry.id,
+      amount: credit,
+      periodAllocated: periodStart,
+      expiry: creditExpiryFor(policy, 'INITIAL_ENTITLEMENT', periodStart),
+      transaction,
+    });
     changed = true;
   }
 
-  if (!keys.has(carryKey) && toUnits(policy.carryForwardAllowance) > 0) {
+  if (!keys.has(carryKey) && carryForwardEnabled(policy) && toUnits(policy.carryForwardAllowance) > 0) {
     const previous = await LeaveBalance.findOne({
       where: {
         organizationId: organization.id,
@@ -373,12 +393,17 @@ export async function ensureBalance(options: {
       transaction,
       lock: Transaction.LOCK.UPDATE,
     });
+    if (previous) {
+      // Expire credits that timed out before deciding how much survives the
+      // reset, otherwise an expired credit would be carried forward.
+      await expireCreditTranches({ balance: previous, today, transaction });
+    }
     const carry = previous
       ? Math.min(toUnits(previous.availableBalance), toUnits(policy.carryForwardAllowance))
       : 0;
     const credit = capForAutomaticCredit(balance, carry, policy.maxBalance);
     applyCredit(balance, 'carriedForward', credit);
-    await appendLedger(
+    const entry = await appendLedger(
       balance,
       {
         kind: 'CARRY_FORWARD',
@@ -394,18 +419,30 @@ export async function ensureBalance(options: {
       },
       transaction,
     );
+    await recordCreditTranche({
+      balance,
+      sourceKind: 'CARRY_FORWARD',
+      ledgerEntryId: entry.id,
+      amount: credit,
+      periodAllocated: periodStart,
+      expiry: creditExpiryFor(policy, 'CARRY_FORWARD', periodStart),
+      transaction,
+    });
     changed = true;
   }
 
   if (policy.accrualFrequency !== 'NONE' && toUnits(policy.accrualAmount) > 0) {
+    // Bound retroactive accrual to a two-year window. For a NEVER-reset policy
+    // this prevents materialising decades of tranches on first read.
+    const accrualWindowStart = laterDate(periodStart, subtractMonthsClamped(today, 24));
     const tranches = accrualTrancheDates({
-      periodStart,
+      periodStart: accrualWindowStart,
       periodEnd,
       today,
       frequency: policy.accrualFrequency,
       amount: toUnits(policy.accrualAmount),
       accrualDayOfMonth: policy.accrualDayOfMonth,
-      effectiveFrom: policy.accrualEffectiveFrom ?? periodStart,
+      effectiveFrom: policy.accrualEffectiveFrom ?? accrualWindowStart,
     });
     for (const trancheDate of tranches) {
       const accrualPeriod = accrualPeriodStart(trancheDate);
@@ -454,7 +491,7 @@ export async function ensureBalance(options: {
           : configured;
       const credit = capForAutomaticCredit(balance, prorated, policy.maxBalance);
       if (credit !== 0) applyCredit(balance, 'accrued', credit);
-      await appendLedger(
+      const entry = await appendLedger(
         balance,
         {
           kind: 'ACCRUAL',
@@ -476,11 +513,32 @@ export async function ensureBalance(options: {
         },
         transaction,
       );
+      await recordCreditTranche({
+        balance,
+        sourceKind: 'ACCRUAL',
+        ledgerEntryId: entry.id,
+        amount: credit,
+        periodAllocated: tranche.accrualPeriod,
+        expiry: creditExpiryFor(policy, 'ACCRUAL', tranche.trancheDate),
+        metadata: { trancheDate: tranche.trancheDate, frequency: policy.accrualFrequency },
+        transaction,
+      });
       keys.add(tranche.key);
       grantedPeriods.add(tranche.accrualPeriod);
       changed = true;
     }
   }
+
+  if (changed) {
+    balance.availableBalance = availableOf(balance);
+    await balance.save({ transaction });
+  }
+
+  // Expire any credit whose validity ended, then make sure the tranche
+  // projection covers legacy balances created before tranche accounting.
+  const expiry = await expireCreditTranches({ balance, today, transaction });
+  if (expiry.expired > 0) changed = true;
+  await reconcileCreditTranches(balance, transaction);
 
   if (changed) {
     balance.availableBalance = availableOf(balance);
@@ -499,7 +557,8 @@ export async function ensureBalanceForDate(options: {
   transaction: Transaction;
   now?: Date;
 }): Promise<{ balance: LeaveBalanceModel; periodStart: string; periodEnd: string }> {
-  const period = balancePeriodFor(options.dateIso, options.policy, options.organization.timezone);
+  const config = await periodConfigFor(options);
+  const period = balancePeriodFor(options.dateIso, config, options.organization.timezone);
   const balance = await ensureBalance({
     organization: options.organization,
     employeeId: options.employeeId,
@@ -511,6 +570,42 @@ export async function ensureBalanceForDate(options: {
     now: options.now,
   });
   return { balance, ...period };
+}
+
+/**
+ * Resolves the calendar configuration for one employee. Only joining-anniversary
+ * resets need a lookup; every other mode is derived from the policy alone.
+ */
+export async function periodConfigFor(options: {
+  organization: OrganizationModel;
+  employeeId: string;
+  policy: LeavePolicyModel;
+  transaction?: Transaction;
+}): Promise<PolicyPeriodConfig> {
+  if ((options.policy.resetPeriod ?? 'CUSTOM') !== 'JOINING_ANNIVERSARY') {
+    return policyPeriodConfig(options.policy);
+  }
+  const membership = await Membership.findOne({
+    where: { organizationId: options.organization.id, userId: options.employeeId },
+    attributes: ['createdAt'],
+    transaction: options.transaction,
+  });
+  return policyPeriodConfig(
+    options.policy,
+    membership ? localDate(membership.createdAt, options.organization.timezone) : null,
+  );
+}
+
+/** Balance period for one employee, honouring joining-anniversary resets. */
+export async function balancePeriodForEmployee(options: {
+  organization: OrganizationModel;
+  employeeId: string;
+  policy: LeavePolicyModel;
+  dateIso: string;
+  transaction?: Transaction;
+}): Promise<BalancePeriod> {
+  const config = await periodConfigFor(options);
+  return balancePeriodFor(options.dateIso, config, options.organization.timezone);
 }
 
 async function loadLedger(balanceIds: string[]): Promise<Map<string, LeaveLedgerEntryModel[]>> {
@@ -577,7 +672,8 @@ export async function getEmployeeLeaveBalances(options: {
   query: LeaveBalanceDetailQuery;
 }) {
   const { organization, employeeId, query } = options;
-  await ensureActiveEmployee(organization.id, employeeId);
+  const membership = await ensureActiveEmployee(organization.id, employeeId);
+  const joinDate = localDate(membership.createdAt, organization.timezone);
   const types = await currentBalanceTypes(organization.id, query.leaveTypeId);
   const today = todayInTimezone(organization.timezone);
 
@@ -606,7 +702,7 @@ export async function getEmployeeLeaveBalances(options: {
   >();
   for (const { type, policy } of types) {
     for (const anchor of anchors) {
-      const period = balancePeriodFor(anchor, policy, organization.timezone);
+      const period = balancePeriodFor(anchor, policyPeriodConfig(policy, joinDate), organization.timezone);
       periods.set(`${type.id}:${period.periodStart}`, { type, policy, ...period });
     }
   }
@@ -617,7 +713,8 @@ export async function getEmployeeLeaveBalances(options: {
   const materialize = [...periods.values()].filter(
     (entry) =>
       entry.periodStart ===
-      balancePeriodFor(today, entry.policy, organization.timezone).periodStart,
+      balancePeriodFor(today, policyPeriodConfig(entry.policy, joinDate), organization.timezone)
+        .periodStart,
   );
 
   if (materialize.length > 0) {
@@ -658,10 +755,60 @@ export async function getEmployeeLeaveBalances(options: {
     })
   ).filter((balance) => periods.has(`${balance.leaveTypeId}:${balance.periodStart}`));
 
+  const summaries = await summariesForBalances(result);
+  const month = today.slice(0, 7);
+  const expiringCutoff = addMonthsClamped(today, 1);
+  const policyByType = new Map(types.map((entry) => [entry.type.id, entry.policy]));
+
+  const balances = await Promise.all(
+    summaries.map(async (summary) => {
+      const policy = policyByType.get(summary.leaveTypeId);
+      if (!policy) return summary;
+
+      const usage = await monthlyUsageFor({
+        organizationId: organization.id,
+        employeeId,
+        leaveTypeId: summary.leaveTypeId,
+        month,
+      });
+      const snapshot = await trancheSnapshot(summary.id);
+      const remaining = snapshot.reduce((sum, tranche) => sum + tranche.remaining, 0);
+      const expiring = snapshot.filter(
+        (tranche) =>
+          tranche.remaining > 0 &&
+          tranche.expiresAt !== null &&
+          tranche.expiresAt >= today &&
+          tranche.expiresAt <= expiringCutoff,
+      );
+      const earnedThisMonth = snapshot
+        .filter(
+          (tranche) =>
+            tranche.sourceKind === 'ACCRUAL' &&
+            tranche.periodAllocated >= `${month}-01` &&
+            tranche.periodAllocated <= today,
+        )
+        .reduce((sum, tranche) => sum + tranche.allocated, 0);
+
+      return {
+        ...summary,
+        monthlyUsage: monthlySummary(usage, policy),
+        credits: {
+          earnedThisMonth: roundUnits(earnedThisMonth),
+          carriedForward: summary.carriedForwardBalance,
+          expiringSoon: roundUnits(expiring.reduce((sum, tranche) => sum + tranche.remaining, 0)),
+          expiringSoonDate: expiring[0]?.expiresAt ?? null,
+          expired: summary.expiredBalance,
+          remainingTranches: roundUnits(remaining),
+          tranches: snapshot.filter((tranche) => tranche.remaining > 0 || tranche.expiresAt).slice(0, 12),
+        },
+      };
+    }),
+  );
+
   return {
     employeeId,
     timezone: organization.timezone,
-    balances: await summariesForBalances(result),
+    balances,
   };
 }
 
@@ -723,15 +870,22 @@ export async function collectOrganizationLeaveBalances(options: {
       policy: LeavePolicyModel;
       periodStart: string;
       periodEnd: string;
+      joinDate: string;
     }
   >();
   for (const membership of memberships) {
+    const joinDate = localDate(membership.createdAt, organization.timezone);
     for (const { type, policy } of types) {
-      const period = balancePeriodFor(anchorDate, policy, organization.timezone);
+      const period = balancePeriodFor(
+        anchorDate,
+        policyPeriodConfig(policy, joinDate),
+        organization.timezone,
+      );
       canonical.set(`${membership.userId}:${type.id}:${period.periodStart}`, {
         employeeId: membership.userId,
         type,
         policy,
+        joinDate,
         ...period,
       });
     }
@@ -745,7 +899,11 @@ export async function collectOrganizationLeaveBalances(options: {
   const materialize = [...canonical.values()].filter(
     (entry) =>
       entry.periodStart ===
-      balancePeriodFor(today, entry.policy, organization.timezone).periodStart,
+      balancePeriodFor(
+        today,
+        policyPeriodConfig(entry.policy, entry.joinDate),
+        organization.timezone,
+      ).periodStart,
   );
 
   if (materialize.length > 0) {
@@ -874,7 +1032,8 @@ export async function applyAdjustmentInTransaction(options: {
   }
 
   const anchor = input.periodStart ?? localDate(now, organization.timezone);
-  const period = balancePeriodFor(anchor, policy, organization.timezone);
+  const periodConfig = await periodConfigFor({ organization, employeeId, policy, transaction });
+  const period = balancePeriodFor(anchor, periodConfig, organization.timezone);
   if (input.periodStart && period.periodStart !== input.periodStart) {
     throw AppError.unprocessable(
       'periodStart must be the first day of a balance period',
@@ -883,7 +1042,7 @@ export async function applyAdjustmentInTransaction(options: {
   }
   const currentPeriod = balancePeriodFor(
     localDate(now, organization.timezone),
-    policy,
+    periodConfig,
     organization.timezone,
   );
 
@@ -969,6 +1128,17 @@ export async function applyAdjustmentInTransaction(options: {
       },
     },
     transaction,
+  ).then((entry) =>
+    recordCreditTranche({
+      balance,
+      sourceKind: 'ADJUSTMENT',
+      ledgerEntryId: entry.id,
+      amount,
+      periodAllocated: period.periodStart,
+      expiry: creditExpiryFor(policy, 'ADJUSTMENT', period.periodStart),
+      metadata: { reason: input.reason },
+      transaction,
+    }),
   );
 
   if (audit) {

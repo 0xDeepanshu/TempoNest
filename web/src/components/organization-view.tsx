@@ -48,6 +48,7 @@ import {
   Th,
 } from "./ui";
 import { IntegrationMappingsPanel } from "./integration-mappings-panel";
+import { SettingsTabs } from "./settings-tabs";
 import { NoOrganization, useWorkspace } from "./workspace";
 
 type InvitationStatusFilter = "pending" | "accepted" | "revoked" | "expired" | "all";
@@ -988,9 +989,11 @@ function OrganizationView({ organization }: { organization: Organization }) {
     <div className="space-y-5">
       <PageHeader
         eyebrow={current.slug}
-        title="Organization"
-        description="Manage the organization profile, memberships, and invitations. Every change is authorized by the backend."
+        title="General"
+        description="Your organization profile, members, and invitations."
       />
+
+      <SettingsTabs current="general" />
 
       {details.error ? (
         <ErrorState message={details.error} onRetry={details.reload} />
@@ -1010,18 +1013,17 @@ function OrganizationView({ organization }: { organization: Organization }) {
             description="Working days, optional holidays, half-days, and default applicability are organization-wide settings."
             actions={
               <Link
-                href="/admin/leave/holidays/settings"
+                href="/settings/leave/holidays"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
               >
                 <CalendarIcon className="h-3.5 w-3.5" />
-                Open holiday settings
+                Open holiday rules
               </Link>
             }
           />
           <CardBody className="text-xs leading-5 text-muted">
-            Holiday settings live with the rest of the organization configuration. Changes are
-            audited and apply to future leave and attendance calculations without rewriting
-            historical records.
+            Holiday rules live with the rest of the organization settings. Changes are recorded
+            and apply to future leave and attendance without rewriting past records.
           </CardBody>
         </Card>
       ) : null}

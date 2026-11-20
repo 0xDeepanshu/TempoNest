@@ -74,6 +74,13 @@ const policy: LeavePolicy = {
   balancePeriodStartMonth: 1,
   balancePeriodStartDay: 1,
   carryForwardAllowance: 0,
+  carryForwardEnabled: false,
+  carryForwardExpiryMonths: null,
+  carryForwardOrder: "EXPIRY_FIRST",
+  resetPeriod: "CUSTOM",
+  maxCreditsPerApplication: null,
+  monthlyUsageLimitEnabled: false,
+  monthlyUsageLimit: null,
   maxBalance: null,
   prorateInitialEntitlement: false,
   workingDays: [1, 2, 3, 4, 5],
@@ -159,7 +166,7 @@ describe("LeaveTypesView", () => {
     renderView("MANAGER");
 
     expect(
-      screen.getByText("Catalog management requires leave:manage"),
+      screen.getByText("You cannot change leave types"),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Create leave type" }),
@@ -175,9 +182,9 @@ describe("LeaveTypesView", () => {
     const table = screen.getByRole("table");
     expect(within(table).getByText("Casual Leave")).toBeInTheDocument();
     expect(within(table).getByText("Paid")).toBeInTheDocument();
-    expect(within(table).getByText("Balance required")).toBeInTheDocument();
-    expect(within(table).getByText("Up to 10 consecutive days")).toBeInTheDocument();
-    expect(within(table).getByText(/20 days starting credits/)).toBeInTheDocument();
+    expect(within(table).getByText("Uses balance")).toBeInTheDocument();
+    expect(within(table).getByText("Up to 10 days per request")).toBeInTheDocument();
+    expect(within(table).getByText(/20 days to start/)).toBeInTheDocument();
   });
 
   it("validates a new leave type before creating it", async () => {
@@ -224,7 +231,7 @@ describe("LeaveTypesView", () => {
     });
     expect(
       await screen.findByText(
-        "Sick Leave was created with a default policy. Review its policy to set starting credits, carry-forward, and working days.",
+        "Sick Leave was created with zero days. Open its earning rules to add starting days, carry-over, and working days.",
       ),
     ).toBeInTheDocument();
   });
@@ -263,17 +270,17 @@ describe("LeaveTypesView", () => {
 
     await screen.findByRole("table");
     const table = screen.getByRole("table");
-    await user.click(within(table).getByRole("button", { name: "Policy" }));
+    await user.click(within(table).getByRole("button", { name: "Earning rules" }));
 
     const dialog = screen.getByRole("dialog");
     expect(
-      within(dialog).getByRole("heading", { name: "Casual Leave policy" }),
+      within(dialog).getByRole("heading", { name: "Casual Leave earning rules" }),
     ).toBeInTheDocument();
 
-    const initial = within(dialog).getByLabelText(/Initial entitlement/);
+    const initial = within(dialog).getByLabelText(/Starting days each period/);
     await user.clear(initial);
     await user.type(initial, "25");
-    await user.click(within(dialog).getByRole("button", { name: "Save policy" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
       expect(mockedApiRequest).toHaveBeenCalledWith(
@@ -289,7 +296,72 @@ describe("LeaveTypesView", () => {
       );
     });
     expect(
-      await screen.findByText("Casual Leave policy was updated."),
+      await screen.findByText("Casual Leave earning rules were updated."),
     ).toBeInTheDocument();
+  });
+
+  it("submits flexible policy settings and shows a live summary", async () => {
+    const user = userEvent.setup();
+    respond();
+    renderView();
+
+    await screen.findByRole("table");
+    await user.click(
+      within(screen.getByRole("table")).getByRole("button", { name: "Earning rules" }),
+    );
+    const dialog = screen.getByRole("dialog");
+
+    await user.click(
+      within(dialog).getByLabelText(/Carry unused days into the next period/),
+    );
+    const cap = within(dialog).getByLabelText(/Max days carried over/);
+    await user.clear(cap);
+    await user.type(cap, "6");
+    await user.selectOptions(
+      within(dialog).getByLabelText(/Carried days expire after/),
+      "1",
+    );
+    await user.selectOptions(
+      within(dialog).getByLabelText(/When balances reset/),
+      "CALENDAR_YEAR",
+    );
+
+    await user.click(
+      within(dialog).getByLabelText(/Limit days per month/),
+    );
+    const monthly = within(dialog).getByLabelText(/Max days per month/);
+    await user.clear(monthly);
+    await user.type(monthly, "4");
+
+    const maxApplication = within(dialog).getByLabelText(
+      /Max days per request/,
+    );
+    await user.clear(maxApplication);
+    await user.type(maxApplication, "2");
+
+    expect(
+      within(dialog).getByText(/carries over up to 6 days of unused leave/i),
+    ).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(mockedApiRequest).toHaveBeenCalledWith(
+        "/organizations/org-1/leave/policies/policy-1",
+        expect.objectContaining({
+          method: "PUT",
+          body: expect.objectContaining({
+            carryForwardEnabled: true,
+            carryForwardAllowance: 6,
+            carryForwardExpiryMonths: 1,
+            carryForwardOrder: "EXPIRY_FIRST",
+            resetPeriod: "CALENDAR_YEAR",
+            maxCreditsPerApplication: 2,
+            monthlyUsageLimitEnabled: true,
+            monthlyUsageLimit: 4,
+          }),
+        }),
+      );
+    });
   });
 });

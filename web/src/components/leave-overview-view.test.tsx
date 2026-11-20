@@ -121,6 +121,7 @@ const lowBalance: LeaveBalance = {
   carriedForwardBalance: 0,
   approvedConsumed: 19,
   pendingReserved: 0,
+  expiredBalance: 0,
   availableBalance: 1,
   assignedBalance: 20,
   breakdown: {
@@ -131,6 +132,7 @@ const lowBalance: LeaveBalance = {
     carriedForward: 0,
     approvedConsumed: 19,
     pendingReserved: 0,
+    expired: 0,
     available: 1,
   },
   leaveType: { id: "type-1", name: "Casual Leave", isPaid: true, requiresBalance: true },

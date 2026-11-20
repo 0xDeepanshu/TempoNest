@@ -511,14 +511,14 @@ export function HolidayCalendarView({
         title={mode === "employee" ? "Holiday calendar" : "Company holidays"}
         description={
           mode === "employee"
-            ? "Read-only view of the holidays that apply to you. Contact your HR administrator if a holiday looks incorrect."
+            ? "Read-only view of the holidays that apply to you. Ask an administrator if a holiday looks wrong."
             : "Plan the organization calendar, publish public and company holidays, and keep half-days and employee-specific dates in one place."
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {canManageSettings ? (
-              <Button variant="secondary" onClick={() => router.push("/admin/leave/holidays/settings")}>
-                Holiday settings
+              <Button variant="secondary" onClick={() => router.push("/settings/leave/holidays")}>
+                Holiday rules
               </Button>
             ) : null}
             {canCreate ? (
@@ -1014,15 +1014,15 @@ export function HolidayCalendarView({
           {mode === "admin" ? (
             <Card>
               <CardHeader
-                title="Calendar configuration"
-                description="Working days and holiday policy are managed once for the organization."
+                title="Holiday rules"
+                description="Working days and holiday rules are set once for the whole organization."
                 actions={
                   canManageSettings ? (
                     <Link
-                      href="/admin/leave/holidays/settings"
+                      href="/settings/leave/holidays"
                       className="inline-flex items-center gap-1 text-xs font-medium text-ink underline-offset-2 hover:underline"
                     >
-                      Open holiday settings
+                      Open holiday rules
                       <ChevronDownIcon className="h-3.5 w-3.5 -rotate-90" />
                     </Link>
                   ) : null

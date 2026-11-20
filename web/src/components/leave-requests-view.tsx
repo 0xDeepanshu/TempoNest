@@ -155,7 +155,7 @@ export function LeaveRequestsView() {
       <PageHeader
         eyebrow={`${organization.name} · ${organization.timezone}`}
         title="Leave requests"
-        description="Review requests across the organization. Open a request to see its calculation, employee remarks, balance impact, and available actions."
+        description="Review and decide on leave. Open a request to see the days, the balance impact, the employee's note, and what you can do."
       />
 
       <LeaveTabs current="requests" />
@@ -396,7 +396,7 @@ function RequestTable({
                     {request.leaveType.isPaid ? "Paid" : "Unpaid"}
                   </Badge>
                   {request.leaveType.requiresBalance ? (
-                    <Badge tone="outline">Balance</Badge>
+                    <Badge tone="outline">Uses balance</Badge>
                   ) : null}
                 </div>
               ) : null}
@@ -710,8 +710,8 @@ function RequestDetailModal({
               </Badge>
               <Badge tone="outline">
                 {request.leaveType.requiresBalance
-                  ? "Balance required"
-                  : "No balance required"}
+                  ? "Uses balance"
+                  : "No balance"}
               </Badge>
             </>
           ) : null}
@@ -872,7 +872,7 @@ function RequestDetailModal({
             </h3>
             {!canManage ? (
               <p className="text-xs leading-5 text-muted">
-                Viewing another employee&apos;s balance requires <code>leave:manage</code>.
+                Seeing another employee&apos;s balance needs leave-management access.
               </p>
             ) : balanceImpact.loading && !balance ? (
               <p className="flex items-center gap-2 text-xs text-muted">

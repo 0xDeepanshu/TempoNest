@@ -99,10 +99,10 @@ describe("MonitoringSettingsView", () => {
 
     await user.click(
       await screen.findByRole("checkbox", {
-        name: /Allow administrator-requested screenshots/,
+        name: /Allow administrators to request screenshots/,
       }),
     );
-    await user.click(screen.getByRole("button", { name: "Save monitoring settings" }));
+    await user.click(screen.getByRole("button", { name: "Save screenshot rules" }));
 
     await waitFor(() => {
       expect(mockedApiRequest).toHaveBeenCalledWith(
@@ -122,7 +122,7 @@ describe("MonitoringSettingsView", () => {
         }),
       );
     });
-    expect(await screen.findByText("Monitoring settings saved")).toBeInTheDocument();
+    expect(await screen.findByText("Screenshot rules saved")).toBeInTheDocument();
   });
 
   it("blocks saving when a requesting role cannot also review", async () => {
@@ -145,10 +145,10 @@ describe("MonitoringSettingsView", () => {
 
     expect(
       await screen.findByText(
-        "Every role allowed to request must also be allowed to review, and both lists need at least one role.",
+        "Anyone who may request must also be able to review, and both lists need at least one role.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save monitoring settings" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save screenshot rules" })).toBeDisabled();
     expect(
       mockedApiRequest.mock.calls.some(([, options]) => options?.method === "PATCH"),
     ).toBe(false);

@@ -425,9 +425,9 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
             </Button>
           </Link>
           {canConfigurePolicy ? (
-            <Link href="/admin/monitoring">
+            <Link href="/settings/monitoring">
               <Button variant="secondary" size="sm">
-                Open monitoring settings
+                Open screenshot settings
               </Button>
             </Link>
           ) : null}
@@ -442,8 +442,8 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
     <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization.name} · ${timezone}`}
-        title="Screenshot review"
-        description="Review private captures across the organization. Previews load on demand through short-lived, audited links."
+        title="Screenshots"
+        description="Private screenshots from across the organization. Images load only when you open them, and every view is recorded."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link href="/admin/live-tracking">
@@ -452,9 +452,9 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
               </Button>
             </Link>
             {canConfigurePolicy ? (
-              <Link href="/admin/monitoring">
+              <Link href="/settings/monitoring">
                 <Button variant="ghost" size="sm">
-                  Monitoring settings
+                  Screenshot settings
                 </Button>
               </Link>
             ) : null}
@@ -626,11 +626,11 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
                 ) : null}
 
                 {!monitoringEnabled && canConfigurePolicy && !policy.loading ? (
-                  <Alert tone="warning" title="Monitoring is disabled">
-                    Screenshot requests are blocked. An owner or administrator can enable the
-                    policy in{" "}
-                    <Link className="font-semibold underline" href="/admin/monitoring">
-                      monitoring settings
+                  <Alert tone="warning" title="Screenshots are off">
+                    No one can request a screenshot. An owner or administrator can turn them on
+                    in{" "}
+                    <Link className="font-semibold underline" href="/settings/monitoring">
+                      screenshot settings
                     </Link>
                     .
                   </Alert>

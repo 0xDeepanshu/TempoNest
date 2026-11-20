@@ -16,9 +16,7 @@ export function PublicAuthShell({
     <div className="min-h-screen bg-canvas px-4 py-10 sm:py-16">
       <div className="mx-auto w-full max-w-xl space-y-6">
         <Link href="/" className="inline-flex items-center gap-2.5">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-lg font-semibold text-on-strong">
-            W
-          </span>
+          <img src="/logo/logo-nobg.png" alt="WorkZen" className="h-10 w-10 object-contain" />
           <span>
             <span className="block text-base font-semibold tracking-tight text-ink">WorkZen</span>
             <span className="block text-[9px] font-medium uppercase tracking-[0.18em] text-muted">

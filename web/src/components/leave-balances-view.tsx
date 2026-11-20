@@ -5,6 +5,8 @@ import { formatDateTime, formatDay } from "@/lib/format";
 import { hasPermission } from "@/lib/permissions";
 import {
   balancePeriodLabel,
+  creditExpiryReasonLabel,
+  creditSourceLabel,
   formatLeaveUnits,
   formatSignedLeaveUnits,
   isCurrentBalancePeriod,
@@ -172,12 +174,12 @@ export function LeaveBalancesView() {
       <PageHeader
         eyebrow={`${organization.name} · ${organization.timezone}`}
         title="Leave balances"
-        description="Give employees leave credits, review what they have used, and see every change in one place. 1 credit equals 1 day."
+        description="Add or adjust someone's leave days, see what they have used, and review every change in one place."
         actions={
           canManage ? (
             <Button onClick={() => setCreditsOpen(true)}>
               <PlusIcon className="h-3.5 w-3.5" />
-              Assign leave credits
+              Add leave days
             </Button>
           ) : undefined
         }
@@ -187,8 +189,8 @@ export function LeaveBalancesView() {
 
       {!canManage ? (
         <EmptyState
-          title="Balance management requires leave:manage"
-          description="Ask an owner or administrator to assign leave credits and review organization-wide balances."
+          title="You cannot manage balances"
+          description="Ask an owner or administrator for leave-management access to add days and see the whole organization."
         />
       ) : (
         <>
@@ -200,11 +202,11 @@ export function LeaveBalancesView() {
             <StatCard
               label="Active employees"
               value={summary ? summary.activeEmployees : "—"}
-              hint={summary ? `${summary.leaveTypes} balance-based leave types` : "Loading"}
+              hint={summary ? `${summary.leaveTypes} leave types use a balance` : "Loading"}
               icon={<UsersIcon className="h-4 w-4" />}
             />
             <StatCard
-              label="Employees with credits"
+              label="People with days"
               value={summary ? summary.employeesWithBalances : "—"}
               hint={
                 summary ? `${summary.availableCredits} days available in total` : "Loading"
@@ -212,7 +214,7 @@ export function LeaveBalancesView() {
               icon={<UsersIcon className="h-4 w-4" />}
             />
             <StatCard
-              label="Credits assigned"
+              label="Days assigned"
               value={summary ? summary.totalCreditsAssigned : "—"}
               hint={
                 summary
@@ -331,7 +333,7 @@ export function LeaveBalancesView() {
                   ) : null}
                   <Button variant="secondary" size="sm" onClick={() => setCreditsOpen(true)}>
                     <PlusIcon className="h-3.5 w-3.5" />
-                    Assign credits
+                    Add days
                   </Button>
                 </>
               }
@@ -351,7 +353,7 @@ export function LeaveBalancesView() {
                 description={
                   hasFilters
                     ? "Try a different search, leave type, or period date."
-                    : "Assign leave credits to create a balance for an employee and leave type. Choose all active employees to credit everyone at once."
+                    : "Add leave days to create a balance for an employee and leave type. Choose all active employees to add days for everyone at once."
                 }
                 icon={<SearchIcon className="h-5 w-5" />}
                 action={
@@ -361,7 +363,7 @@ export function LeaveBalancesView() {
                     </Button>
                   ) : (
                     <Button size="sm" onClick={() => setCreditsOpen(true)}>
-                      Assign leave credits
+                      Add leave days
                     </Button>
                   )
                 }
@@ -394,8 +396,8 @@ export function LeaveBalancesView() {
 
           <Card>
             <CardHeader
-              title="Credit history"
-              description="Every credit assignment, reservation, approval, rejection, and correction across the organization."
+              title="Balance history"
+              description="Every assignment, reservation, approval, rejection, and correction across the organization."
               actions={
                 <Button variant="ghost" size="sm" onClick={history.reload}>
                   Refresh
@@ -407,11 +409,11 @@ export function LeaveBalancesView() {
                 <ErrorState message={history.error} onRetry={history.reload} />
               </div>
             ) : history.loading && !history.data ? (
-              <LoadingBlock label="Loading credit history" rows={4} />
+              <LoadingBlock label="Loading balance history" rows={4} />
             ) : (history.data?.data ?? []).length === 0 ? (
               <EmptyState
                 title="No balance history yet"
-                description="Credit assignments and leave decisions will be recorded here."
+                description="Assignments and leave decisions will be recorded here."
               />
             ) : (
               <>
@@ -438,25 +440,25 @@ export function LeaveBalancesView() {
             </summary>
             <div className="space-y-3 border-t border-line p-4">
               <p className="text-xs leading-5 text-muted">
-                These tools exist for edge cases. Daily work uses “Assign leave credits”
-                above; these operations never delete balances or history.
+                These tools are for edge cases. Everyday work uses “Add leave days” above; none
+                of these operations delete balances or history.
               </p>
               <div className="grid gap-3 md:grid-cols-3">
                 <OperationTile
                   title="Bulk adjustment"
-                  description="Apply the same signed adjustment to several employees. Use Assign credits for normal allocations."
+                  description="Apply the same change to several people at once. Use Add days for normal allocations."
                   actionLabel="Bulk adjust"
                   onAction={() => setTool("bulk")}
                 />
                 <OperationTile
-                  title="Initialize balances"
-                  description="Create the current balance period for active employees and active balance-based leave types. Existing rows are preserved."
-                  actionLabel="Preview backfill"
+                  title="Create balances"
+                  description="Create this period's balances for active employees and active balance types. Existing rows are kept."
+                  actionLabel="Preview"
                   onAction={() => setTool("backfill")}
                 />
                 <OperationTile
-                  title="Reconcile periods"
-                  description="Find overlapping or incorrectly sized periods and remove only empty rows with no history or requests."
+                  title="Check periods"
+                  description="Find overlapping or wrong-length periods. Only empty rows with no history or requests are removed."
                   actionLabel="Scan balances"
                   onAction={() => setTool("reconcile")}
                 />
@@ -858,12 +860,12 @@ function BalanceDetailModal({
   function validate(): string | null {
     const value = Number(credits);
     if (!credits.trim() || !Number.isFinite(value)) {
-      return "Enter the number of credits.";
+      return "Enter the number of days.";
     }
-    if (value < 0) return "Credits cannot be negative.";
-    if (value > 3650) return "Credits must be 3650 or fewer.";
+    if (value < 0) return "Days cannot be negative.";
+    if (value > 3650) return "Days must be 3650 or fewer.";
     if (mode === "ADD" && value === 0) {
-      return "Add credits needs an amount greater than zero.";
+      return "Adding days needs an amount greater than zero.";
     }
     if (reason.trim().length < 3) {
       return "Enter a reason with at least 3 characters.";
@@ -918,7 +920,7 @@ function BalanceDetailModal({
       setCredits("");
       setReason("");
       setPreview(null);
-      setSuccess("Credits updated. The change is recorded in the balance history.");
+      setSuccess("Days updated. The change is recorded in the balance history.");
       detail.reload();
       ledger.reload();
       onChanged();
@@ -975,7 +977,7 @@ function BalanceDetailModal({
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>
-            <Button onClick={beginAssignment}>Assign credits</Button>
+            <Button onClick={beginAssignment}>Add days</Button>
           </>
         )
       }
@@ -1018,7 +1020,7 @@ function BalanceDetailModal({
             <BalanceFigure
               label="Assigned"
               value={balance.assignedBalance}
-              hint="Leave credits given for this period."
+              hint="Days added for this period."
             />
             <BalanceFigure
               label="Used"
@@ -1030,24 +1032,95 @@ function BalanceDetailModal({
               value={balance.pendingReserved}
               hint="Reserved by requests still waiting for a decision."
             />
+            <BalanceFigure
+              label="Expired"
+              value={balance.expiredBalance}
+              hint="Days past their expiry that can no longer be used."
+            />
           </div>
           <p className="mt-2 rounded-md bg-surface-muted px-3 py-2 text-[11px] leading-4 text-muted tnum">
             {formatLeaveUnits(balance.assignedBalance)} assigned −{" "}
             {formatLeaveUnits(balance.approvedConsumed)} used −{" "}
-            {formatLeaveUnits(balance.pendingReserved)} pending ={" "}
-            {formatLeaveUnits(balance.availableBalance)} available
+            {formatLeaveUnits(balance.pendingReserved)} pending
+            {balance.expiredBalance > 0
+              ? ` − ${formatLeaveUnits(balance.expiredBalance)} expired`
+              : ""}{" "}
+            = {formatLeaveUnits(balance.availableBalance)} available
           </p>
+          {balance.monthlyUsage?.enabled ? (
+            <p className="mt-2 rounded-md bg-surface-muted px-3 py-2 text-[11px] leading-4 text-muted tnum">
+              Monthly usage ({balance.monthlyUsage.month}):{" "}
+              {formatLeaveUnits(balance.monthlyUsage.total)} of{" "}
+              {balance.monthlyUsage.limit === null
+                ? "no limit"
+                : formatLeaveUnits(balance.monthlyUsage.limit)}{" "}
+              · {formatLeaveUnits(balance.monthlyUsage.pending)} pending,{" "}
+              {formatLeaveUnits(balance.monthlyUsage.approved)} approved
+              {balance.monthlyUsage.remaining !== null
+                ? ` · ${formatLeaveUnits(balance.monthlyUsage.remaining)} remaining`
+                : ""}
+              .
+            </p>
+          ) : null}
+          {balance.credits && balance.credits.tranches.length > 0 ? (
+            <details className="mt-2 text-xs text-muted">
+              <summary className="cursor-pointer font-medium text-ink-secondary">
+                Day batches ({balance.credits.tranches.length})
+              </summary>
+              <ul className="mt-1.5 space-y-1">
+                {balance.credits.tranches.map((tranche, index) => (
+                  <li
+                    key={`${tranche.periodAllocated}-${tranche.sourceKind}-${index}`}
+                    className="rounded-md bg-surface-muted px-2 py-1"
+                  >
+                    <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                      <span className="font-medium text-ink-secondary">
+                        {creditSourceLabel(tranche.sourceKind)} ·{" "}
+                        {formatDay(tranche.periodAllocated)}
+                      </span>
+                      <span className="tnum">
+                        {formatLeaveUnits(tranche.remaining)} of{" "}
+                        {formatLeaveUnits(tranche.allocated)} left
+                      </span>
+                    </div>
+                    {tranche.expiresAt ? (
+                      <p className="text-[11px] text-muted">
+                        Expires {formatDay(tranche.expiresAt)} ·{" "}
+                        {creditExpiryReasonLabel(tranche.expiryReason).toLowerCase()}
+                        {tranche.reserved > 0
+                          ? ` · ${formatLeaveUnits(tranche.reserved)} reserved`
+                          : ""}
+                        {tranche.expired > 0
+                          ? ` · ${formatLeaveUnits(tranche.expired)} expired`
+                          : ""}
+                      </p>
+                    ) : tranche.reserved > 0 || tranche.expired > 0 ? (
+                      <p className="text-[11px] text-muted">
+                        {tranche.reserved > 0
+                          ? `${formatLeaveUnits(tranche.reserved)} reserved`
+                          : ""}
+                        {tranche.reserved > 0 && tranche.expired > 0 ? " · " : ""}
+                        {tranche.expired > 0
+                          ? `${formatLeaveUnits(tranche.expired)} expired`
+                          : ""}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
           <details className="mt-2 text-xs text-muted">
             <summary className="cursor-pointer font-medium text-ink-secondary">
-              Credit sources
+              Where the days came from
             </summary>
             <dl className="mt-1.5 grid gap-1 sm:grid-cols-2">
               <div className="flex justify-between gap-3 sm:block">
-                <dt className="text-muted">Starting credits</dt>
+                <dt className="text-muted">Starting days</dt>
                 <dd className="tnum text-ink">{formatLeaveUnits(balance.entitledBalance)}</dd>
               </div>
               <div className="flex justify-between gap-3 sm:block">
-                <dt className="text-muted">Scheduled credits</dt>
+                <dt className="text-muted">Scheduled days</dt>
                 <dd className="tnum text-ink">{formatLeaveUnits(balance.accruedBalance)}</dd>
               </div>
               <div className="flex justify-between gap-3 sm:block">
@@ -1108,12 +1181,12 @@ function BalanceDetailModal({
             className="rounded-lg border border-line bg-surface-muted p-3.5"
           >
             <h3 id="leave-balance-assign" className="text-[13px] font-semibold text-ink">
-              Assign credits for this period
+              Add days for this period
             </h3>
             <p className="mt-0.5 text-xs leading-5 text-muted">
-              Add credits on top of the assigned total, or set the assigned total exactly.
-              Preview first; the server validates the policy cap and negative-balance rules
-              before anything is written.
+              Add days on top of the assigned total, or set the assigned total exactly. Preview
+              first; the server checks the yearly cap and negative-balance rules before anything
+              is saved.
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Operation" htmlFor="leave-credit-mode">
@@ -1125,12 +1198,12 @@ function BalanceDetailModal({
                     setPreview(null);
                   }}
                 >
-                  <option value="ADD">Add credits</option>
+                  <option value="ADD">Add days</option>
                   <option value="SET">Set balance</option>
                 </Select>
               </Field>
               <Field
-                label={mode === "ADD" ? "Credits to add" : "New assigned total"}
+                label={mode === "ADD" ? "Days to add" : "New assigned total"}
                 htmlFor="leave-credit-amount"
                 required
               >
@@ -1218,7 +1291,7 @@ function BalanceDetailModal({
             <LoadingBlock label="Loading history" rows={3} />
           ) : ledgerRows.length === 0 ? (
             <p className="text-xs leading-5 text-muted">
-              No credit or leave activity yet for this period.
+              No day or leave activity yet for this period.
             </p>
           ) : (
             <div className="overflow-hidden rounded-lg border border-line">

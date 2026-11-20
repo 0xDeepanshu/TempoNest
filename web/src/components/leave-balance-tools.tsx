@@ -454,7 +454,7 @@ export function BulkAdjustmentModal({
       open={open}
       onClose={onClose}
       title="Bulk balance adjustment"
-      description="Credit or debit the same leave type for several employees. Preview every employee first; the server validates caps and negative-balance rules before anything is written."
+      description="Add or remove the same leave type for several employees. Preview everyone first; the server checks caps and negative-balance rules before anything is saved."
       size="lg"
       dismissible={!submitting && !previewing}
       footer={
@@ -779,7 +779,7 @@ export function BackfillModal({
       open={open}
       onClose={onClose}
       title="Initialize missing balances"
-      description="Creates the current balance period for active employees and active balance-based leave types. Existing rows and ledger history are never changed."
+      description="Creates this period's balances for active employees and leave types that use an allowance. Existing rows and history are never changed."
       size="lg"
       dismissible={!applying}
       footer={
@@ -847,7 +847,7 @@ export function BackfillModal({
             {report.items.length === 0 ? (
               <EmptyState
                 title="No eligible balances"
-                description="There are no active employees or active balance-based leave types to initialize."
+                description="There are no active employees or leave types that use an allowance to set up."
               />
             ) : (
               <div className="max-h-72 overflow-y-auto rounded-lg border border-line">
@@ -1041,7 +1041,7 @@ export function ReconciliationModal({
       open={open}
       onClose={onClose}
       title="Reconcile balance periods"
-      description="Detects overlapping or incorrectly sized periods. Repair removes only empty, non-canonical rows with no ledger history and no leave requests."
+      description="Finds overlapping or wrong-length periods. Repair removes only empty, incorrect rows with no history and no leave requests."
       size="lg"
       dismissible={!repairing}
       footer={
@@ -1103,7 +1103,7 @@ export function ReconciliationModal({
             {report.groups.length === 0 ? (
               <EmptyState
                 title="No balance issues found"
-                description="Every employee/type pair has a single canonical balance period."
+                description="Every employee and leave type pair has a single correct balance period."
               />
             ) : (
               <div className="space-y-3">

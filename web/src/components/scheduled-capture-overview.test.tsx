@@ -112,7 +112,7 @@ describe("ScheduledCaptureOverviewView", () => {
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getAllByText("Never").length).toBeGreaterThan(0);
     expect(screen.getByText("Every 15 min")).toBeInTheDocument();
-    expect(screen.getByText(/1 of 2 employees capture automatically/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 employees take screenshots automatically/i)).toBeInTheDocument();
     expect(
       screen.getByText(/scheduled screenshots consume additional storage and database resources/i),
     ).toBeInTheDocument();
@@ -134,6 +134,6 @@ describe("ScheduledCaptureOverviewView", () => {
 
     expect(await screen.findByText("Paused")).toBeInTheDocument();
     expect(screen.getByText("Every 10 min")).toBeInTheDocument();
-    expect(screen.getByText(/0 of 1 employees capture automatically/i)).toBeInTheDocument();
+    expect(screen.getByText(/0 of 1 employees take screenshots automatically/i)).toBeInTheDocument();
   });
 });

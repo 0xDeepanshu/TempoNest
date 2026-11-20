@@ -156,11 +156,11 @@ export function LeaveApplyModal({
       return;
     }
     if (!policy) {
-      setFormError("This leave type has no policy configured, so it cannot accept requests.");
+      setFormError("This leave type is not set up yet, so it cannot take requests.");
       return;
     }
     if (!policy.isActive) {
-      setFormError("This leave type is not accepting requests because its policy is inactive.");
+      setFormError("This leave type is paused and is not taking new requests.");
       return;
     }
     if (!isDateOnly(startDate) || !isDateOnly(endDate)) {
@@ -177,32 +177,32 @@ export function LeaveApplyModal({
     }
     const trimmedReason = reason.trim();
     if (trimmedReason.length < 3) {
-      setFormError("Enter remarks with at least 3 characters.");
+      setFormError("Add a short note (at least 3 characters) so your reviewer has context.");
       return;
     }
     if (trimmedReason.length > 2000) {
-      setFormError("Remarks must be 2000 characters or fewer.");
+      setFormError("Your note must be 2000 characters or fewer.");
       return;
     }
     const documentation = documentationReference.trim();
     if (selectedType.requiresDocumentation && !documentation) {
-      setFormError("This leave type requires a documentation reference.");
+      setFormError("This leave type needs proof. Add a document reference.");
       return;
     }
     if (documentation.length > 500) {
-      setFormError("The documentation reference must be 500 characters or fewer.");
+      setFormError("The document reference must be 500 characters or fewer.");
       return;
     }
 
     if (policy && holidaysReady) {
       if (estimate === null) {
         setFormError(
-          "The half-day selection must fall on a chargeable working day. Choose different dates or a full-day request.",
+          "A half day must fall on a working day. Change the dates or ask for a full day.",
         );
         return;
       }
       if (estimate === 0) {
-        setFormError("The selected range has no chargeable working days.");
+        setFormError("Those dates contain no working days to charge.");
         return;
       }
     }
@@ -210,7 +210,7 @@ export function LeaveApplyModal({
     if (selectedType.requiresBalance && !selectedType.allowNegativeBalance) {
       if (balance && balance.availableBalance <= 0) {
         setFormError(
-          `No ${selectedType.name} balance is available for this period. Choose another leave type or period.`,
+          `You have no ${selectedType.name} days left for this period. Choose another leave type or period.`,
         );
         return;
       }
@@ -220,12 +220,46 @@ export function LeaveApplyModal({
       }
       if (holidaysReady && balance && estimate !== null && estimate > balance.availableBalance + 0.001) {
         setFormError(
-          `This request is estimated at ${formatLeaveUnits(estimate)}, but only ${formatLeaveUnits(
+          `This request needs ${formatLeaveUnits(estimate)}, but only ${formatLeaveUnits(
             balance.availableBalance,
-          )} is available for this period.`,
+          )} is left for this period.`,
         );
         return;
       }
+    }
+
+    const maxPerApplication = policy?.maxCreditsPerApplication ?? null;
+    if (
+      maxPerApplication !== null &&
+      estimate !== null &&
+      estimate > maxPerApplication + 0.001
+    ) {
+      setFormError(
+        `This leave type allows at most ${formatLeaveUnits(
+          maxPerApplication,
+        )} per application.`,
+      );
+      return;
+    }
+
+    // The monthly limit is precise only when the whole request falls in the
+    // current month, which is the only usage the client has loaded.
+    const todayMonth = today.slice(0, 7);
+    const usage = balance?.monthlyUsage;
+    if (
+      usage?.enabled &&
+      usage.limit !== null &&
+      estimate !== null &&
+      startDate.slice(0, 7) === todayMonth &&
+      endDate.slice(0, 7) === todayMonth &&
+      usage.total + estimate > usage.limit + 0.001
+    ) {
+      setFormError(
+        `The monthly limit for ${selectedType.name} is ${formatLeaveUnits(
+          usage.limit,
+        )}. ${formatLeaveUnits(usage.total)} is already used or pending this month.`,
+      );
+      return;
     }
 
     submittingRef.current = true;
@@ -313,8 +347,8 @@ export function LeaveApplyModal({
                 disabled={Boolean(type.policy && !type.policy.isActive)}
               >
                 {type.name}
-                {type.requiresBalance ? "" : " · no balance"}
-                {type.policy && !type.policy.isActive ? " · policy inactive" : ""}
+                {type.requiresBalance ? "" : " · no allowance"}
+                {type.policy && !type.policy.isActive ? " · paused" : ""}
               </option>
             ))}
           </Select>
@@ -327,10 +361,10 @@ export function LeaveApplyModal({
                 {selectedType.isPaid ? "Paid" : "Unpaid"}
               </Badge>
               <Badge tone="outline">
-                {selectedType.requiresBalance ? "Balance required" : "No balance"}
+                {selectedType.requiresBalance ? "Uses your allowance" : "No allowance needed"}
               </Badge>
               {selectedType.allowNegativeBalance ? (
-                <Badge tone="warning">Negative balance allowed</Badge>
+                <Badge tone="warning">Can go below zero</Badge>
               ) : null}
               {selectedType.policy ? (
                 <Badge tone="neutral">
@@ -340,15 +374,34 @@ export function LeaveApplyModal({
             </div>
             <p className="mt-2 text-xs leading-5 text-muted">
               {selectedType.minNoticeDays > 0
-                ? `At least ${selectedType.minNoticeDays} day(s) of notice. `
+                ? `Apply at least ${selectedType.minNoticeDays} day(s) ahead. `
                 : ""}
               {selectedType.maxConsecutiveDays !== null
-                ? `Up to ${selectedType.maxConsecutiveDays} consecutive calendar day(s). `
+                ? `Up to ${selectedType.maxConsecutiveDays} calendar day(s) per request. `
                 : ""}
               {selectedType.requiresDocumentation
-                ? "A documentation reference is required."
+                ? "You will need to attach proof."
                 : ""}
             </p>
+            {selectedType.policy?.maxCreditsPerApplication !== null &&
+            selectedType.policy?.maxCreditsPerApplication !== undefined ? (
+              <p className="mt-1 text-[11px] leading-4 text-muted">
+                At most{" "}
+                {formatLeaveUnits(selectedType.policy.maxCreditsPerApplication)} per request.
+              </p>
+            ) : null}
+            {selectedType.policy?.monthlyUsageLimitEnabled &&
+            selectedType.policy.monthlyUsageLimit !== null ? (
+              <p className="mt-1 text-[11px] leading-4 text-muted">
+                Monthly cap: {formatLeaveUnits(selectedType.policy.monthlyUsageLimit)}
+                {balance?.monthlyUsage?.enabled
+                  ? ` · ${formatLeaveUnits(
+                      balance.monthlyUsage.remaining ?? 0,
+                    )} left this month`
+                  : ""}
+                . Requests waiting for approval count too; half days count as 0.5.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -405,7 +458,7 @@ export function LeaveApplyModal({
             <dl className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-muted">
-                  {selectedType.requiresBalance ? "Credits required" : "Estimated days"}
+                  {selectedType.requiresBalance ? "Days needed" : "Estimated days"}
                 </dt>
                 <dd className="tnum font-medium text-ink">
                   {estimate === null

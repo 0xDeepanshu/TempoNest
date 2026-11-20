@@ -242,18 +242,17 @@ function AttendanceEvidenceContent({
       <PageHeader
         eyebrow={`${organization.name} · ${timezone}`}
         title="Attendance evidence"
-        description="Review mobile check-ins by employee, time, attendance status, work mode, evidence availability, and location status. Filters apply immediately; open a check-in for private photos and secondary metadata."
+        description="See who checked in, when, and from where. Open a check-in for private photos and location details."
       />
 
-      <Alert tone="info" title="Private evidence and approximate location">
-        Photos are released only through short-lived, audited links; storage paths are never
-        exposed. GPS coordinates come from the employee&apos;s device at check-in and are
-        approximate, so they do not independently prove physical presence. WFO check-ins never
-        collect location, WFH collects neither photos nor location, and ON_SITE collects a selfie
-        and location. ON_SITE sessions can also record a location history while work is active;
-        it pauses on breaks and stops at checkout, and is shown only to roles with the
-        attendance:location:read permission. Site photos are optional and are shown only for
-        older check-ins that include one.
+      <Alert tone="info" title="Photos and locations stay private">
+        Photos open only through short, recorded links; file paths are never shown. Location
+        comes from the employee&apos;s device at check-in, so it is approximate and does not
+        prove someone was on site. Office check-ins never collect location, working from home
+        collects no photos or location, and on-site check-ins take a selfie plus location.
+        On-site check-ins can also record location while work is active; it pauses on breaks
+        and stops when the session ends. A site photo appears only on older check-ins that
+        include one.
       </Alert>
 
       <Card>

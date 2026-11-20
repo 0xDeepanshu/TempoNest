@@ -149,7 +149,7 @@ export function MyLeaveView() {
       <Card>
         <CardHeader
           title="Available balances"
-          description="1 credit equals 1 day. Available = assigned − used − pending. Balances are shown for the current period and any future period with active requests."
+          description="Available = assigned − used − waiting for approval. You see the current period and any future period with open requests."
         />
         {balances.error ? (
           <div className="p-4">
@@ -160,7 +160,7 @@ export function MyLeaveView() {
         ) : balanceRows.length === 0 ? (
           <EmptyState
             title="No leave balances"
-            description="Your active leave types do not use balances, or no balance is available for the current period."
+            description="None of your leave types use an allowance, or there is no balance for this period."
             icon={<CalendarIcon className="h-5 w-5" />}
             action={
               canApply ? (
@@ -186,7 +186,7 @@ export function MyLeaveView() {
       <Card>
         <CardHeader
           title="My leave requests"
-          description="Pending, approved, rejected, and cancellation states appear here for your own requests."
+          description="Everything you have asked for, including requests still waiting for a decision."
         />
         {requests.error ? (
           <div className="p-4">
@@ -294,9 +294,9 @@ function BalanceRow({
               {balance.leaveType?.name ?? "Leave"}
             </p>
             <Badge tone={currentPeriod ? "success" : "neutral"}>
-              {currentPeriod ? "Current period" : "Other period"}
+              {currentPeriod ? "Now" : "Later period"}
             </Badge>
-            {zero ? <Badge tone="danger">No balance</Badge> : null}
+            {zero ? <Badge tone="danger">Nothing left</Badge> : null}
           </div>
           <p className="mt-0.5 text-xs text-muted">
             {balancePeriodLabel(balance.periodStart, balance.periodEnd)}
@@ -314,13 +314,55 @@ function BalanceRow({
 
       <dl className="mt-2.5 grid grid-cols-2 gap-1.5 text-[11px] sm:grid-cols-4">
         <BalanceFigure label="Assigned" value={formatLeaveUnits(assigned)} />
+        <BalanceFigure
+          label="Earned this month"
+          value={formatLeaveUnits(balance.credits?.earnedThisMonth ?? 0)}
+        />
+        <BalanceFigure
+          label="Carried forward"
+          value={formatLeaveUnits(balance.carriedForwardBalance)}
+        />
+        <BalanceFigure
+          label="Expiring soon"
+          value={formatLeaveUnits(balance.credits?.expiringSoon ?? 0)}
+        />
         <BalanceFigure label="Used" value={formatLeaveUnits(balance.approvedConsumed)} />
         <BalanceFigure label="Pending" value={formatLeaveUnits(balance.pendingReserved)} />
         <BalanceFigure label="Available" value={formatLeaveUnits(balance.availableBalance)} />
+        {balance.monthlyUsage?.enabled && balance.monthlyUsage.limit !== null ? (
+          <BalanceFigure
+            label="Monthly limit"
+            value={`${formatLeaveUnits(
+              balance.monthlyUsage.total,
+              false,
+            )} / ${formatLeaveUnits(balance.monthlyUsage.limit, false)}`}
+          />
+        ) : (
+          <BalanceFigure label="Monthly limit" value="No limit" />
+        )}
       </dl>
+      {balance.credits?.expiringSoon && balance.credits.expiringSoonDate ? (
+        <p className="mt-1.5 text-[11px] text-warning">
+          {formatLeaveUnits(balance.credits.expiringSoon)} expire on{" "}
+          {formatDay(balance.credits.expiringSoonDate)}.
+        </p>
+      ) : null}
+      {balance.monthlyUsage?.enabled && balance.monthlyUsage.remaining !== null ? (
+        <p className="mt-1 text-[11px] text-muted">
+          {formatLeaveUnits(balance.monthlyUsage.remaining)} remaining this month
+          {balance.monthlyUsage.pending > 0
+            ? ` (${formatLeaveUnits(balance.monthlyUsage.pending)} pending still counts)`
+            : ""}
+          .
+        </p>
+      ) : null}
       <p className="mt-2 text-[11px] leading-5 text-muted">
         {formatLeaveUnits(assigned)} assigned − {formatLeaveUnits(balance.approvedConsumed)} used −{" "}
-        {formatLeaveUnits(balance.pendingReserved)} pending ={" "}
+        {formatLeaveUnits(balance.pendingReserved)} pending
+        {balance.expiredBalance > 0
+          ? ` − ${formatLeaveUnits(balance.expiredBalance)} expired`
+          : ""}{" "}
+        ={" "}
         <span className="font-medium text-ink-secondary">
           {formatLeaveUnits(balance.availableBalance)} available
         </span>
@@ -499,7 +541,7 @@ function RequestDetailModal({
             </Badge>
           ) : null}
           {request.leaveType?.requiresBalance ? (
-            <Badge tone="outline">Balance required</Badge>
+            <Badge tone="outline">Uses balance</Badge>
           ) : null}
         </div>
 

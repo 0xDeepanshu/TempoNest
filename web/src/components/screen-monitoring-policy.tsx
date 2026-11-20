@@ -126,8 +126,8 @@ export function ScreenMonitoringPolicyCard({
   return (
     <Card>
       <CardHeader
-        title="Screen Monitoring Policy"
-        description="Control whether authorized administrators can access this employee's live screen and screenshots."
+        title="Screen monitoring"
+        description="Control whether administrators can view this employee's live screen and request screenshots."
         actions={
           value ? (
             <Badge tone={enabled ? "success" : "neutral"}>
@@ -173,7 +173,7 @@ export function ScreenMonitoringPolicyCard({
                 </Button>
               ) : (
                 <p className="text-xs text-muted">
-                  Your role cannot change this policy.
+                  You cannot change this setting.
                 </p>
               )}
             </div>

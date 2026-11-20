@@ -351,7 +351,7 @@ describe("ApplicationClassificationsView", () => {
     mockCatalog();
     renderCatalog("MANAGER");
 
-    expect(await screen.findByText("Read-only catalog")).toBeInTheDocument();
+    expect(await screen.findByText("Read-only list")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add classification" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Classify" })).not.toBeInTheDocument();

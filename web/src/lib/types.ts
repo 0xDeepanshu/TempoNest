@@ -862,6 +862,43 @@ export const LEAVE_ACCRUAL_FREQUENCIES = ["NONE", "MONTHLY", "QUARTERLY", "ANNUA
 
 export type LeaveAccrualFrequency = (typeof LEAVE_ACCRUAL_FREQUENCIES)[number];
 
+export const LEAVE_RESET_PERIODS = [
+  "CALENDAR_YEAR",
+  "FINANCIAL_YEAR",
+  "JOINING_ANNIVERSARY",
+  "CUSTOM",
+  "NEVER",
+] as const;
+
+export type LeaveResetPeriod = (typeof LEAVE_RESET_PERIODS)[number];
+
+export const LEAVE_CARRY_FORWARD_ORDERS = [
+  "EXPIRY_FIRST",
+  "CARRY_FORWARD_FIRST",
+  "NEW_FIRST",
+] as const;
+
+export type LeaveCarryForwardOrder = (typeof LEAVE_CARRY_FORWARD_ORDERS)[number];
+
+export const LEAVE_CREDIT_EXPIRY_REASONS = [
+  "NONE",
+  "MONTHLY_RESET",
+  "ANNUAL_RESET",
+  "CARRY_FORWARD",
+] as const;
+
+export type LeaveCreditExpiryReason = (typeof LEAVE_CREDIT_EXPIRY_REASONS)[number];
+
+export const LEAVE_CREDIT_SOURCE_KINDS = [
+  "INITIAL_ENTITLEMENT",
+  "ACCRUAL",
+  "CARRY_FORWARD",
+  "ADJUSTMENT",
+  "LEGACY",
+] as const;
+
+export type LeaveCreditSourceKind = (typeof LEAVE_CREDIT_SOURCE_KINDS)[number];
+
 export const LEAVE_LEDGER_ENTRY_KINDS = [
   "INITIAL_ENTITLEMENT",
   "ACCRUAL",
@@ -871,6 +908,7 @@ export const LEAVE_LEDGER_ENTRY_KINDS = [
   "RESERVATION_RELEASE",
   "CONSUMPTION",
   "CONSUMPTION_RESTORE",
+  "EXPIRY",
 ] as const;
 
 export type LeaveLedgerEntryKind = (typeof LEAVE_LEDGER_ENTRY_KINDS)[number];
@@ -888,6 +926,13 @@ export interface LeavePolicy {
   balancePeriodStartMonth: number;
   balancePeriodStartDay: number;
   carryForwardAllowance: number;
+  carryForwardEnabled: boolean;
+  carryForwardExpiryMonths: number | null;
+  carryForwardOrder: LeaveCarryForwardOrder;
+  resetPeriod: LeaveResetPeriod;
+  maxCreditsPerApplication: number | null;
+  monthlyUsageLimitEnabled: boolean;
+  monthlyUsageLimit: number | null;
   maxBalance: number | null;
   prorateInitialEntitlement: boolean;
   workingDays: number[];
@@ -1170,6 +1215,7 @@ export interface LeaveLedgerEntry {
   carriedForwardDelta: number;
   reservedDelta: number;
   consumedDelta: number;
+  expiredDelta: number;
   availableDelta: number;
   balanceAfter: number;
   reason: string | null;
@@ -1180,6 +1226,38 @@ export interface LeaveLedgerEntry {
   actor?: ScreenshotUserSummary;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface LeaveMonthlyUsage {
+  month: string;
+  approved: number;
+  pending: number;
+  total: number;
+  limit: number | null;
+  enabled: boolean;
+  remaining: number | null;
+}
+
+export interface LeaveCreditTrancheSummary {
+  sourceKind: LeaveCreditSourceKind;
+  periodAllocated: string;
+  allocated: number;
+  consumed: number;
+  reserved: number;
+  expired: number;
+  remaining: number;
+  expiresAt: string | null;
+  expiryReason: LeaveCreditExpiryReason;
+}
+
+export interface LeaveCreditSummary {
+  earnedThisMonth: number;
+  carriedForward: number;
+  expiringSoon: number;
+  expiringSoonDate: string | null;
+  expired: number;
+  remainingTranches: number;
+  tranches: LeaveCreditTrancheSummary[];
 }
 
 export interface LeaveBalance {
@@ -1195,6 +1273,7 @@ export interface LeaveBalance {
   carriedForwardBalance: number;
   approvedConsumed: number;
   pendingReserved: number;
+  expiredBalance: number;
   availableBalance: number;
   assignedBalance: number;
   breakdown: {
@@ -1205,8 +1284,11 @@ export interface LeaveBalance {
     carriedForward: number;
     approvedConsumed: number;
     pendingReserved: number;
+    expired: number;
     available: number;
   };
+  monthlyUsage?: LeaveMonthlyUsage;
+  credits?: LeaveCreditSummary;
   leaveType?: {
     id: string;
     name: string;
@@ -1287,6 +1369,13 @@ export interface LeavePolicySnapshot {
   balancePeriodStartDay: number;
   carryForwardAllowance: number;
   maxBalance: number | null;
+  carryForwardEnabled: boolean;
+  carryForwardExpiryMonths: number | null;
+  carryForwardOrder: LeaveCarryForwardOrder;
+  resetPeriod: LeaveResetPeriod;
+  maxCreditsPerApplication: number | null;
+  monthlyUsageLimitEnabled: boolean;
+  monthlyUsageLimit: number | null;
   prorateInitialEntitlement: boolean;
   isActive: boolean;
 }

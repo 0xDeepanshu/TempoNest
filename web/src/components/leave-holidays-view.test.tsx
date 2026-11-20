@@ -212,7 +212,7 @@ describe("LeaveHolidaysView", () => {
 
     expect(await screen.findByText("Company holidays")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add holiday" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Holiday settings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Holiday rules" })).not.toBeInTheDocument();
   });
 
   it("validates and creates a holiday with category and applicability", async () => {
