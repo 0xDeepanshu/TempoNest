@@ -906,7 +906,7 @@ describe("LeaveBalancesView", () => {
 
     await user.click(await screen.findByText("Advanced maintenance"));
 
-    expect((await screen.findAllByText("Next accrual")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Scheduled days")).length).toBeGreaterThan(0);
     expect(screen.getByText("Nov 1, 2026")).toBeInTheDocument();
     expect(screen.getByText("+2")).toBeInTheDocument();
     expect(screen.getByText("19 days")).toBeInTheDocument();

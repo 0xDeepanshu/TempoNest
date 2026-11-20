@@ -50,9 +50,7 @@ describe("visibleNavigationGroups", () => {
     expect(visible).not.toContain("People");
     expect(visible).not.toContain("App tracking");
     expect(visible).not.toContain("Screenshots");
-    expect(visible).not.toContain("Scheduled screenshots");
-    expect(visible).not.toContain("Monitoring");
-    expect(visible).not.toContain("General");
+    expect(visible).not.toContain("Settings");
   });
 
   it("keeps the built-in EMPLOYEE navigation free of management areas", () => {
@@ -66,27 +64,35 @@ describe("visibleNavigationGroups", () => {
     expect(visible).not.toContain("App tracking");
     expect(visible).not.toContain("Reports");
     expect(visible).not.toContain("People");
-    expect(visible).not.toContain("General");
-    expect(visible).not.toContain("Roles & permissions");
+    expect(visible).not.toContain("Settings");
   });
 
-  it("requires both organization and member read for the General settings item", () => {
-    expect(labels(membership(["organization:read"]))).not.toContain("General");
+  it("shows the single Settings item only when a section is readable", () => {
+    // Organization read alone is not enough: General also needs member read,
+    // and no other section is granted.
+    expect(labels(membership(["organization:read"]))).not.toContain("Settings");
     expect(labels(membership(["organization:read", "member:read"]))).toContain(
-      "General",
+      "Settings",
     );
+    expect(labels(membership(["role:read"]))).toContain("Settings");
+    expect(labels(membership([]))).not.toContain("Settings");
   });
 
-  it("maps each team and workspace item to its exact permission", () => {
+  it("maps live and settings areas to their exact permission", () => {
     expect(labels(membership(["member:read"]))).toContain("People");
     expect(labels(membership(["leave:approve"]))).toContain("Leave");
     expect(labels(membership(["leave:manage"]))).toContain("Leave");
-    expect(labels(membership(["role:read"]))).toContain("Roles & permissions");
+    expect(labels(membership(["role:read"]))).toContain("Settings");
     expect(labels(membership(["screenshot:read"]))).toContain("Screenshots");
-    expect(labels(membership(["screenshot:policy"]))).toContain("Monitoring");
-    expect(labels(membership(["screenshot:monitoring"]))).toContain("Scheduled screenshots");
-    expect(labels(membership(["screenshot:read"]))).not.toContain("Scheduled screenshots");
-    expect(labels(membership(["screenshot:policy"]))).not.toContain("Scheduled screenshots");
+    // Screenshot configuration lives in Settings, not in the live nav.
+    expect(labels(membership(["screenshot:policy"]))).toContain("Settings");
+    // Scheduled capture is a section inside Screenshots, never its own item.
+    expect(labels(membership(["screenshot:monitoring"]))).not.toContain(
+      "Scheduled screenshots",
+    );
+    expect(labels(membership(["screenshot:read"]))).not.toContain(
+      "Scheduled screenshots",
+    );
   });
 
   it("gates holiday navigation by view and management permissions", () => {
@@ -139,9 +145,9 @@ describe("activeNavigationHref", () => {
       "/admin/leave/holidays",
     );
     expect(activeNavigationHref("/admin/leave/requests", manager)).toBe("/admin/leave");
-    expect(activeNavigationHref("/settings/leave/holidays", manager)).toBe(
-      "/settings/leave",
-    );
+    // Every settings route points at the single Settings item.
+    expect(activeNavigationHref("/settings/leave/holidays", manager)).toBe("/settings");
+    expect(activeNavigationHref("/settings/roles", manager)).toBe("/settings");
     expect(activeNavigationHref("/admin/activity/classifications", manager)).toBe(
       "/admin/activity/team",
     );
@@ -152,6 +158,8 @@ describe("activeNavigationHref", () => {
   });
 
   it("only considers items the membership can see", () => {
-    expect(activeNavigationHref("/settings/roles", manager)).toBeNull();
+    const employee = membership(undefined, { role: "EMPLOYEE" });
+    // An employee cannot open any settings section, so no Settings highlight.
+    expect(activeNavigationHref("/settings/roles", employee)).toBeNull();
   });
 });

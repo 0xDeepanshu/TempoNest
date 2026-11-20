@@ -21,17 +21,18 @@ import {
   CloseIcon,
   DashboardIcon,
   EditIcon,
-  KeyIcon,
   LogOutIcon,
   MapPinIcon,
   MenuIcon,
   MonitorIcon,
   PulseIcon,
+  SettingsIcon,
   ShieldIcon,
   UsersIcon,
 } from "./icons";
 import { ThemeToggle } from "./theme-toggle";
 import { Avatar, ErrorState, RoleBadge } from "./ui";
+import { visibleSettingsTabs } from "./settings-tabs";
 import { WorkspaceProvider, useWorkspace } from "./workspace";
 
 interface NavItem {
@@ -49,6 +50,8 @@ interface NavItem {
    * splits a surface across sibling routes (for example a hub with tabs).
    */
   activePrefix?: string;
+  /** A surface with its own visibility rules, such as the Settings hub. */
+  visibleWhen?: (membership: MembershipSummary | undefined) => boolean;
 }
 
 const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
@@ -146,12 +149,9 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
         label: "Screenshots",
         icon: <CameraIcon className="h-4 w-4" />,
         permission: "screenshot:read",
-      },
-      {
-        href: "/admin/scheduled-capture",
-        label: "Scheduled screenshots",
-        icon: <CameraIcon className="h-4 w-4" />,
-        permission: "screenshot:monitoring",
+        // Scheduled capture is a view inside Screenshots, so keep this item
+        // highlighted on both routes.
+        activePrefix: "/admin/scheduled-capture",
       },
       {
         href: "/admin/attendance",
@@ -162,33 +162,14 @@ const NAV_GROUPS: Array<{ label?: string; items: NavItem[] }> = [
     ],
   },
   {
-    label: "Settings",
     items: [
       {
-        href: "/settings/general",
-        label: "General",
-        icon: <BuildingIcon className="h-4 w-4" />,
-        // The page lives under the admin layout and lists members, so both the
-        // organization profile and the directory must be readable.
-        allOf: ["organization:read", "member:read"],
-      },
-      {
-        href: "/settings/roles",
-        label: "Roles & permissions",
-        icon: <KeyIcon className="h-4 w-4" />,
-        permission: "role:read",
-      },
-      {
-        href: "/settings/leave",
-        label: "Leave & holidays",
-        icon: <CalendarIcon className="h-4 w-4" />,
-        anyOf: ["leave:manage", "holiday:settings:manage"],
-      },
-      {
-        href: "/settings/monitoring",
-        label: "Monitoring",
-        icon: <ShieldIcon className="h-4 w-4" />,
-        anyOf: ["screenshot:policy", "activity:policy"],
+        href: "/settings",
+        label: "Settings",
+        icon: <SettingsIcon className="h-4 w-4" />,
+        activePrefix: "/settings",
+        // The hub only appears when at least one settings section is readable.
+        visibleWhen: (membership) => visibleSettingsTabs(membership).length > 0,
       },
     ],
   },
@@ -230,6 +211,7 @@ function navItemAllowed(
   item: NavItem,
   membership: MembershipSummary | undefined,
 ): boolean {
+  if (item.visibleWhen && !item.visibleWhen(membership)) return false;
   if (item.permission && !hasPermission(membership, item.permission)) return false;
   if (item.anyOf && !hasAnyPermission(membership, item.anyOf)) return false;
   if (item.allOf && !item.allOf.every((permission) => hasPermission(membership, permission))) {
@@ -267,11 +249,11 @@ function NavLink({
       className={[
         "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors",
         active
-          ? "bg-ink text-on-strong"
+          ? "bg-accent text-accent-ink shadow-[0_1px_0_rgba(0,0,0,0.15)]"
           : "text-ink-secondary hover:bg-surface-hover hover:text-ink",
       ].join(" ")}
     >
-      <span className={active ? "text-on-strong/70" : "text-muted"}>{item.icon}</span>
+      <span className={active ? "text-accent-ink/70" : "text-muted"}>{item.icon}</span>
       {item.label}
     </Link>
   );
@@ -319,7 +301,7 @@ function WorkspaceControls() {
           aria-label="Organization"
           value={organization.id}
           onChange={(event) => setOrganizationId(event.target.value)}
-          className="w-full rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-xs font-medium text-ink outline-none transition focus:border-ink focus:ring-2 focus:ring-ink/10"
+          className="w-full rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-xs font-medium text-ink outline-none transition hover:border-line-strong focus:border-accent focus:ring-2 focus:ring-accent/25"
         >
           {activeMemberships.map((item) => (
             <option key={item.organizationId} value={item.organizationId}>
@@ -433,9 +415,9 @@ function Shell({ children }: { children: ReactNode }) {
             <Link
               href="/superadmin"
               onClick={onNavigate}
-              className="mb-2 flex items-center gap-2 rounded-lg bg-ink px-2.5 py-2 text-[11px] font-medium text-on-strong transition-colors hover:bg-ink-secondary"
+              className="mb-2 flex items-center gap-2 rounded-lg bg-accent px-2.5 py-2 text-[11px] font-medium text-accent-ink transition-colors hover:bg-accent-hover"
             >
-              <ShieldIcon className="h-3.5 w-3.5 shrink-0 text-on-strong/70" />
+              <ShieldIcon className="h-3.5 w-3.5 shrink-0 text-accent-ink/70" />
               Platform admin
               <ArrowRightIcon className="ml-auto h-3.5 w-3.5" />
             </Link>
@@ -467,14 +449,14 @@ function Shell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-canvas">
       <a
         href="#main-content"
-        className="sr-only rounded-lg bg-ink px-3 py-2 text-sm font-medium text-on-strong focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50"
+        className="sr-only rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-ink focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50"
       >
         Skip to content
       </a>
 
       <aside
         aria-label="Sidebar"
-        className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-line bg-surface lg:block"
+        className="ambient-sidebar fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-sidebar-border bg-sidebar lg:block"
       >
         {renderSidebar()}
       </aside>
@@ -519,7 +501,7 @@ function Shell({ children }: { children: ReactNode }) {
               role="dialog"
               aria-modal="true"
               aria-label="Navigation"
-              className="absolute inset-y-0 left-0 w-72 border-r border-line bg-surface shadow-xl"
+              className="ambient-sidebar absolute inset-y-0 left-0 w-72 border-r border-sidebar-border bg-sidebar shadow-xl"
             >
               <button
                 ref={closeButtonRef}
@@ -538,7 +520,7 @@ function Shell({ children }: { children: ReactNode }) {
         <main
           id="main-content"
           tabIndex={-1}
-          className="mx-auto w-full max-w-[1440px] px-4 py-5 outline-none sm:px-6 lg:px-8 lg:py-7"
+          className="ambient-top mx-auto w-full max-w-[1440px] px-4 py-5 outline-none sm:px-6 lg:px-8 lg:py-7"
         >
           {!organization ? (
             <div className="mb-4">

@@ -91,10 +91,10 @@ const CATEGORY_META: Record<
   HolidayCategory,
   { tone: "indigo" | "success" | "warning" | "info" | "neutral"; dot: string }
 > = {
-  PUBLIC: { tone: "indigo", dot: "bg-ink" },
+  PUBLIC: { tone: "indigo", dot: "bg-accent" },
   COMPANY: { tone: "success", dot: "bg-success" },
   OPTIONAL: { tone: "warning", dot: "bg-warning" },
-  NATIONAL: { tone: "indigo", dot: "bg-ink" },
+  NATIONAL: { tone: "indigo", dot: "bg-accent" },
   STATE: { tone: "info", dot: "bg-ink-secondary" },
   GAZETTED: { tone: "neutral", dot: "bg-ink-secondary" },
   RESTRICTED: { tone: "warning", dot: "bg-warning" },
@@ -619,7 +619,7 @@ export function HolidayCalendarView({
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
                       filter === value
-                        ? "border-ink bg-ink text-on-strong"
+                        ? "border-accent bg-accent text-accent-ink"
                         : "border-line bg-surface text-ink-secondary hover:bg-surface-hover",
                     )}
                   >
@@ -675,9 +675,9 @@ export function HolidayCalendarView({
                           type="button"
                           onClick={() => setSelectedDate(dateOnly)}
                           className={cn(
-                            "min-h-24 border-b border-r border-line p-2 text-left align-top transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink",
+                            "min-h-24 border-b border-r border-line p-2 text-left align-top transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
                             fullDay && "bg-surface-muted",
-                            isSelected && "ring-2 ring-inset ring-ink",
+                            isSelected && "ring-2 ring-inset ring-accent",
                           )}
                           aria-pressed={isSelected}
                         >
@@ -685,7 +685,7 @@ export function HolidayCalendarView({
                             <span
                               className={cn(
                                 "inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-semibold",
-                                isToday ? "bg-ink text-on-strong" : "text-ink-secondary",
+                                isToday ? "bg-accent text-accent-ink" : "text-ink-secondary",
                               )}
                             >
                               {day}

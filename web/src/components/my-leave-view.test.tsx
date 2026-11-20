@@ -380,10 +380,11 @@ describe("MyLeaveView", () => {
     renderView();
 
     expect(await screen.findByText("Available balances")).toBeInTheDocument();
-    expect(screen.getByText("Assigned")).toBeInTheDocument();
+    expect(screen.getByText("Earned this month")).toBeInTheDocument();
+    expect(screen.getByText("Rolled over")).toBeInTheDocument();
     expect(screen.getByText("Used")).toBeInTheDocument();
     expect(screen.getByText("Pending")).toBeInTheDocument();
-    expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(screen.getByText("Available days")).toBeInTheDocument();
     expect(
       screen.getByText(
         (_content, element) =>

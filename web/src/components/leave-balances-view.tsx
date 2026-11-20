@@ -218,7 +218,7 @@ export function LeaveBalancesView() {
               value={summary ? summary.totalCreditsAssigned : "—"}
               hint={
                 summary
-                  ? `${summary.approvedConsumed} used · ${summary.pendingReserved} reserved`
+                  ? `${summary.approvedConsumed} used · ${summary.pendingReserved} pending`
                   : "Loading"
               }
             />
@@ -397,7 +397,7 @@ export function LeaveBalancesView() {
           <Card>
             <CardHeader
               title="Balance history"
-              description="Every assignment, reservation, approval, rejection, and correction across the organization."
+              description="Every assignment, pending request, approval, rejection, and correction across the organization."
               actions={
                 <Button variant="ghost" size="sm" onClick={history.reload}>
                   Refresh
@@ -638,7 +638,7 @@ function BalanceCard({
     <button
       type="button"
       onClick={onOpen}
-      className="block w-full px-4 py-3 text-left transition hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink"
+      className="block w-full px-4 py-3 text-left transition hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
@@ -1030,7 +1030,7 @@ function BalanceDetailModal({
             <BalanceFigure
               label="Pending"
               value={balance.pendingReserved}
-              hint="Reserved by requests still waiting for a decision."
+              hint="Held by requests still waiting for a decision."
             />
             <BalanceFigure
               label="Expired"
@@ -1088,7 +1088,7 @@ function BalanceDetailModal({
                         Expires {formatDay(tranche.expiresAt)} ·{" "}
                         {creditExpiryReasonLabel(tranche.expiryReason).toLowerCase()}
                         {tranche.reserved > 0
-                          ? ` · ${formatLeaveUnits(tranche.reserved)} reserved`
+                          ? ` · ${formatLeaveUnits(tranche.reserved)} pending`
                           : ""}
                         {tranche.expired > 0
                           ? ` · ${formatLeaveUnits(tranche.expired)} expired`
@@ -1097,7 +1097,7 @@ function BalanceDetailModal({
                     ) : tranche.reserved > 0 || tranche.expired > 0 ? (
                       <p className="text-[11px] text-muted">
                         {tranche.reserved > 0
-                          ? `${formatLeaveUnits(tranche.reserved)} reserved`
+                          ? `${formatLeaveUnits(tranche.reserved)} pending`
                           : ""}
                         {tranche.reserved > 0 && tranche.expired > 0 ? " · " : ""}
                         {tranche.expired > 0

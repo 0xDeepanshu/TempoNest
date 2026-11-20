@@ -48,7 +48,6 @@ import {
   Th,
 } from "./ui";
 import { IntegrationMappingsPanel } from "./integration-mappings-panel";
-import { SettingsTabs } from "./settings-tabs";
 import { NoOrganization, useWorkspace } from "./workspace";
 
 type InvitationStatusFilter = "pending" | "accepted" | "revoked" | "expired" | "all";
@@ -988,12 +987,9 @@ function OrganizationView({ organization }: { organization: Organization }) {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow={current.slug}
         title="General"
         description="Your organization profile, members, and invitations."
       />
-
-      <SettingsTabs current="general" />
 
       {details.error ? (
         <ErrorState message={details.error} onRetry={details.reload} />

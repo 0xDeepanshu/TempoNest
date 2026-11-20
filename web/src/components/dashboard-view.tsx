@@ -63,7 +63,7 @@ function currentStateText(
     return {
       label: "Not tracking",
       tone: "neutral",
-      detail: "No open time session. Start tracking from the WorkZen desktop agent.",
+      detail: "No open work session. Start tracking from the WorkZen desktop app.",
     };
   }
   if (session.status === "ON_BREAK") {
@@ -77,14 +77,14 @@ function currentStateText(
     return {
       label: "Working",
       tone: "success",
-      detail: `Session started ${formatTime(session.startedAt, timezone)} and the desktop agent heartbeat is fresh.`,
+      detail: `Session started ${formatTime(session.startedAt, timezone)} and the desktop app is connected.`,
     };
   }
   return {
-    label: "Session open · stale",
+    label: "Session open · not syncing",
     tone: "warning",
     detail:
-      "The session is still open but its heartbeat is stale. It may be closed automatically the next time the desktop agent starts tracking.",
+      "The session is still open but the desktop app has not checked in recently. It may close automatically the next time tracking starts.",
   };
 }
 
@@ -276,7 +276,7 @@ export function PersonalDashboard() {
           label="Pending corrections"
           value={pending.loading ? "…" : pendingCorrections.length}
           hint="Requests awaiting a reviewer"
-          accent="sky"
+          accent="amber"
           icon={<CheckSquareIcon className="h-4 w-4" />}
         />
       </div>
@@ -507,7 +507,7 @@ export function TeamDashboard() {
       <PageHeader
         eyebrow={`${organization?.name ?? "Team"} · overview`}
         title="Overview"
-        description="Live durable tracking state and today's recorded work. Session times are server-authoritative."
+        description="Live team activity and today's tracked hours."
         actions={
           <>
             <Link href="/admin/reports">
@@ -542,7 +542,7 @@ export function TeamDashboard() {
                 : (details.data?.data.memberCount ?? "—")
               : "—"
           }
-          hint={canReadOrganization ? "Active memberships" : "Not visible for your role"}
+          hint={canReadOrganization ? "Active team members" : "Not visible for your role"}
           accent="indigo"
           icon={<UsersIcon className="h-4 w-4" />}
         />
@@ -578,7 +578,10 @@ export function TeamDashboard() {
         <Card>
           <CardHeader
             title="Live tracking"
-            description={`Freshness threshold: ${tracking.data?.heartbeatStaleAfterSeconds ?? 120}s · ${timezone}`}
+            description={`Updates every ${Math.max(
+              1,
+              Math.round((tracking.data?.heartbeatStaleAfterSeconds ?? 120) / 60),
+            )} min · ${timezone}`}
             actions={
               <Link href="/admin/live-tracking" className="text-xs font-medium text-ink-secondary underline decoration-line-strong underline-offset-4 hover:text-ink">
                 Open live tracking

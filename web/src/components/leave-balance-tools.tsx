@@ -114,11 +114,11 @@ export function AccrualPreviewCard({
   return (
     <Card>
       <CardHeader
-        title="Next accrual"
+        title="Scheduled days"
         description={
           report
-            ? `Preview only · ${report.summary.previews} employee/type combination${report.summary.previews === 1 ? "" : "s"} as of ${formatDay(report.asOf)} (${report.timezone}). No balances are modified.`
-            : "Preview the next scheduled tranche and its projected impact. No balances are modified."
+            ? `Preview only · ${report.summary.previews} employee/type combination${report.summary.previews === 1 ? "" : "s"} as of ${formatDay(report.asOf)} (${report.timezone}). Nothing is saved.`
+            : "Preview the next batch of days and how it changes each balance. Nothing is saved."
         }
       />
 
@@ -172,14 +172,14 @@ export function AccrualPreviewCard({
           <ErrorState message={preview.error} onRetry={preview.reload} />
         </div>
       ) : preview.loading && !report ? (
-        <LoadingBlock label="Loading accrual preview" rows={4} />
+        <LoadingBlock label="Loading scheduled days" rows={4} />
       ) : items.length === 0 ? (
         <EmptyState
-          title={hasFilters ? "No accrual previews match" : "No upcoming accruals"}
+          title={hasFilters ? "No scheduled days match" : "Nothing scheduled ahead"}
           description={
             hasFilters
               ? "Try a different employee or leave type."
-              : "Configure a monthly, quarterly, or annual accrual amount on an active balance-based leave type."
+              : "Set up monthly, quarterly, or yearly days to add on a leave type that uses an allowance."
           }
         />
       ) : (
@@ -189,7 +189,7 @@ export function AccrualPreviewCard({
               <Alert tone="warning">
                 {report.summary.missingBalances} employee/type combination
                 {report.summary.missingBalances === 1 ? " has" : "s have"} no balance
-                for the current period yet. Run the backfill below so accruals and requests
+                for the current period yet. Run the backfill below so scheduled days and requests
                 have a balance to apply to.
               </Alert>
             </div>
@@ -201,7 +201,7 @@ export function AccrualPreviewCard({
                   <Th>Employee</Th>
                   <Th>Leave type</Th>
                   <Th>Frequency</Th>
-                  <Th>Next accrual</Th>
+                  <Th>Next addition</Th>
                   <Th className="text-right">Amount</Th>
                   <Th className="text-right">Current</Th>
                   <Th className="text-right">Projected</Th>
@@ -242,7 +242,7 @@ export function AccrualPreviewCard({
                       {item.nextAccrualDate ? (
                         formatDay(item.nextAccrualDate)
                       ) : (
-                        <span className="text-muted">No upcoming tranche</span>
+                        <span className="text-muted">Nothing scheduled</span>
                       )}
                     </Td>
                     <Td className="whitespace-nowrap text-right tnum">
@@ -285,7 +285,7 @@ export function AccrualPreviewCard({
                   <span className="text-ink-secondary">
                     {item.nextAccrualDate
                       ? `${formatSignedLeaveUnits(item.nextAccrualAmount)} days`
-                      : "No upcoming tranche"}
+                      : "Nothing scheduled"}
                   </span>
                   <span className="tnum">
                     {formatLeaveUnits(item.currentAvailable)} →{" "}
@@ -502,7 +502,7 @@ export function BulkAdjustmentModal({
             {result.summary.adjusted} of {result.summary.requested} employees adjusted.
             {result.summary.failed > 0
               ? ` ${result.summary.failed} failed and can be retried individually.`
-              : " Every change is recorded in the ledger and audit trail."}
+              : " Every change is recorded in the balance history and audit trail."}
           </Alert>
         ) : null}
 
@@ -565,7 +565,7 @@ export function BulkAdjustmentModal({
           <Field
             label="Period date"
             htmlFor="bulk-adjustment-period"
-            hint="Any date inside the target balance period. Empty uses today."
+            hint="Any date inside the target period. Empty uses today."
           >
             <Input
               id="bulk-adjustment-period"
@@ -578,7 +578,7 @@ export function BulkAdjustmentModal({
           <Field
             label="Amount (days)"
             htmlFor="bulk-adjustment-amount"
-            hint="Positive credits, negative debits."
+            hint="Positive numbers add days, negative numbers remove them."
           >
             <Input
               id="bulk-adjustment-amount"
@@ -830,9 +830,9 @@ export function BackfillModal({
             </dl>
 
             <p className="text-xs leading-5 text-muted">
-              As of {formatDay(report.asOf)} in {report.timezone}. Only the current balance
-              period is created; no entitlement is granted before a policy&apos;s effective
-              date and no past period is backfilled.
+              As of {formatDay(report.asOf)} in {report.timezone}. Only the current period is
+              created; no days are added before a policy&apos;s start date and no past period is
+              filled in.
             </p>
 
             {report.unconfiguredTypes.length > 0 ? (
@@ -906,7 +906,7 @@ export function BackfillModal({
                 <span className="text-xs leading-5 text-ink-secondary">
                   I understand this creates {missing} balance row
                   {missing === 1 ? "" : "s"} for the current period. Existing balances,
-                  ledger entries, and requests will not be altered.
+                  balance history, and requests will not be altered.
                 </span>
               </label>
             ) : (
@@ -1040,7 +1040,7 @@ export function ReconciliationModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Reconcile balance periods"
+      title="Check leave periods"
       description="Finds overlapping or wrong-length periods. Repair removes only empty, incorrect rows with no history and no leave requests."
       size="lg"
       dismissible={!repairing}
@@ -1096,14 +1096,14 @@ export function ReconciliationModal({
               As of {formatDay(report.asOf)} in {report.timezone}. Generated{" "}
               {formatDateTime(report.generatedAt, report.timezone)}.
               {report.summary.unkeyedAccrualEntries > 0
-                ? ` ${report.summary.unkeyedAccrualEntries} older accrual ledger entries have no month key; they are preserved for audit.`
+                ? ` ${report.summary.unkeyedAccrualEntries} older scheduled-day entries have no month; they are preserved for audit.`
                 : ""}
             </p>
 
             {report.groups.length === 0 ? (
               <EmptyState
                 title="No balance issues found"
-                description="Every employee and leave type pair has a single correct balance period."
+                description="Every employee and leave type pair has a single correct period."
               />
             ) : (
               <div className="space-y-3">
@@ -1165,14 +1165,14 @@ export function ReconciliationModal({
                               {balancePeriodLabel(balance.periodStart, balance.periodEnd)}
                             </span>
                             {balance.canonical ? (
-                              <Badge tone="success">Canonical</Badge>
+                              <Badge tone="success">Correct</Badge>
                             ) : null}
                           </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted">
                             <span className="tnum">
                               {formatLeaveUnits(balance.availableBalance)} available
                             </span>
-                            <span>{balance.ledgerEntries} ledger</span>
+                            <span>{balance.ledgerEntries} history</span>
                             <span>{balance.requests} requests</span>
                             {balance.safeToRemove ? (
                               <Badge tone="warning">Safe to remove</Badge>
@@ -1208,8 +1208,8 @@ export function ReconciliationModal({
                   disabled={repairing || selectedIds.length === 0}
                 />
                 <span className="text-xs leading-5 text-ink-secondary">
-                  I understand only the selected empty, non-canonical rows are removed.
-                  Balances with ledger history or leave requests are preserved and need a
+                  I understand only the selected empty, incorrect rows are removed.
+                  Balances with history or leave requests are preserved and need a
                   manual decision.
                 </span>
               </label>

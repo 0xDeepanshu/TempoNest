@@ -32,7 +32,7 @@ const STATUS_LABELS: Record<LeaveRequestStatus, string> = {
 };
 
 const ACCRUAL_LABELS: Record<LeaveAccrualFrequency, string> = {
-  NONE: "No accrual",
+  NONE: "No automatic days",
   MONTHLY: "Monthly",
   QUARTERLY: "Quarterly",
   ANNUAL: "Annual",
@@ -44,7 +44,7 @@ const LEDGER_LABELS: Record<LeaveLedgerEntryKind, string> = {
   CARRY_FORWARD: "Carried-over days",
   ADJUSTMENT: "Days added",
   RESERVATION: "Request submitted",
-  RESERVATION_RELEASE: "Reserved days released",
+  RESERVATION_RELEASE: "Pending days released",
   CONSUMPTION: "Leave approved",
   CONSUMPTION_RESTORE: "Approved leave cancelled",
   EXPIRY: "Days expired",
@@ -68,7 +68,7 @@ const CREDIT_EXPIRY_REASON_LABELS: Record<LeaveCreditExpiryReason, string> = {
   NONE: "No expiry",
   MONTHLY_RESET: "Monthly reset",
   ANNUAL_RESET: "Annual reset",
-  CARRY_FORWARD: "Carry-forward expiry",
+  CARRY_FORWARD: "Carry-over expiry",
 };
 
 const CREDIT_SOURCE_LABELS: Record<LeaveCreditSourceKind, string> = {

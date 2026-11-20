@@ -100,7 +100,7 @@ export function ThemeToggle({ className }: { className?: string }) {
           className={cn(
             "flex h-6 w-6 items-center justify-center rounded-md transition-colors",
             preference === value
-              ? "bg-ink text-on-strong"
+              ? "bg-accent text-accent-ink"
               : "text-muted hover:bg-surface-hover hover:text-ink",
           )}
         >

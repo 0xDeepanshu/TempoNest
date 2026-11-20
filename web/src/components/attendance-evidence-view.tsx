@@ -657,7 +657,7 @@ function AttendanceDetailDialog({
             ref={closeRef}
             type="button"
             onClick={onClose}
-            className="rounded-lg p-2 text-muted transition hover:bg-surface-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            className="rounded-lg p-2 text-muted transition hover:bg-surface-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             aria-label="Close attendance details"
           >
             <CloseIcon className="h-5 w-5" />

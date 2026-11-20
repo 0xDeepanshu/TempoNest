@@ -304,22 +304,21 @@ function BalanceRow({
         </div>
         <div className="text-right">
           <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">
-            Available balance
+            Available days
           </p>
-          <p className={cn("tnum text-lg font-semibold", zero ? "text-danger" : "text-ink")}>
+          <p className={cn("tnum text-2xl font-semibold", zero ? "text-danger" : "text-ink")}>
             {formatLeaveUnits(balance.availableBalance)}
           </p>
         </div>
       </div>
 
-      <dl className="mt-2.5 grid grid-cols-2 gap-1.5 text-[11px] sm:grid-cols-4">
-        <BalanceFigure label="Assigned" value={formatLeaveUnits(assigned)} />
+      <dl className="mt-3 grid grid-cols-2 gap-1.5 text-[11px] sm:grid-cols-3">
         <BalanceFigure
           label="Earned this month"
           value={formatLeaveUnits(balance.credits?.earnedThisMonth ?? 0)}
         />
         <BalanceFigure
-          label="Carried forward"
+          label="Rolled over"
           value={formatLeaveUnits(balance.carriedForwardBalance)}
         />
         <BalanceFigure
@@ -328,17 +327,16 @@ function BalanceRow({
         />
         <BalanceFigure label="Used" value={formatLeaveUnits(balance.approvedConsumed)} />
         <BalanceFigure label="Pending" value={formatLeaveUnits(balance.pendingReserved)} />
-        <BalanceFigure label="Available" value={formatLeaveUnits(balance.availableBalance)} />
         {balance.monthlyUsage?.enabled && balance.monthlyUsage.limit !== null ? (
           <BalanceFigure
-            label="Monthly limit"
+            label="Monthly limit left"
             value={`${formatLeaveUnits(
-              balance.monthlyUsage.total,
+              balance.monthlyUsage.remaining ?? 0,
               false,
-            )} / ${formatLeaveUnits(balance.monthlyUsage.limit, false)}`}
+            )} of ${formatLeaveUnits(balance.monthlyUsage.limit, false)}`}
           />
         ) : (
-          <BalanceFigure label="Monthly limit" value="No limit" />
+          <BalanceFigure label="Monthly limit left" value="No limit" />
         )}
       </dl>
       {balance.credits?.expiringSoon && balance.credits.expiringSoonDate ? (
@@ -749,7 +747,7 @@ function CancelLeaveModal({
         {target.requiresApproval
           ? "A reviewer must approve this cancellation. The leave remains approved until then."
           : target.request.status === "PENDING"
-            ? "The reserved days will be released back to your available balance."
+            ? "The pending days will be released back to your available balance."
             : "The approved days will be restored to your available balance."}
       </p>
       <Field

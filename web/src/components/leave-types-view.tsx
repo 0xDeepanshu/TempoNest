@@ -735,7 +735,7 @@ function TypeFormModal({
           />
           <CheckField
             label="Uses a balance"
-            description="Requests reserve and use days from the employee's balance. You cannot turn this off while requests are open."
+            description="Requests hold and then use days from the employee's balance. You cannot turn this off while requests are open."
             checked={form.requiresBalance}
             onChange={(value) => update("requiresBalance", value)}
           />
@@ -926,18 +926,18 @@ function PolicyFormModal({
     const day = Number(form.balancePeriodStartDay);
 
     const amounts: Array<{ label: string; value: number }> = [
-      { label: "Initial entitlement", value: initialEntitlement },
-      { label: "Accrual amount", value: accrualAmount },
-      { label: "Carry-forward allowance", value: carryForwardAllowance },
+      { label: "Starting days", value: initialEntitlement },
+      { label: "Days added each time", value: accrualAmount },
+      { label: "Max days carried over", value: carryForwardAllowance },
       ...(maxBalance === null
         ? []
-        : [{ label: "Maximum balance", value: maxBalance }]),
+        : [{ label: "Max balance", value: maxBalance }]),
       ...(maxCreditsPerApplication === null
         ? []
-        : [{ label: "Maximum credits per application", value: maxCreditsPerApplication }]),
+        : [{ label: "Max days per request", value: maxCreditsPerApplication }]),
       ...(monthlyUsageLimit === null
         ? []
-        : [{ label: "Monthly usage limit", value: monthlyUsageLimit }]),
+        : [{ label: "Max days per month", value: monthlyUsageLimit }]),
     ];
     for (const { label, value } of amounts) {
       if (!Number.isFinite(value) || value < 0 || value > 3650) {
@@ -947,13 +947,13 @@ function PolicyFormModal({
     }
     if (form.carryForwardEnabled && carryForwardAllowance <= 0) {
       setFormError(
-        "Enter a carry-forward allowance greater than zero, or turn carry-forward off.",
+        "Enter a number of days to carry over greater than zero, or turn carry-over off.",
       );
       return;
     }
     if (maxCreditsPerApplication !== null && maxCreditsPerApplication <= 0) {
       setFormError(
-        "Maximum credits per application must be greater than zero, or left blank for no limit.",
+        "Max days per request must be greater than zero, or left blank for no limit.",
       );
       return;
     }
@@ -976,19 +976,19 @@ function PolicyFormModal({
       return;
     }
     if (!Number.isInteger(month) || month < 1 || month > 12) {
-      setFormError("The balance period start month must be between January and December.");
+      setFormError("The period start month must be between January and December.");
       return;
     }
     if (!Number.isInteger(day) || day < 1 || day > 31) {
-      setFormError("The balance period start day must be a whole number from 1 to 31.");
+      setFormError("The period start day must be a whole number from 1 to 31.");
       return;
     }
     if (!Number.isInteger(accrualDayOfMonth) || accrualDayOfMonth < 1 || accrualDayOfMonth > 31) {
-      setFormError("The accrual day of month must be a whole number from 1 to 31.");
+      setFormError("The day of the month must be a whole number from 1 to 31.");
       return;
     }
     if (form.accrualEffectiveFrom && !isDateOnly(form.accrualEffectiveFrom)) {
-      setFormError("The accrual effective date must be a valid date.");
+      setFormError("The start-adding-days date must be a valid date.");
       return;
     }
     if (form.workingDays.length === 0) {
@@ -1115,11 +1115,11 @@ function PolicyFormModal({
           </Alert>
         ) : null}
 
-        <div className="rounded-lg border border-line bg-surface-muted/60 p-3">
+        <div className="rounded-lg border border-accent-soft bg-accent-soft p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
-            Summary
+            In plain English
           </p>
-          <p className="mt-1 text-xs leading-5 text-ink">{summaryText}</p>
+          <p className="mt-1 text-[13px] leading-5 text-ink">{summaryText}</p>
         </div>
 
         <section className="space-y-3" aria-labelledby="leave-policy-amounts">
@@ -1130,8 +1130,8 @@ function PolicyFormModal({
             Leave allocation
           </h3>
           <p className="text-xs leading-5 text-muted">
-            Days granted at the start of each balance period. Owners can also add extra days to
-            one person at any time. 1 day = 1 credit.
+            Days granted at the start of each period. Owners can also add extra days to one
+            person at any time.
           </p>
           <Field
             label="Starting days each period"
@@ -1171,7 +1171,7 @@ function PolicyFormModal({
             <Field
               label="How often days are added"
               htmlFor="leave-policy-frequency"
-              hint="Each scheduled credit is added once its date arrives."
+              hint="Each scheduled batch is added once its date arrives."
             >
               <Select
                 id="leave-policy-frequency"
@@ -1187,59 +1187,65 @@ function PolicyFormModal({
                 ))}
               </Select>
             </Field>
-            <Field
-              label="Days added each time"
-              htmlFor="leave-policy-accrual-amount"
-              hint="How many days are added on each scheduled date."
-            >
-              <Input
-                id="leave-policy-accrual-amount"
-                type="number"
-                min={0}
-                max={3650}
-                step="any"
-                value={form.accrualAmount}
-                disabled={form.accrualFrequency === "NONE"}
-                onChange={(event) => update("accrualAmount", event.target.value)}
-              />
-            </Field>
-            <Field
-              label="Day of the month"
-              htmlFor="leave-policy-accrual-day"
-              hint="Which day of the month to add them, in the organization's timezone."
-            >
-              <Input
-                id="leave-policy-accrual-day"
-                type="number"
-                min={1}
-                max={31}
-                step={1}
-                value={form.accrualDayOfMonth}
-                disabled={form.accrualFrequency === "NONE"}
-                onChange={(event) => update("accrualDayOfMonth", event.target.value)}
-              />
-            </Field>
-            <Field
-              label="Start adding days from"
-              htmlFor="leave-policy-accrual-effective"
-              hint="Nothing is added before this date. Leave blank to start today."
-            >
-              <Input
-                id="leave-policy-accrual-effective"
-                type="date"
-                value={form.accrualEffectiveFrom}
-                disabled={form.accrualFrequency === "NONE"}
-                onChange={(event) => update("accrualEffectiveFrom", event.target.value)}
-              />
-            </Field>
+            {form.accrualFrequency !== "NONE" ? (
+              <>
+                <Field
+                  label="Days added each time"
+                  htmlFor="leave-policy-accrual-amount"
+                  hint="How many days are added on each scheduled date."
+                >
+                  <Input
+                    id="leave-policy-accrual-amount"
+                    type="number"
+                    min={0}
+                    max={3650}
+                    step="any"
+                    value={form.accrualAmount}
+                    onChange={(event) => update("accrualAmount", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label="Day of the month"
+                  htmlFor="leave-policy-accrual-day"
+                  hint="Which day of the month to add them, in the organization's timezone."
+                >
+                  <Input
+                    id="leave-policy-accrual-day"
+                    type="number"
+                    min={1}
+                    max={31}
+                    step={1}
+                    value={form.accrualDayOfMonth}
+                    onChange={(event) => update("accrualDayOfMonth", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label="Start adding days from"
+                  htmlFor="leave-policy-accrual-effective"
+                  hint="Nothing is added before this date. Leave blank to start today."
+                >
+                  <Input
+                    id="leave-policy-accrual-effective"
+                    type="date"
+                    value={form.accrualEffectiveFrom}
+                    onChange={(event) => update("accrualEffectiveFrom", event.target.value)}
+                  />
+                </Field>
+              </>
+            ) : null}
           </div>
-          <CheckField
-            label="Prorate the first month"
-            description="Someone who joined part-way through the month gets a share of it."
-            checked={form.accrualFrequency !== "NONE" && form.prorateAccrual}
-            disabled={form.accrualFrequency === "NONE"}
-            onChange={(value) => update("prorateAccrual", value)}
-          />
+          {form.accrualFrequency !== "NONE" ? (
+            <CheckField
+              label="Prorate the first month"
+              description="Someone who joined part-way through the month gets a share of it."
+              checked={form.prorateAccrual}
+              onChange={(value) => update("prorateAccrual", value)}
+            />
+          ) : (
+            <p className="text-[11px] text-muted">
+              Days are only added when you add them yourself.
+            </p>
+          )}
         </section>
 
         <section className="space-y-3" aria-labelledby="leave-policy-usage">
@@ -1275,22 +1281,23 @@ function PolicyFormModal({
                 onChange={(event) => update("maxCreditsPerApplication", event.target.value)}
               />
             </Field>
-            <Field
-              label="Max days per month"
-              htmlFor="leave-policy-monthly-limit"
-              hint="Counts pending and approved leave. A request that spans two months is checked against each one."
-            >
-              <Input
-                id="leave-policy-monthly-limit"
-                type="number"
-                min={0}
-                max={3650}
-                step="any"
-                value={form.monthlyUsageLimit}
-                disabled={!form.monthlyUsageLimitEnabled}
-                onChange={(event) => update("monthlyUsageLimit", event.target.value)}
-              />
-            </Field>
+            {form.monthlyUsageLimitEnabled ? (
+              <Field
+                label="Max days per month"
+                htmlFor="leave-policy-monthly-limit"
+                hint="Counts pending and approved leave. A request that spans two months is checked against each one."
+              >
+                <Input
+                  id="leave-policy-monthly-limit"
+                  type="number"
+                  min={0}
+                  max={3650}
+                  step="any"
+                  value={form.monthlyUsageLimit}
+                  onChange={(event) => update("monthlyUsageLimit", event.target.value)}
+                />
+              </Field>
+            ) : null}
           </div>
           <p className="text-[11px] text-muted">
             Half days count as 0.5.{" "}
@@ -1316,70 +1323,74 @@ function PolicyFormModal({
             checked={form.carryForwardEnabled}
             onChange={(value) => update("carryForwardEnabled", value)}
           />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field
-              label="Max days carried over"
-              htmlFor="leave-policy-carry"
-              hint="The most that can move into the next period."
-            >
-              <Input
-                id="leave-policy-carry"
-                type="number"
-                min={0}
-                max={3650}
-                step="any"
-                value={form.carryForwardAllowance}
-                disabled={!form.carryForwardEnabled}
-                onChange={(event) => update("carryForwardAllowance", event.target.value)}
-              />
-            </Field>
-            <Field
-              label="Carried days expire after"
-              htmlFor="leave-policy-carry-expiry"
-              hint="How long carried-over days stay usable. Choose no expiry to keep them."
-            >
-              <Select
-                id="leave-policy-carry-expiry"
-                value={form.carryForwardExpiryMonths}
-                disabled={!form.carryForwardEnabled}
-                onChange={(event) =>
-                  update("carryForwardExpiryMonths", event.target.value)
-                }
+          {form.carryForwardEnabled ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field
+                  label="Max days carried over"
+                  htmlFor="leave-policy-carry"
+                  hint="The most that can move into the next period."
+                >
+                  <Input
+                    id="leave-policy-carry"
+                    type="number"
+                    min={0}
+                    max={3650}
+                    step="any"
+                    value={form.carryForwardAllowance}
+                    onChange={(event) => update("carryForwardAllowance", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label="Carried days expire after"
+                  htmlFor="leave-policy-carry-expiry"
+                  hint="How long carried-over days stay usable. Choose no expiry to keep them."
+                >
+                  <Select
+                    id="leave-policy-carry-expiry"
+                    value={form.carryForwardExpiryMonths}
+                    onChange={(event) =>
+                      update("carryForwardExpiryMonths", event.target.value)
+                    }
+                  >
+                    {EXPIRY_MONTH_OPTIONS.map((option) => (
+                      <option key={option.value || "none"} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              <Field
+                label="Days used first"
+                htmlFor="leave-policy-carry-order"
+                hint="Which days get used when someone takes leave."
               >
-                {EXPIRY_MONTH_OPTIONS.map((option) => (
-                  <option key={option.value || "none"} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <Field
-            label="Days used first"
-            htmlFor="leave-policy-carry-order"
-            hint="Which days get used when someone takes leave."
-          >
-            <Select
-              id="leave-policy-carry-order"
-              value={form.carryForwardOrder}
-              onChange={(event) =>
-                update("carryForwardOrder", event.target.value as LeaveCarryForwardOrder)
-              }
-            >
-              {LEAVE_CARRY_FORWARD_ORDERS.map((order) => (
-                <option key={order} value={order}>
-                  {carryForwardOrderLabel(order)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <p className="text-[11px] text-muted">
-            {form.carryForwardEnabled
-              ? summaryExpiry
-                ? `Carried days expire ${summaryExpiry} month${summaryExpiry === 1 ? "" : "s"} after they move over. Expired days stay in the history.`
-                : "Carried days do not expire."
-              : "Nothing carries over, so nothing expires at reset."}
-          </p>
+                <Select
+                  id="leave-policy-carry-order"
+                  value={form.carryForwardOrder}
+                  onChange={(event) =>
+                    update("carryForwardOrder", event.target.value as LeaveCarryForwardOrder)
+                  }
+                >
+                  {LEAVE_CARRY_FORWARD_ORDERS.map((order) => (
+                    <option key={order} value={order}>
+                      {carryForwardOrderLabel(order)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <p className="text-[11px] text-muted">
+                {summaryExpiry
+                  ? `Carried days expire ${summaryExpiry} month${summaryExpiry === 1 ? "" : "s"} after they move over. Expired days stay in the history.`
+                  : "Carried days do not expire."}
+              </p>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted">
+              Unused days are cleared at reset and nothing expires.
+            </p>
+          )}
         </section>
 
         <section className="space-y-3" aria-labelledby="leave-policy-period">

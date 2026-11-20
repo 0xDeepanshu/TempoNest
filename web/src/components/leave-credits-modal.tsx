@@ -390,7 +390,7 @@ export function LeaveCreditsModal({
               <Field
                 label="Effective date"
                 htmlFor="leave-credits-effective"
-                hint="Optional. Uses the balance period that contains this date; blank uses today."
+                hint="Optional. Uses the period that contains this date; blank uses today."
               >
                 <Input
                   id="leave-credits-effective"

@@ -68,7 +68,7 @@ export function LeaveTabs({ current }: { current: LeaveTab }) {
               className={cn(
                 "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
                 active
-                  ? "bg-ink text-on-strong"
+                  ? "bg-accent-soft text-accent-soft-ink"
                   : "text-muted hover:bg-surface-muted hover:text-ink",
               )}
             >

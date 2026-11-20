@@ -151,7 +151,7 @@ const ENTRIES: Array<Omit<PermissionCatalogEntry, 'grantableToCustomRole' | 'gra
   {
     id: 'screenshot:request',
     group: 'monitoring',
-    label: 'Request screenshots',
+    label: 'View screenshots',
     description: 'Request screenshots from an employee device.',
   },
   {

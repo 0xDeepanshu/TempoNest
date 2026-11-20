@@ -3,7 +3,6 @@
 import { hasPermission } from "@/lib/permissions";
 import { ActivitySettingsView } from "./activity-settings-view";
 import { MonitoringSettingsView } from "./monitoring-settings-view";
-import { SettingsSubNav, SettingsTabs } from "./settings-tabs";
 import { Alert, PageHeader } from "./ui";
 import { NoOrganization, useWorkspace } from "./workspace";
 
@@ -35,35 +34,13 @@ export function MonitoringSettingsHub({
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow={organization.name}
         title="Monitoring"
         description="Choose what WorkZen may capture, how long it is kept, and who can review it."
       />
 
-      <SettingsTabs current="monitoring" />
-
-      <SettingsSubNav
-        label="Monitoring settings"
-        current={activeSection}
-        items={[
-          {
-            value: "screenshots",
-            label: "Screenshots",
-            href: "/settings/monitoring",
-            visible: canManageScreenshots,
-          },
-          {
-            value: "tracking",
-            label: "App tracking",
-            href: "/settings/monitoring/tracking",
-            visible: canReadTracking,
-          },
-        ]}
-      />
-
-      <Alert tone="info" title="Global defaults">
-        These rules apply to everyone in the organization. Per-employee capture schedules are
-        managed from Scheduled screenshots, and live activity is reviewed from Monitoring.
+      <Alert tone="info" title="Organization-wide rules">
+        These defaults apply to everyone in {organization.name}. Individual screenshot schedules
+        are set on each employee&apos;s profile, and live activity is reviewed in Monitoring.
       </Alert>
 
       {activeSection === "screenshots" ? (

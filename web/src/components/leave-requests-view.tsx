@@ -436,7 +436,7 @@ function RequestCard({
     <button
       type="button"
       onClick={onOpen}
-      className="block w-full px-4 py-3 text-left transition hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink"
+      className="block w-full px-4 py-3 text-left transition hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
@@ -894,12 +894,12 @@ function RequestDetailModal({
                 <BalanceFigure
                   label="Available balance"
                   value={balance.availableBalance}
-                  hint="After this request's reservation"
+                  hint="After this request is taken into account"
                 />
                 <BalanceFigure
                   label="Pending approval"
                   value={balance.pendingReserved}
-                  hint="Reserved by pending requests, including this one when pending"
+                  hint="Held by pending requests, including this one when pending"
                 />
                 <BalanceFigure
                   label="Approved consumed"
@@ -941,7 +941,7 @@ function RequestDetailModal({
             </h3>
             <p className="mt-0.5 text-xs leading-5 text-muted">
               {actionMode === "approve"
-                ? "Optionally add a note for the employee. Balance reservations become consumed on approval."
+                ? "Optionally add a note for the employee. Pending days become used once approved."
                 : actionMode === "reject"
                   ? "Explain why this request is being rejected. Pending balance is released."
                   : actionMode === "decline-cancellation"

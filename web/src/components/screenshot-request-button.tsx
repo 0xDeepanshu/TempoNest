@@ -89,7 +89,7 @@ export function ScreenshotRequestButton({
           ? "Requesting…"
           : state === "sent"
             ? "Request pending"
-            : "Request screenshot"}
+            : "View screenshot"}
         {employeeName ? <span className="sr-only"> for {employeeName}</span> : null}
       </Button>
       {disabled && disabledReason ? (

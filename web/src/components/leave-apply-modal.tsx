@@ -315,7 +315,7 @@ export function LeaveApplyModal({
       open
       onClose={onClose}
       title="Apply for leave"
-      description="Your request starts as pending. Units and balance checks are calculated by the server."
+      description="Your request starts as pending. WorkZen checks the dates and your available days before it is saved."
       size="lg"
       dismissible={!submitting}
       footer={
@@ -455,6 +455,16 @@ export function LeaveApplyModal({
 
         {selectedType ? (
           <div className="rounded-lg border border-line px-3 py-2.5">
+            {selectedType.requiresBalance ? (
+              <div className="mb-3 flex items-baseline justify-between gap-3 rounded-lg border border-accent-soft bg-accent-soft px-3 py-2">
+                <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
+                  Available days
+                </span>
+                <span className="tnum text-lg font-semibold text-ink">
+                  {balance ? formatLeaveUnits(balance.availableBalance) : "—"}
+                </span>
+              </div>
+            ) : null}
             <dl className="grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
               <div className="flex items-center justify-between gap-2">
                 <dt className="text-muted">
@@ -576,8 +586,8 @@ export function LeaveApplyModal({
         ) : null}
 
         <p className="text-[11px] leading-4 text-muted">
-          Requests spanning two balance periods, overlapping leave, or exceeding the balance
-          are rejected by the server. Review your{" "}
+          Requests that span two periods, overlap other leave, or use more days than you have
+          are rejected. Review your{" "}
           {endDate ? `${formatDay(startDate)} – ${formatDay(endDate)}` : "selected dates"} before
           submitting.
         </p>

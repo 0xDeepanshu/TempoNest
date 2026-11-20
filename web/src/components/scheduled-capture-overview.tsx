@@ -5,6 +5,7 @@ import { formatDateTime } from "@/lib/format";
 import type { ScheduledCaptureOverviewResponse } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { CameraIcon } from "./icons";
+import { ScreenshotSectionTabs } from "./screenshot-tabs";
 import {
   Badge,
   Card,
@@ -69,6 +70,8 @@ export function ScheduledCaptureOverviewView() {
         title="Scheduled screenshots"
         description="Who has automatic screenshots on, and how often they are taken."
       />
+
+      <ScreenshotSectionTabs />
 
       {overview.loading && !overview.data ? (
         <Card>

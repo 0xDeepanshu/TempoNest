@@ -25,7 +25,6 @@ import { useApi } from "@/lib/use-api";
 import { ConfirmDialog } from "./confirm-dialog";
 import { KeyIcon, PlusIcon, SearchIcon, UsersIcon } from "./icons";
 import { Modal } from "./modal";
-import { SettingsTabs } from "./settings-tabs";
 import {
   Alert,
   Badge,
@@ -508,7 +507,7 @@ function RoleEditorModal({
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search permissions"
-                  className="h-8 w-56 rounded-lg border border-line bg-surface pl-8 pr-2 text-xs text-ink outline-none transition focus:border-ink focus:ring-2 focus:ring-ink/10"
+                  className="h-8 w-56 rounded-lg border border-line bg-surface pl-8 pr-2 text-xs text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/25"
                 />
               </div>
             </div>
@@ -842,7 +841,6 @@ export function RolesView() {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow={organization.name}
         title="Roles & permissions"
         description="Decide what each role can see and do. Built-in roles stay protected; you can adjust Manager and add your own roles."
         actions={
@@ -854,8 +852,6 @@ export function RolesView() {
           ) : null
         }
       />
-
-      <SettingsTabs current="roles" />
 
       {notice ? (
         <Alert tone="success">
@@ -885,7 +881,7 @@ export function RolesView() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search roles"
-                className="h-8 w-56 rounded-lg border border-line bg-surface pl-8 pr-2 text-xs text-ink outline-none transition focus:border-ink focus:ring-2 focus:ring-ink/10"
+                className="h-8 w-56 rounded-lg border border-line bg-surface pl-8 pr-2 text-xs text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/25"
               />
             </div>
           }
