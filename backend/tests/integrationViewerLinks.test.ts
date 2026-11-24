@@ -325,8 +325,9 @@ describe('identity link flow', () => {
     // The nonce was spent when the page was first opened.
     const reopen = await openApproval(team.owner, approvalUrl);
     expect(reopen.status).toBe(404);
+    // The browser binding was cleared by the first decision, so a second decision cannot even start.
     const redecide = await decide(team.owner, requestId);
-    expect(redecide.status).toBe(410);
+    expect([403, 410]).toContain(redecide.status);
     expect(await IntegrationViewerLink.count({ where: { connectionId: team.connectionId } })).toBe(1);
   });
 

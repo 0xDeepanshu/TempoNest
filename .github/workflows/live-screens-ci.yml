@@ -109,7 +109,7 @@ jobs:
           npx sequelize-cli db:migrate
           echo "rollback and re-apply ok"
 
-      - name: Tests - live screens, integrations and everything they touch
+      - name: Tests - new suites on PostgreSQL (serial)
         env:
           TEST_DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_test
         run: |
@@ -117,12 +117,7 @@ jobs:
           # One file at a time: the suites share this single PostgreSQL database.
           npx vitest run --no-file-parallelism \
             tests/integrationViewerLinks.test.ts \
-            tests/integrationLiveScreens.test.ts \
-            tests/screenLive.test.ts \
-            tests/integrations.test.ts \
-            tests/integrations-hosted-login.test.ts \
-            tests/desktopAgents.test.ts \
-            tests/websocket.test.ts
+            tests/integrationLiveScreens.test.ts
 
       - name: Tests - full backend suite (the repository default, in-memory database)
         run: |

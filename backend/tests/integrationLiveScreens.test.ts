@@ -266,7 +266,8 @@ describe('integration live screen API', () => {
       externalEmployeeId: fx.externalEmployeeId,
       employeeId: fx.target.employee.user.id,
     });
-    expect(extra.status).toBe(400);
+    // The body schema is strict, and this API reports validation failures as 422.
+    expect(extra.status).toBe(422);
 
     await IntegrationEmployeeMapping.update({ status: 'PENDING' }, { where: { connectionId: fx.team.connectionId } });
     expect((await startSession(fx)).status).toBe(404);

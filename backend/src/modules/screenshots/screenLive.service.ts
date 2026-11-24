@@ -292,6 +292,14 @@ export async function startScreenLiveSession(options: {
   });
   if (existing && isActiveScreenLiveSession(existing, now)) {
     if (await isSessionTargetStillEligible(existing, now)) {
+      // Never hand an integration viewer a native session (it has no employee indicator), nor an
+      // owner an integration session. Each kind only ever reuses its own.
+      if (!sessionBelongsTo(existing, options.integration)) {
+        throw AppError.conflict(
+          'A live screen session is already running for this employee',
+          'SCREEN_LIVE_SESSION_IN_USE',
+        );
+      }
       const delivery = await deliverStartToAgent(existing);
       return {
         session: toScreenLiveSessionSummary(existing),
