@@ -197,6 +197,8 @@ jobs:
       - name: Typecheck
         run: |
           exec > >(tee "$RUNNER_TEMP/web-typecheck.log") 2>&1
+          # Next generates the route prop types (LayoutProps, PageProps) that the app uses.
+          npx next typegen
           npm run typecheck
       - name: Annotate failures
         if: failure()

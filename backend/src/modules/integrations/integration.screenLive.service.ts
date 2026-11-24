@@ -17,6 +17,7 @@ import {
 } from '../screenshots/screenLive.service';
 import { isHeartbeatFresh } from '../timeTracking/timeSession.mapper';
 import type { IntegrationContext } from '../../types/express';
+import type { ScreenLiveSession as ScreenLiveSessionModel } from '../screenshots/screenLiveSession.model';
 import { resolveVerifiedViewer } from './integration.viewerLink.service';
 
 /**
@@ -92,7 +93,7 @@ async function loadOwnedSession(options: {
   linkId: string;
   organizationId: string;
   sessionId: string;
-}): Promise<ScreenLiveSession> {
+}): Promise<ScreenLiveSessionModel> {
   const session = await ScreenLiveSession.findOne({
     where: {
       id: options.sessionId,
@@ -109,7 +110,7 @@ async function loadOwnedSession(options: {
   return session;
 }
 
-function sessionView(session: ScreenLiveSession, externalEmployeeId: string | null) {
+function sessionView(session: ScreenLiveSessionModel, externalEmployeeId: string | null) {
   return {
     id: session.id,
     status: session.status,

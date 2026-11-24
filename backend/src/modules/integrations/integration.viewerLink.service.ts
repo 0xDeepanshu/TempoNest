@@ -19,6 +19,13 @@ import { terminateActiveScreenLiveSessionsForIntegration } from '../screenshots/
 import { getOrCreateScreenshotPolicy } from '../screenshots/screenshotPolicy.service';
 import { hashIntegrationValue, verifyPkceChallenge } from './integration.crypto';
 import type { IntegrationContext } from '../../types/express';
+import type { Membership as MembershipModel } from '../memberships/membership.model';
+import type { Organization as OrganizationModel } from '../organizations/organization.model';
+import type { IntegrationConnection as IntegrationConnectionModel } from './integrationConnection.model';
+import type {
+  IntegrationViewerLink as IntegrationViewerLinkModel,
+  IntegrationViewerLinkRequest as IntegrationViewerLinkRequestModel,
+} from './integrationViewerLink.model';
 
 /** The approval link is short-lived and single-use. Completing the link must also happen inside it. */
 export const VIEWER_LINK_REQUEST_TTL_SECONDS = 10 * 60;
@@ -46,7 +53,7 @@ export async function assertEligibleLinkOwner(options: {
   userId: string;
   organizationId: string;
   transaction?: Transaction;
-}): Promise<{ membership: Membership; organization: Organization }> {
+}): Promise<{ membership: MembershipModel; organization: OrganizationModel }> {
   const { userId, organizationId, transaction } = options;
   const membership = await Membership.findOne({
     where: { userId, organizationId, status: 'ACTIVE' },
@@ -92,7 +99,7 @@ export async function assertEligibleLinkOwner(options: {
 async function assertConnectionAllowsLiveScreens(
   connectionId: string,
   transaction?: Transaction,
-): Promise<IntegrationConnection> {
+): Promise<IntegrationConnectionModel> {
   const connection = await IntegrationConnection.findByPk(connectionId, {
     include: [
       { model: IntegrationClient, as: 'client', required: true },
@@ -134,7 +141,7 @@ export type ViewerLinkView = {
   workzenUser: { id: string; name: string } | null;
 };
 
-async function toLinkView(link: IntegrationViewerLink): Promise<ViewerLinkView> {
+async function toLinkView(link: IntegrationViewerLinkModel): Promise<ViewerLinkView> {
   const user = await User.findByPk(link.workzenUserId, { attributes: ['id', 'name'] });
   return {
     id: link.id,
@@ -269,7 +276,7 @@ export async function createViewerLinkRequest(options: {
 }
 
 export type ApprovalPageData = {
-  request: IntegrationViewerLinkRequest;
+  request: IntegrationViewerLinkRequestModel;
   workzenOrganizationName: string;
   clientName: string;
   externalOrganizationId: string;
@@ -310,7 +317,7 @@ export async function openViewerLinkRequest(options: {
 }
 
 async function assertRequestPending(
-  request: IntegrationViewerLinkRequest,
+  request: IntegrationViewerLinkRequestModel,
   transaction?: Transaction,
 ): Promise<void> {
   if (request.status === 'PENDING' && request.expiresAt.getTime() <= Date.now()) {
@@ -345,7 +352,7 @@ export async function loadApprovalContext(options: {
   };
 }
 
-function assertBinding(request: IntegrationViewerLinkRequest, rawBinding: string | undefined): void {
+function assertBinding(request: IntegrationViewerLinkRequestModel, rawBinding: string | undefined): void {
   if (
     !rawBinding ||
     !request.browserBindingHash ||
@@ -599,7 +606,7 @@ export async function resolveVerifiedViewer(options: {
   connectionId: string;
   externalUserId: string;
   context?: AuditContext;
-}): Promise<{ link: IntegrationViewerLink; membership: Membership; organization: Organization }> {
+}): Promise<{ link: IntegrationViewerLinkModel; membership: MembershipModel; organization: OrganizationModel }> {
   const link = await IntegrationViewerLink.findOne({
     where: {
       connectionId: options.connectionId,
@@ -635,7 +642,7 @@ export async function resolveVerifiedViewer(options: {
 }
 
 async function revokeLinkRow(options: {
-  link: IntegrationViewerLink;
+  link: IntegrationViewerLinkModel;
   reason: Reason;
   revokedByUserId: string | null;
   transaction: Transaction;
