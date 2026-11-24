@@ -24,6 +24,10 @@ export const INTEGRATION_SCOPES = [
   // additional WorkZen business data. It is optional and separate from the two
   // read scopes above.
   'webhooks:manage',
+  // Live screen viewing on behalf of a verified, linked WorkZen Owner. Deliberately NOT part of
+  // INTEGRATION_READ_SCOPES, and only an organisation OWNER may approve a connection that grants it.
+  // Every call additionally needs an active viewer link (see integrationViewerLink.model.ts).
+  'screens:live',
 ] as const;
 export type IntegrationScope = (typeof INTEGRATION_SCOPES)[number];
 
@@ -48,7 +52,29 @@ export const INTEGRATION_SCOPE_DESCRIPTIONS: Record<IntegrationScope, string> = 
     'Read attendance correction request history (type, requested times, reason, status) for one explicitly mapped employee. Never exposes evidence files or another employee’s requests, and never allows submitting, approving or rejecting a correction.',
   'webhooks:manage':
     'Create, update, rotate and inspect this integration’s webhook subscriptions and delivery logs.',
+  'screens:live':
+    'Let a linked WorkZen Owner view the live screen of one explicitly mapped employee while that employee is tracking time. The employee sees an on-screen indicator for as long as the screen is viewed, and every view is audited against the Owner who started it.',
 };
+
+/** The scope that only an organisation OWNER may grant. */
+export const INTEGRATION_OWNER_ONLY_SCOPES: readonly IntegrationScope[] = ['screens:live'];
+
+export const INTEGRATION_VIEWER_LINK_STATUSES = ['ACTIVE', 'REVOKED'] as const;
+export type IntegrationViewerLinkStatus = (typeof INTEGRATION_VIEWER_LINK_STATUSES)[number];
+
+export const INTEGRATION_VIEWER_LINK_REQUEST_STATUSES = [
+  'PENDING',
+  'APPROVED',
+  'DENIED',
+  'EXPIRED',
+  'CONSUMED',
+] as const;
+export type IntegrationViewerLinkRequestStatus =
+  (typeof INTEGRATION_VIEWER_LINK_REQUEST_STATUSES)[number];
+
+/** Who started a live screen session. WORKZEN is the existing in-product flow. */
+export const SCREEN_LIVE_ORIGINS = ['WORKZEN', 'INTEGRATION'] as const;
+export type ScreenLiveOrigin = (typeof SCREEN_LIVE_ORIGINS)[number];
 
 export const INTEGRATION_CLIENT_STATUSES = ['ACTIVE', 'DISABLED'] as const;
 export type IntegrationClientStatus = (typeof INTEGRATION_CLIENT_STATUSES)[number];

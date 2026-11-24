@@ -5,6 +5,8 @@ type Connection = {
   organizationId: string;
   userId: string;
   agentId: string;
+  /** Capabilities the agent advertised on this connection. */
+  capabilities?: ReadonlySet<string>;
 };
 
 /**
@@ -31,6 +33,17 @@ export class AgentHub {
     if (!set) return;
     set.delete(ws);
     if (set.size === 0) this.connections.delete(connection.agentId);
+  }
+
+  /** True only while a live connection of this agent advertises the capability. */
+  agentHasCapability(agentId: string, capability: string): boolean {
+    const set = this.connections.get(agentId);
+    if (!set) return false;
+    for (const ws of set) {
+      if (ws.readyState !== 1) continue;
+      if (this.metadata.get(ws)?.capabilities?.has(capability)) return true;
+    }
+    return false;
   }
 
   countForAgent(agentId: string): number {

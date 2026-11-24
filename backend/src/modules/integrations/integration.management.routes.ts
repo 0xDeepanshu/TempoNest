@@ -21,10 +21,15 @@ import {
   updateWebhook,
 } from './integration.management.controller';
 import {
+  listViewerLinksHandler,
+  revokeViewerLinkByManagerHandler,
+} from './integration.viewerLink.controller';
+import {
   createIntegrationMappingSchema,
   createWebhookSubscriptionSchema,
   integrationConnectionListQuerySchema,
   integrationConnectionParamsSchema,
+  integrationViewerLinkManageParamsSchema,
   integrationMappingListQuerySchema,
   integrationMappingParamsSchema,
   resolveIntegrationMappingSchema,
@@ -159,6 +164,21 @@ export function createOrganizationIntegrationRouter(): Router {
     loadOrganizationContext,
     requirePermission('integration:manage'),
     retryDelivery,
+  );
+
+  router.get(
+    '/:organizationId/integrations/viewer-links',
+    ...organizationGuard,
+    listViewerLinksHandler,
+  );
+
+  router.post(
+    '/:organizationId/integrations/viewer-links/:linkId/revoke',
+    requireAuth,
+    validate({ params: integrationViewerLinkManageParamsSchema }),
+    loadOrganizationContext,
+    requirePermission('integration:manage'),
+    revokeViewerLinkByManagerHandler,
   );
 
   return router;

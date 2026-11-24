@@ -14,6 +14,8 @@ export function toScreenLiveSessionSummary(session: ScreenLiveSession) {
     desktopAgentId: session.desktopAgentId,
     timeSessionId: session.timeSessionId,
     startedByUserId: session.startedByUserId,
+    origin: session.origin,
+    indicatorConfirmedAt: session.indicatorConfirmedAt,
     status: session.status,
     startedAt: session.startedAt,
     expiresAt: session.expiresAt,
@@ -51,6 +53,8 @@ export function toScreenLiveStartCommand(session: ScreenLiveSession) {
     maxFrameWidth: config.screenLive.maxFrameWidth,
     maxFrameBytes: config.screenLive.maxFrameBytes,
     streamPath: `${config.apiPrefix}${config.screenLive.agentPath}`,
+    // The agent must show its on-screen indicator, and confirm it, before it may send any frame.
+    requireIndicator: session.origin === 'INTEGRATION',
   };
 }
 
@@ -63,6 +67,7 @@ export function toScreenLivePendingSession(session: ScreenLiveSession) {
     maxFrameWidth: config.screenLive.maxFrameWidth,
     maxFrameBytes: config.screenLive.maxFrameBytes,
     streamPath: `${config.apiPrefix}${config.screenLive.agentPath}`,
+    requireIndicator: session.origin === 'INTEGRATION',
   };
 }
 

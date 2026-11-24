@@ -90,6 +90,8 @@ export const {
   IntegrationAuthorizationCode,
   IntegrationCredential,
   IntegrationEmployeeMapping,
+  IntegrationViewerLinkRequest,
+  IntegrationViewerLink,
   IntegrationWebhookSubscription,
   IntegrationWebhookEvent,
   IntegrationWebhookDelivery,

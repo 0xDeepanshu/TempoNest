@@ -17,6 +17,7 @@ import { AuthManager } from './authManager'
 import { getApiBaseUrl, getWebSocketUrl } from './config'
 import { toUserFacingError } from './errors'
 import { createForegroundAppSource } from './foregroundApp'
+import { LiveIndicatorWindow } from './liveIndicatorWindow'
 import { LiveScreenService } from './liveScreenService'
 import { OfflineQueue } from './offlineQueue'
 import { captureLiveFrame, capturePrimaryScreen } from './screenCapture'
@@ -106,7 +107,8 @@ export class AppRuntime {
         return { accessToken: token, agentId: agent.id, agentKey: agent.key }
       },
       refreshAccessToken: () => this.auth.refreshAccessToken(),
-      capture: captureLiveFrame
+      capture: captureLiveFrame,
+      indicator: new LiveIndicatorWindow()
     })
     this.tracking = new TrackingController({
       auth: this.auth,

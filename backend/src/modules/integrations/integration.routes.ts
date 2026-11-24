@@ -22,6 +22,22 @@ import {
 } from './integration.webhook.controller';
 import { requireIntegrationAuth } from './integrationAuth.middleware';
 import {
+  completeViewerLinkRequestHandler,
+  createViewerLinkRequestHandler,
+  getViewerLinkStatusHandler,
+  revokeViewerLinkHandler,
+} from './integration.viewerLink.controller';
+import { createApiRateLimiter } from '../../middleware/rateLimit';
+import { config } from '../../config/env';
+import {
+  getLiveSessionHandler,
+  issueViewerTicketHandler,
+  listLiveEmployeesHandler,
+  requireLiveScreensEnabled,
+  startLiveSessionHandler,
+  stopLiveSessionHandler,
+} from './integration.screenLive.controller';
+import {
   createWebhookSubscriptionSchema,
   integrationEmployeeListQuerySchema,
   integrationEmployeeMatchBatchSchema,
@@ -36,6 +52,14 @@ import {
   integrationWebhookDeliveryParamsSchema,
   integrationWebhookListQuerySchema,
   integrationWebhookParamsSchema,
+  integrationLiveActorBodySchema,
+  integrationLiveActorQuerySchema,
+  integrationLiveSessionParamsSchema,
+  integrationLiveStartBodySchema,
+  integrationViewerLinkCompleteBodySchema,
+  integrationViewerLinkRequestBodySchema,
+  integrationViewerLinkRequestParamsSchema,
+  integrationViewerLinkUserParamsSchema,
   updateWebhookSubscriptionSchema,
   webhookDeliveryListQuerySchema,
 } from './integration.schemas';
@@ -169,6 +193,92 @@ export function createIntegrationDataRouter(): Router {
     requireIntegrationAuth(['webhooks:manage']),
     validate({ query: webhookDeliveryListQuerySchema }),
     listIntegrationDeliveries,
+  );
+
+  // Live-screen viewer links. They need the dedicated screens:live scope, which attendance-only
+  // connections never hold. The link itself is verified again on every live-screen call.
+  const linkLimiter = config.rateLimit.enabled
+    ? [createApiRateLimiter({ windowMs: 60_000, max: 30 })]
+    : [];
+
+  router.post(
+    '/viewer-links/requests',
+    requireLiveScreensEnabled,
+    requireIntegrationAuth(['screens:live']),
+    ...linkLimiter,
+    validate({ body: integrationViewerLinkRequestBodySchema }),
+    createViewerLinkRequestHandler,
+  );
+
+  router.post(
+    '/viewer-links/requests/:requestId/complete',
+    requireLiveScreensEnabled,
+    requireIntegrationAuth(['screens:live']),
+    ...linkLimiter,
+    validate({ params: integrationViewerLinkRequestParamsSchema }),
+    validate({ body: integrationViewerLinkCompleteBodySchema }),
+    completeViewerLinkRequestHandler,
+  );
+
+  router.get(
+    '/viewer-links/users/:externalUserId',
+    requireIntegrationAuth(['screens:live']),
+    validate({ params: integrationViewerLinkUserParamsSchema }),
+    getViewerLinkStatusHandler,
+  );
+
+  router.delete(
+    '/viewer-links/users/:externalUserId',
+    requireIntegrationAuth(['screens:live']),
+    validate({ params: integrationViewerLinkUserParamsSchema }),
+    revokeViewerLinkHandler,
+  );
+
+  // Live screens. Each call resolves the verified owner behind `externalUserId` again, so none of
+  // them trusts an earlier call. The browser only ever receives a short-lived single-use ticket.
+  const liveLimiter = config.rateLimit.enabled
+    ? [createApiRateLimiter({ windowMs: 60_000, max: 60 })]
+    : [];
+  const liveGuard = [requireLiveScreensEnabled, requireIntegrationAuth(['screens:live'])];
+
+  router.get(
+    '/screen-live/employees',
+    ...liveGuard,
+    validate({ query: integrationLiveActorQuerySchema }),
+    listLiveEmployeesHandler,
+  );
+
+  router.post(
+    '/screen-live/sessions',
+    ...liveGuard,
+    ...liveLimiter,
+    validate({ body: integrationLiveStartBodySchema }),
+    startLiveSessionHandler,
+  );
+
+  router.get(
+    '/screen-live/sessions/:sessionId',
+    ...liveGuard,
+    validate({ params: integrationLiveSessionParamsSchema }),
+    validate({ query: integrationLiveActorQuerySchema }),
+    getLiveSessionHandler,
+  );
+
+  router.post(
+    '/screen-live/sessions/:sessionId/viewer-tickets',
+    ...liveGuard,
+    ...liveLimiter,
+    validate({ params: integrationLiveSessionParamsSchema }),
+    validate({ body: integrationLiveActorBodySchema }),
+    issueViewerTicketHandler,
+  );
+
+  router.post(
+    '/screen-live/sessions/:sessionId/stop',
+    ...liveGuard,
+    validate({ params: integrationLiveSessionParamsSchema }),
+    validate({ body: integrationLiveActorBodySchema }),
+    stopLiveSessionHandler,
   );
 
   router.post(

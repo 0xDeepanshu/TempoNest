@@ -1,3 +1,4 @@
+import { parseAgentCapabilities } from './agentCapabilities';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
@@ -34,6 +35,7 @@ export type AgentConnectionContext = {
   organization: OrganizationModel;
   agent: DesktopAgentModel;
   isAlive: boolean;
+  capabilities: ReadonlySet<string>;
 };
 
 type ConnectionContext = AgentConnectionContext;
@@ -193,6 +195,7 @@ export async function authenticateAgentUpgrade(
     organization: membership.organization,
     agent,
     isAlive: true,
+    capabilities: parseAgentCapabilities(req.headers['x-agent-capabilities']),
   };
 }
 
@@ -365,6 +368,7 @@ function setupConnection(ws: WebSocket, context: ConnectionContext): void {
     organizationId: context.organization.id,
     userId: context.user.id,
     agentId: context.agent.id,
+    capabilities: context.capabilities,
   });
 
   void Promise.all([

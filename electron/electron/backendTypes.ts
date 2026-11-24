@@ -176,6 +176,8 @@ export interface ScreenLiveStartCommand {
   maxFrameWidth: number
   maxFrameBytes: number
   streamPath: string
+  /** When true the agent must show the employee-visible indicator before streaming (see liveScreenService). */
+  requireIndicator?: boolean
 }
 
 /** Re-delivered on agent reconnect so capture can resume after a drop. */
@@ -187,6 +189,7 @@ export interface PendingScreenLiveSession {
   maxFrameWidth: number
   maxFrameBytes: number
   streamPath: string
+  requireIndicator?: boolean
 }
 
 export interface ScreenLiveSocketError {

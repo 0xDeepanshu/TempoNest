@@ -10,6 +10,7 @@ import { agentHub } from './realtime/agentHub';
 import { startScreenshotMaintenance } from './modules/screenshots/screenshot.maintenance';
 import { startScreenshotScheduler } from './modules/screenshots/screenshot.scheduler.maintenance';
 import { startScreenLiveMaintenance } from './modules/screenshots/screenLive.maintenance';
+import { startIntegrationScreenLiveRevalidation } from './modules/screenshots/screenLive.integrationRevalidation';
 import { startAttendanceLocationMaintenance } from './modules/attendance/attendanceLocation.maintenance';
 import { startLeaveAccrualMaintenance } from './modules/leave/leaveAccrual.maintenance';
 import { startActivityMaintenance } from './modules/activity/activity.maintenance';
@@ -89,7 +90,12 @@ async function main(): Promise<void> {
   const wss = attachAgentWebSocketServer(server);
   const relay = attachScreenLiveRelay(server);
   const stopMaintenance = startScreenshotMaintenance();
-  const stopLiveMaintenance = startScreenLiveMaintenance();
+  const stopBaseLiveMaintenance = startScreenLiveMaintenance();
+  const stopIntegrationRevalidation = startIntegrationScreenLiveRevalidation();
+  const stopLiveMaintenance = () => {
+    stopBaseLiveMaintenance();
+    stopIntegrationRevalidation();
+  };
   const stopLocationMaintenance = startAttendanceLocationMaintenance();
   const stopLeaveAccrualMaintenance = startLeaveAccrualMaintenance();
   const stopActivityMaintenance = startActivityMaintenance();

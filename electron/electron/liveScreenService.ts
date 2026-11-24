@@ -22,6 +22,16 @@ const MIN_FRAME_BYTES = 32 * 1024
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 6_000]
 
+const INDICATOR_UNAVAILABLE: ReconnectFailure = {
+  code: 'INDICATOR_UNAVAILABLE',
+  message: 'The on-screen viewing indicator could not be shown, so live viewing was refused.'
+}
+
+const INDICATOR_LOST: ReconnectFailure = {
+  code: 'INDICATOR_LOST',
+  message: 'The on-screen viewing indicator is no longer visible, so live viewing stopped.'
+}
+
 const LOST_CONNECTION: ReconnectFailure = {
   code: 'SCREEN_LIVE_DISCONNECTED',
   message: 'The live screen stream lost its connection.'
@@ -35,10 +45,23 @@ export interface LiveScreenCredentials {
   agentKey: string
 }
 
+/**
+ * The employee-visible "your screen is being viewed" indicator. `show` resolves true only once the
+ * indicator is actually on screen; `isVisible` is checked before every frame; `onLost` fires if the
+ * indicator disappears (window closed or destroyed) while it is needed.
+ */
+export interface LiveIndicator {
+  show: (onLost: () => void) => Promise<boolean>
+  hide: () => void
+  isVisible: () => boolean
+}
+
 export interface LiveScreenServiceOptions {
   getCredentials: () => LiveScreenCredentials | null
   refreshAccessToken: () => Promise<boolean>
   capture: LiveFrameCapture
+  /** Required for sessions that demand an indicator. Without it such sessions are refused. */
+  indicator?: LiveIndicator
   createSocket?: (url: string, headers: Record<string, string>) => WebSocket
   now?: () => number
 }
@@ -84,6 +107,8 @@ interface ActiveCapture {
   maxFps: number
   maxFrameWidth: number
   maxFrameBytes: number
+  requireIndicator: boolean
+  indicatorShown: boolean
   socket: WebSocket | null
   controller: AbortController
   frameTimer: NodeJS.Timeout | null
@@ -99,7 +124,10 @@ interface ActiveCapture {
   lastFrameAt: string | null
 }
 
-type LiveTarget = Omit<PendingScreenLiveSession, 'expiresAt'> & { expiresAt: number }
+type LiveTarget = Omit<PendingScreenLiveSession, 'expiresAt' | 'requireIndicator'> & {
+  expiresAt: number
+  requireIndicator: boolean
+}
 
 function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
@@ -127,6 +155,7 @@ function normalizeTarget(
     timeSessionId,
     expiresAt,
     streamPath,
+    requireIndicator: command.requireIndicator === true,
     maxFps: clampInteger(command.maxFps, MIN_FPS, MAX_FPS, DEFAULT_FPS),
     maxFrameWidth: clampInteger(
       command.maxFrameWidth,
@@ -248,6 +277,7 @@ export class LiveScreenService implements LiveScreenSocketHandler {
       frameTimer: null,
       expiryTimer: null,
       reconnectTimer: null,
+      indicatorShown: false,
       captureBusy: false,
       ready: false,
       stopped: false,
@@ -268,7 +298,33 @@ export class LiveScreenService implements LiveScreenSocketHandler {
     })
 
     this.scheduleExpiry(active)
-    this.connect(active)
+    if (!active.requireIndicator) {
+      this.connect(active)
+      return
+    }
+    // The indicator must be on screen before the stream is even opened. Without one that can be
+    // shown, the session is refused and reported, never captured.
+    const indicator = this.options.indicator
+    if (!indicator) {
+      this.stopActive('FAILED', INDICATOR_UNAVAILABLE)
+      return
+    }
+    void indicator
+      .show(() => {
+        if (this.isCurrent(active)) this.stopActive('FAILED', INDICATOR_LOST)
+      })
+      .then((shown) => {
+        if (!this.isCurrent(active)) return
+        if (!shown || !indicator.isVisible()) {
+          this.stopActive('FAILED', INDICATOR_UNAVAILABLE)
+          return
+        }
+        active.indicatorShown = true
+        this.connect(active)
+      })
+      .catch(() => {
+        if (this.isCurrent(active)) this.stopActive('FAILED', INDICATOR_UNAVAILABLE)
+      })
   }
 
   handleStop(liveSessionId: string, _reason?: string): void {
@@ -328,7 +384,10 @@ export class LiveScreenService implements LiveScreenSocketHandler {
     const headers = {
       Authorization: `Bearer ${credentials.accessToken}`,
       'X-Agent-Id': credentials.agentId,
-      'X-Agent-Key': credentials.agentKey
+      'X-Agent-Key': credentials.agentKey,
+      // States that this build can show the viewing indicator; sessions that require one are refused
+      // by the server without it.
+      'X-Live-Indicator': 'v1'
     }
 
     let socket: WebSocket
@@ -358,6 +417,20 @@ export class LiveScreenService implements LiveScreenSocketHandler {
         return
       }
       if (message.type === 'live.ready') {
+        if (active.requireIndicator) {
+          // Confirm the indicator to the server first. The server forwards nothing until it has this,
+          // and this build sends no frame until it has told the server.
+          if (!active.indicatorShown || !this.options.indicator?.isVisible()) {
+            this.stopActive('FAILED', INDICATOR_UNAVAILABLE)
+            return
+          }
+          try {
+            socket.send(JSON.stringify({ type: 'live.indicator', state: 'visible' }))
+          } catch {
+            this.stopActive('FAILED', LOST_CONNECTION)
+            return
+          }
+        }
         this.startStreaming(active)
         return
       }
@@ -486,6 +559,12 @@ export class LiveScreenService implements LiveScreenSocketHandler {
       return
     }
 
+    // No frame is captured or sent while the indicator is not on screen.
+    if (active.requireIndicator && (!active.indicatorShown || !this.options.indicator?.isVisible())) {
+      this.stopActive('FAILED', INDICATOR_LOST)
+      return
+    }
+
     const socket = active.socket
     if (!socket || socket.readyState !== WebSocket.OPEN) return
     if (active.captureBusy) {
@@ -565,6 +644,18 @@ export class LiveScreenService implements LiveScreenSocketHandler {
 
     const socket = active.socket
     active.socket = null
+    if (active.requireIndicator) {
+      // Tell the server first that the indicator is going away, then remove it. Removal always happens,
+      // whatever the reason capture ended.
+      try {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'live.indicator', state: 'hidden' }))
+        }
+      } catch {
+        // The server also learns from the closed stream.
+      }
+      this.options.indicator?.hide()
+    }
     if (socket) {
       try {
         if (socket.readyState === WebSocket.OPEN) {

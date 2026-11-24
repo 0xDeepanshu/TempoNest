@@ -125,6 +125,11 @@ const envSchema = z
       .default(1_048_576),
     SCREEN_LIVE_AGENT_GRACE_SECONDS: z.coerce.number().int().min(1).max(60).default(10),
     SCREEN_LIVE_VIEWER_GRACE_SECONDS: z.coerce.number().int().min(1).max(60).default(8),
+    // How often every active integration live session is re-authorized, independent of any API call
+    // or socket event. The hard maximum is 15 seconds: revocation reaches a running stream within it.
+    SCREEN_LIVE_INTEGRATION_REVALIDATE_SECONDS: z.coerce.number().int().min(2).max(15).default(10),
+    // How long an integration session may run without the employee's indicator being confirmed.
+    SCREEN_LIVE_INDICATOR_CONFIRM_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(60).default(20),
 
     // Mobile attendance evidence is uploaded to the same private object store
     // as screenshots, but has its own request lifetime and location policy.
@@ -170,6 +175,8 @@ const envSchema = z
     // with the server-side CLI. The integration is read-only and never creates
     // WorkZen users, roles, sessions or attendance records.
     INTEGRATION_ENABLED: booleanFromEnv.default('false'),
+    // Second, independent switch for live screen viewing through integrations. Off unless set.
+    INTEGRATION_LIVE_SCREENS_ENABLED: booleanFromEnv.default('false'),
     INTEGRATION_AUTH_REQUEST_TTL_SECONDS: z.coerce
       .number()
       .int()
@@ -524,6 +531,8 @@ export const config = {
     viewerBufferLimitBytes: env.SCREEN_LIVE_VIEWER_BUFFER_LIMIT_BYTES,
     agentGraceMs: env.SCREEN_LIVE_AGENT_GRACE_SECONDS * 1000,
     viewerGraceMs: env.SCREEN_LIVE_VIEWER_GRACE_SECONDS * 1000,
+    integrationRevalidateMs: env.SCREEN_LIVE_INTEGRATION_REVALIDATE_SECONDS * 1000,
+    indicatorConfirmTimeoutMs: env.SCREEN_LIVE_INDICATOR_CONFIRM_TIMEOUT_SECONDS * 1000,
     viewerPath: '/ws/screen-live',
     agentPath: '/ws/screen-stream',
   },
@@ -545,6 +554,7 @@ export const config = {
   },
   integrations: {
     enabled: env.INTEGRATION_ENABLED,
+    liveScreensEnabled: env.INTEGRATION_LIVE_SCREENS_ENABLED,
     authRequestTtlSeconds: env.INTEGRATION_AUTH_REQUEST_TTL_SECONDS,
     authorizationCodeTtlSeconds: env.INTEGRATION_AUTHORIZATION_CODE_TTL_SECONDS,
     accessTokenTtlSeconds: env.INTEGRATION_ACCESS_TOKEN_TTL_SECONDS,

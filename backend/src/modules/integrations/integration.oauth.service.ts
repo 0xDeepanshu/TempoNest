@@ -24,9 +24,14 @@ import {
   verifyPkceChallenge,
 } from './integration.crypto';
 import {
+  INTEGRATION_OWNER_ONLY_SCOPES,
   INTEGRATION_SCOPES,
   type IntegrationScope,
 } from './integration.constants';
+import {
+  endIntegrationSessionsForConnection,
+  invalidateViewerLinksForConnection,
+} from './integration.viewerLink.service';
 import type {
   IntegrationClient as IntegrationClientModel,
 } from './integrationClient.model';
@@ -231,7 +236,19 @@ export async function approveAuthorizationRequest(options: {
   context?: AuditContext;
 }): Promise<{ redirectUrl: string; code: string }> {
   const { request, userId, organizationId, context } = options;
-  await assertCanManageIntegration(userId, organizationId);
+  const approver = await assertCanManageIntegration(userId, organizationId);
+
+  // Live screens are an owner-only capability. An admin may manage integrations but can never grant
+  // (or be the person who grants) a scope that lets a partner watch employee screens.
+  const ownerOnly = request.scopes.filter((scope) =>
+    INTEGRATION_OWNER_ONLY_SCOPES.includes(scope as IntegrationScope),
+  );
+  if (ownerOnly.length > 0 && approver.role !== 'OWNER') {
+    throw AppError.forbidden(
+      `Only a WorkZen owner can approve this access: ${ownerOnly.join(', ')}`,
+      'OWNER_REQUIRED_FOR_SCOPE',
+    );
+  }
 
   const code = generateOpaqueToken();
   const now = new Date();
@@ -499,6 +516,8 @@ export async function exchangeAuthorizationCode(input: {
         { revokedAt: now, revokedReason: 'REAUTHORIZED' },
         { where: { connectionId: existing.id, revokedAt: null }, transaction },
       );
+      // Viewer links were approved against the previous grant. A new grant starts without any.
+      await invalidateViewerLinksForConnection({ connectionId: existing.id, transaction });
 
       await existing.update(
         {
@@ -612,6 +631,7 @@ export async function rotateRefreshToken(input: {
       { connectionId: credential.connectionId, reason: 'REFRESH_TOKEN_REUSE', trigger: 'refresh_token_reuse', clientId: client.clientId },
       transaction,
     ));
+    await endIntegrationSessionsForConnection(credential.connectionId);
     throw AppError.unauthorized('Refresh token reuse detected', 'REFRESH_TOKEN_REUSED');
   }
 
@@ -707,6 +727,8 @@ export async function revokeIntegrationToken(input: {
       transaction,
     );
   });
+  // Live sessions started through this connection end as soon as the revocation has committed.
+  await endIntegrationSessionsForConnection(credential.connectionId);
 }
 
 /**
@@ -725,6 +747,7 @@ async function closeConnectionAfterRevocation(
     { revokedAt: now, revokedReason: options.reason },
     { where: { connectionId: options.connectionId, revokedAt: null }, transaction },
   );
+  await invalidateViewerLinksForConnection({ connectionId: options.connectionId, transaction });
   if (!connection || connection.status === 'REVOKED') return;
 
   await IntegrationWebhookSubscription.update(

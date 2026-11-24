@@ -8,6 +8,10 @@ import {
   TimeSession,
   User,
   sequelize,
+  IntegrationClient,
+  IntegrationConnection,
+  IntegrationCredential,
+  IntegrationViewerLink,
 } from '../../database';
 import { config } from '../../config/env';
 import { logger } from '../../config/logger';
@@ -15,6 +19,7 @@ import { generateOpaqueToken, hashOpaqueToken } from '../../utils/crypto';
 import { AppError } from '../../utils/errors';
 import { serializeByKey } from '../../utils/serialize';
 import { agentHub } from '../../realtime/agentHub';
+import { LIVE_INDICATOR_CAPABILITY } from '../../realtime/agentCapabilities';
 import { isAgentOnline } from '../desktopAgents/desktopAgent.mapper';
 import { hasPermission } from '../memberships/permissions';
 import type { Role } from '../memberships/roles';
@@ -235,11 +240,21 @@ async function deliverStartToAgent(
  * session only produces a command for the desktop agent; no capture is
  * considered active until the agent connects to the binary stream endpoint.
  */
+export type IntegrationSessionOrigin = {
+  connectionId: string;
+  viewerLinkId: string;
+  externalOrganizationId: string;
+  externalUserId: string;
+  clientId: string;
+};
+
 export async function startScreenLiveSession(options: {
   organizationId: string;
   employeeId: string;
   actorUserId: string;
   actorRole: Role;
+  /** Set only for sessions started through a verified integration viewer link. */
+  integration?: IntegrationSessionOrigin;
   context?: AuditContext;
 }): Promise<{
   session: ReturnType<typeof toScreenLiveSessionSummary>;
@@ -301,6 +316,22 @@ export async function startScreenLiveSession(options: {
 
         const target = await resolveLiveTarget(organizationId, employeeId, now, transaction);
 
+        // An integration viewer may only watch a screen whose desktop app can show the employee the
+        // on-screen indicator. The capability comes from the agent's live connection, so an app that
+        // is offline, or too old to advertise it, is refused rather than viewed silently.
+        if (
+          options.integration &&
+          !agentHub.agentHasCapability(target.agent.id, LIVE_INDICATOR_CAPABILITY)
+        ) {
+          const online = agentHub.countForAgent(target.agent.id) > 0;
+          throw AppError.conflict(
+            online
+              ? 'The employee desktop app must be updated before their screen can be viewed here'
+              : 'The employee desktop app is not connected',
+            online ? 'SCREEN_LIVE_INDICATOR_UNSUPPORTED' : 'SCREEN_LIVE_AGENT_OFFLINE',
+          );
+        }
+
         // A concurrent request may have created the session while this one was
         // waiting for the employee lock. Reuse it instead of failing.
         const active = await ScreenLiveSession.findOne({
@@ -309,6 +340,14 @@ export async function startScreenLiveSession(options: {
           lock: transaction.LOCK.UPDATE,
         });
         if (active) {
+          // Never attach to a session that belongs to a different kind of viewer: an integration viewer
+          // must not inherit a native session (no indicator) and the reverse.
+          if (!sessionBelongsTo(active, options.integration)) {
+            throw AppError.conflict(
+              'A live screen session is already running for this employee',
+              'SCREEN_LIVE_SESSION_IN_USE',
+            );
+          }
           return { sessionId: active.id, reused: true };
         }
 
@@ -324,6 +363,15 @@ export async function startScreenLiveSession(options: {
             expiresAt: new Date(
               now.getTime() + config.screenLive.maxSessionSeconds * 1000,
             ),
+            ...(options.integration
+              ? {
+                  origin: 'INTEGRATION' as const,
+                  integrationConnectionId: options.integration.connectionId,
+                  integrationViewerLinkId: options.integration.viewerLinkId,
+                  externalOrganizationId: options.integration.externalOrganizationId,
+                  externalUserId: options.integration.externalUserId,
+                }
+              : {}),
           },
           { transaction },
         );
@@ -342,6 +390,18 @@ export async function startScreenLiveSession(options: {
               expiresAt: session.expiresAt.toISOString(),
               maxFps: config.screenLive.maxFps,
               maxFrameWidth: config.screenLive.maxFrameWidth,
+              origin: options.integration ? 'INTEGRATION' : 'WORKZEN',
+              ...(options.integration
+                ? {
+                    viewerUserId: actorUserId,
+                    integrationConnectionId: options.integration.connectionId,
+                    integrationViewerLinkId: options.integration.viewerLinkId,
+                    integrationClientId: options.integration.clientId,
+                    externalOrganizationId: options.integration.externalOrganizationId,
+                    externalUserId: options.integration.externalUserId,
+                    indicatorRequired: true,
+                  }
+                : {}),
             },
           },
           { transaction, context: options.context },
@@ -364,7 +424,7 @@ export async function startScreenLiveSession(options: {
         where: { organizationId, employeeId, status: 'ACTIVE' },
         include: SESSION_INCLUDES,
       });
-      if (raced && isActiveScreenLiveSession(raced, now)) {
+      if (raced && isActiveScreenLiveSession(raced, now) && sessionBelongsTo(raced, options.integration)) {
         const delivery = await deliverStartToAgent(raced);
         return {
           session: toScreenLiveSessionSummary(raced),
@@ -413,6 +473,8 @@ export async function issueScreenLiveViewerTicket(options: {
   sessionId: string;
   actorUserId: string;
   actorRole: Role;
+  /** Set only for integration viewers: the verified link the session must belong to. */
+  integrationViewerLinkId?: string;
   context?: AuditContext;
 }): Promise<{
   ticket: string;
@@ -423,6 +485,19 @@ export async function issueScreenLiveViewerTicket(options: {
 }> {
   const now = new Date();
   const session = await loadScreenLiveSession(options.sessionId, options.organizationId);
+
+  const ticketDenial = integrationTicketDenial(session, options.integrationViewerLinkId);
+  if (ticketDenial) {
+    await auditAccessDenied({
+      organizationId: options.organizationId,
+      sessionId: session.id,
+      actorUserId: options.actorUserId,
+      targetEmployeeId: session.employeeId,
+      reason: ticketDenial.code,
+      context: options.context,
+    });
+    throw ticketDenial;
+  }
 
   const policy = await getOrCreateScreenshotPolicy(options.organizationId);
   try {
@@ -588,6 +663,30 @@ export async function consumeScreenLiveViewerTicket(
     );
   }
 
+  if (session.origin === 'INTEGRATION') {
+    // No viewer may join an integration session until the employee's indicator is confirmed, and the
+    // viewer must be the verified owner the session was started for.
+    if (!session.indicatorConfirmedAt) {
+      return deny(
+        new AppError(
+          409,
+          'SCREEN_LIVE_INDICATOR_NOT_CONFIRMED',
+          'The employee indicator has not been confirmed yet',
+        ),
+      );
+    }
+    if (viewer.userId !== session.startedByUserId) {
+      return deny(new AppError(403, 'SCREEN_LIVE_SESSION_FOREIGN', 'This session belongs to another viewer'));
+    }
+    const failure = await evaluateIntegrationSessionAuthorization(session, now);
+    if (failure) {
+      await enforceIntegrationFailure(session, failure);
+      return deny(
+        new AppError(403, 'SCREEN_LIVE_ACCESS_REVOKED', 'Access to this live session was revoked'),
+      );
+    }
+  }
+
   const policy = await getOrCreateScreenshotPolicy(viewer.organizationId);
   try {
     assertScreenLiveViewAllowed(policy, membership.role);
@@ -726,6 +825,14 @@ export async function canScreenLiveViewerContinue(viewerId: string): Promise<boo
   // The agent must still be authorized and the work session must still be
   // heartbeating; otherwise a frozen device could keep streaming until expiry.
   if (!(await isSessionTargetStillEligible(viewer.session, now))) return false;
+
+  if (viewer.session.origin === 'INTEGRATION') {
+    const failure = await evaluateIntegrationSessionAuthorization(viewer.session, now);
+    if (failure) {
+      await enforceIntegrationFailure(viewer.session, failure);
+      return false;
+    }
+  }
 
   const [user, membership, organization] = await Promise.all([
     User.findByPk(viewer.userId, { attributes: ['id', 'status'] }),
@@ -965,6 +1072,18 @@ export async function terminateActiveScreenLiveSessionsForOrganization(
 }
 
 /**
+ * Ends every active integration-origin live session for a revoked viewer link or a closed
+ * integration connection. Capture stops on the agent and viewers are closed through the relay event,
+ * exactly as for any other termination. Existing WorkZen-origin sessions are never matched.
+ */
+export async function terminateActiveScreenLiveSessionsForIntegration(
+  scope: { integrationConnectionId: string } | { integrationViewerLinkId: string },
+  reason: Extract<ScreenLiveTerminationReason, 'VIEWER_LINK_REVOKED' | 'INTEGRATION_DISCONNECTED'>,
+): Promise<number> {
+  return terminateActiveSessionsWhere({ ...scope, origin: 'INTEGRATION' }, reason);
+}
+
+/**
  * Ends the live session for one employee when their individual monitoring
  * policy is disabled. Other employees in the organization are unaffected.
  */
@@ -1174,6 +1293,14 @@ export async function authorizeScreenLiveAgentStream(options: {
     );
   }
 
+  if (session.origin === 'INTEGRATION') {
+    const failure = await evaluateIntegrationSessionAuthorization(session, now);
+    if (failure) {
+      await enforceIntegrationFailure(session, failure);
+      throw AppError.forbidden('Access to this live session was revoked', 'SCREEN_LIVE_ACCESS_REVOKED');
+    }
+  }
+
   return session;
 }
 
@@ -1302,4 +1429,283 @@ export async function runScreenLiveMaintenance(now = new Date()): Promise<{
   sessionsTerminated: number;
 }> {
   return { sessionsTerminated: await expireScreenLiveSessions(now) };
+}
+
+// --- Integration (partner-viewer) sessions ------------------------------------------------------
+
+function sessionBelongsTo(
+  session: Pick<ScreenLiveSessionModel, 'origin' | 'integrationViewerLinkId'>,
+  integration: IntegrationSessionOrigin | undefined,
+): boolean {
+  if (integration) {
+    return (
+      session.origin === 'INTEGRATION' &&
+      session.integrationViewerLinkId === integration.viewerLinkId
+    );
+  }
+  return session.origin !== 'INTEGRATION';
+}
+
+function integrationTicketDenial(
+  session: Pick<ScreenLiveSessionModel, 'origin' | 'integrationViewerLinkId' | 'indicatorConfirmedAt'>,
+  linkId: string | undefined,
+): AppError | null {
+  if (session.origin !== 'INTEGRATION') {
+    return linkId
+      ? new AppError(403, 'SCREEN_LIVE_SESSION_FOREIGN', 'This session does not belong to that viewer')
+      : null;
+  }
+  if (!linkId || session.integrationViewerLinkId !== linkId) {
+    return new AppError(403, 'SCREEN_LIVE_SESSION_FOREIGN', 'This session belongs to another viewer');
+  }
+  if (!session.indicatorConfirmedAt) {
+    return new AppError(
+      409,
+      'SCREEN_LIVE_INDICATOR_NOT_CONFIRMED',
+      'The employee indicator has not been confirmed yet',
+    );
+  }
+  return null;
+}
+
+/**
+ * When each running integration session was last positively re-authorized, in this process. Frames of an
+ * integration session are forwarded only while that is recent (see `isIntegrationSessionVerified`), so if
+ * re-authorization stops working, for example because the database is unreachable, streaming stops after
+ * the verification window instead of continuing on the last good answer.
+ */
+const integrationVerifiedAt = new Map<string, number>();
+
+/** Three revalidation intervals: one missed or failed pass is tolerated, a prolonged outage is not. */
+export function integrationVerificationWindowMs(): number {
+  return config.screenLive.integrationRevalidateMs * 3;
+}
+
+export function isIntegrationSessionVerified(sessionId: string, now = Date.now()): boolean {
+  const at = integrationVerifiedAt.get(sessionId);
+  return at !== undefined && now - at <= integrationVerificationWindowMs();
+}
+
+export type IntegrationSessionFailure = {
+  reason: ScreenLiveTerminationReason;
+  code: string;
+  /** Set when the linked owner is no longer eligible, so the link itself is withdrawn. */
+  revokeLinkId?: string;
+};
+
+/**
+ * Everything that must still hold for an integration session to keep streaming. It is evaluated from
+ * durable state on a fixed timer (`revalidateIntegrationScreenLiveSessions`), when a viewer joins, on
+ * every viewer revalidation and when the agent attaches its stream, so revocation never depends on
+ * somebody making another API call.
+ */
+export async function evaluateIntegrationSessionAuthorization(
+  session: ScreenLiveSessionModel,
+  now = new Date(),
+): Promise<IntegrationSessionFailure | null> {
+  if (session.origin !== 'INTEGRATION') return null;
+  // The feature switches are part of the authorization. Turning either off (a restart with the flag
+  // false) ends every running integration session on the next pass and refuses new streams.
+  if (!config.integrations.enabled || !config.integrations.liveScreensEnabled) {
+    return { reason: 'FEATURE_DISABLED', code: 'LIVE_SCREENS_DISABLED' };
+  }
+  if (!isActiveScreenLiveSession(session, now)) {
+    return { reason: 'EXPIRED', code: 'SCREEN_LIVE_SESSION_ENDED' };
+  }
+
+  const link = session.integrationViewerLinkId
+    ? await IntegrationViewerLink.findByPk(session.integrationViewerLinkId)
+    : null;
+  if (
+    !link ||
+    link.status !== 'ACTIVE' ||
+    link.connectionId !== session.integrationConnectionId ||
+    link.organizationId !== session.organizationId ||
+    link.workzenUserId !== session.startedByUserId
+  ) {
+    return { reason: 'VIEWER_LINK_REVOKED', code: 'VIEWER_LINK_REVOKED' };
+  }
+
+  const connection = session.integrationConnectionId
+    ? await IntegrationConnection.findByPk(session.integrationConnectionId, {
+        include: [{ model: IntegrationClient, as: 'client', required: true }],
+      })
+    : null;
+  if (!connection || connection.status !== 'ACTIVE' || connection.client?.status !== 'ACTIVE') {
+    return { reason: 'INTEGRATION_DISCONNECTED', code: 'INTEGRATION_CONNECTION_INACTIVE' };
+  }
+  const credentials = await IntegrationCredential.findAll({
+    where: { connectionId: connection.id, revokedAt: null },
+    attributes: ['scopes'],
+  });
+  if (!credentials.some((credential) => credential.scopes.includes('screens:live'))) {
+    return { reason: 'INTEGRATION_DISCONNECTED', code: 'INTEGRATION_SCOPE_DENIED' };
+  }
+
+  const [user, membership, organization] = await Promise.all([
+    User.findByPk(link.workzenUserId, { attributes: ['id', 'status'] }),
+    Membership.findOne({
+      where: { organizationId: session.organizationId, userId: link.workzenUserId },
+      attributes: ['id', 'role', 'status'],
+    }),
+    Organization.findOne({
+      where: { id: session.organizationId, status: 'ACTIVE', deletedAt: null },
+      attributes: ['id'],
+    }),
+  ]);
+  if (
+    !user ||
+    user.status !== 'ACTIVE' ||
+    !membership ||
+    membership.status !== 'ACTIVE' ||
+    membership.role !== 'OWNER' ||
+    !hasPermission(membership.role, 'screenshot:live') ||
+    !organization
+  ) {
+    // Demoted, suspended, removed or no longer allowed live screens: the link ends for good.
+    return {
+      reason: 'VIEWER_LINK_REVOKED',
+      code: 'VIEWER_IDENTITY_INELIGIBLE',
+      revokeLinkId: link.id,
+    };
+  }
+
+  const policy = await getOrCreateScreenshotPolicy(session.organizationId);
+  try {
+    assertScreenLiveStartAllowed(policy, membership.role);
+    assertScreenLiveViewAllowed(policy, membership.role);
+  } catch {
+    return { reason: 'POLICY_DISABLED', code: 'SCREEN_LIVE_POLICY_DISABLED' };
+  }
+  if (!(await isEmployeeMonitoringEnabled(session.organizationId, session.employeeId))) {
+    return { reason: 'POLICY_DISABLED', code: EMPLOYEE_MONITORING_DISABLED };
+  }
+
+  // The window runs from the later of the start and the last change to the flag (a dropped stream
+  // clears it), so a reconnecting app gets the same time to confirm again as a new session does.
+  const unconfirmedSince = Math.max(session.startedAt.getTime(), session.updatedAt.getTime());
+  if (
+    !session.indicatorConfirmedAt &&
+    now.getTime() - unconfirmedSince > config.screenLive.indicatorConfirmTimeoutMs
+  ) {
+    return { reason: 'INDICATOR_UNAVAILABLE', code: 'SCREEN_LIVE_INDICATOR_TIMEOUT' };
+  }
+  integrationVerifiedAt.set(session.id, now.getTime());
+  return null;
+}
+
+/** Ends the session (stopping capture and closing every viewer) and withdraws the link if needed. */
+export async function enforceIntegrationFailure(
+  session: Pick<ScreenLiveSessionModel, 'id' | 'organizationId'>,
+  failure: IntegrationSessionFailure,
+): Promise<void> {
+  if (failure.revokeLinkId) {
+    const [changed] = await IntegrationViewerLink.update(
+      {
+        status: 'REVOKED',
+        revokedAt: new Date(),
+        revokeReason: 'IDENTITY_NO_LONGER_ELIGIBLE',
+      },
+      { where: { id: failure.revokeLinkId, status: 'ACTIVE' } },
+    );
+    if (changed > 0) {
+      await recordAuditEvent({
+        organizationId: session.organizationId,
+        actorUserId: null,
+        action: 'INTEGRATION_VIEWER_LINK_REVOKED',
+        entityType: 'INTEGRATION_VIEWER_LINK',
+        entityId: failure.revokeLinkId,
+        metadata: { reason: 'IDENTITY_NO_LONGER_ELIGIBLE', detectedBy: 'live_revalidation' },
+      });
+    }
+  }
+  await terminateScreenLiveSession({
+    sessionId: session.id,
+    organizationId: session.organizationId,
+    reason: failure.reason,
+    metadata: { code: failure.code, detectedBy: 'live_revalidation' },
+  });
+  if (failure.revokeLinkId) {
+    await terminateActiveScreenLiveSessionsForIntegration(
+      { integrationViewerLinkId: failure.revokeLinkId },
+      'VIEWER_LINK_REVOKED',
+    );
+  }
+}
+
+/**
+ * Re-authorizes every active integration session. Run on a fixed timer no longer than
+ * `SCREEN_LIVE_INTEGRATION_REVALIDATE_SECONDS` (hard maximum 15 s), so a revoked link, a demoted or
+ * suspended owner, a lost permission, a closed connection or a disabled policy ends a running stream
+ * without any API call. A transient database error never ends a healthy session; the next tick retries.
+ */
+export async function revalidateIntegrationScreenLiveSessions(now = new Date()): Promise<number> {
+  let ended = 0;
+  const sessions = await ScreenLiveSession.findAll({
+    where: { origin: 'INTEGRATION', status: 'ACTIVE' },
+    limit: 500,
+  });
+  const running = new Set(sessions.map((session) => session.id));
+  for (const id of [...integrationVerifiedAt.keys()]) {
+    if (!running.has(id)) integrationVerifiedAt.delete(id);
+  }
+  for (const session of sessions) {
+    try {
+      const failure = await evaluateIntegrationSessionAuthorization(session, now);
+      if (failure) {
+        await enforceIntegrationFailure(session, failure);
+        ended += 1;
+      }
+    } catch (error) {
+      logger.warn(
+        { err: error, sessionId: session.id },
+        'integration live session revalidation failed; retrying on the next tick',
+      );
+    }
+  }
+  return ended;
+}
+
+/**
+ * Records the employee agent's statement about its on-screen indicator for an integration session.
+ * Frames are forwarded only while this is set (see screenLiveRelay).
+ */
+export async function setScreenLiveIndicatorState(options: {
+  sessionId: string;
+  organizationId: string;
+  agentId: string;
+  visible: boolean;
+  context?: AuditContext;
+}): Promise<boolean> {
+  const session = await ScreenLiveSession.findOne({
+    where: {
+      id: options.sessionId,
+      organizationId: options.organizationId,
+      desktopAgentId: options.agentId,
+      origin: 'INTEGRATION',
+      status: 'ACTIVE',
+    },
+  });
+  if (!session) return false;
+  const was = session.indicatorConfirmedAt !== null;
+  await session.update({ indicatorConfirmedAt: options.visible ? new Date() : null });
+  if (was !== options.visible) {
+    await recordAuditEvent(
+      {
+        organizationId: session.organizationId,
+        actorUserId: session.employeeId,
+        targetEmployeeId: session.employeeId,
+        action: options.visible ? 'SCREEN_LIVE_INDICATOR_CONFIRMED' : 'SCREEN_LIVE_INDICATOR_HIDDEN',
+        entityType: 'SCREEN_LIVE_SESSION',
+        entityId: session.id,
+        metadata: {
+          desktopAgentId: session.desktopAgentId,
+          viewerUserId: session.startedByUserId,
+          integrationViewerLinkId: session.integrationViewerLinkId,
+        },
+      },
+      { context: options.context },
+    );
+  }
+  return true;
 }

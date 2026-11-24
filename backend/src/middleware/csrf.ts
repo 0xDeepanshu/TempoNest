@@ -16,6 +16,9 @@ const CSRF_EXEMPT_PATHS = new Set([
 const HOSTED_CONSENT_PATHS = new Set([
   `${config.apiPrefix}/integrations/oauth/authorize/login`,
   `${config.apiPrefix}/integrations/oauth/authorize/decision`,
+  `${config.apiPrefix}/integrations/viewer-links/open`,
+  `${config.apiPrefix}/integrations/viewer-links/login`,
+  `${config.apiPrefix}/integrations/viewer-links/decision`,
 ]);
 
 /**
@@ -27,7 +30,12 @@ const HOSTED_CONSENT_PATHS = new Set([
  * session's CSRF cookie and always fail. The decision endpoint is authenticated and deliberately keeps
  * using the session check below, since its form's token already is the real session CSRF cookie value.
  */
-const HOSTED_LOGIN_PATH = `${config.apiPrefix}/integrations/oauth/authorize/login`;
+const HOSTED_LOGIN_PATHS = new Set([
+  // The viewer-link open POST is authenticated by its one-time nonce in the body, not by a session.
+  `${config.apiPrefix}/integrations/viewer-links/open`,
+  `${config.apiPrefix}/integrations/oauth/authorize/login`,
+  `${config.apiPrefix}/integrations/viewer-links/login`,
+]);
 
 /**
  * An unsafe cookie-authenticated request must come from an allowlisted origin
@@ -112,7 +120,7 @@ export function csrfProtection(req: Request, _res: Response, next: NextFunction)
 
   // Checked by its own token above (via authorizeLogin), never by a session that may not exist yet
   // or may be a stale leftover from an unrelated account in the same browser.
-  if (path === HOSTED_LOGIN_PATH) return next();
+  if (HOSTED_LOGIN_PATHS.has(path)) return next();
 
   const hasSessionCookie =
     Boolean(req.cookies?.[ACCESS_COOKIE]) || Boolean(req.cookies?.[REFRESH_COOKIE]);

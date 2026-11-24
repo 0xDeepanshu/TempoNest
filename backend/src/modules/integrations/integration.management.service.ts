@@ -1,6 +1,7 @@
 import { Op } from 'sequelize';
 import { config } from '../../config/env';
 import {
+  sequelize,
   IntegrationClient,
   IntegrationConnection,
   IntegrationCredential,
@@ -17,6 +18,10 @@ import {
   toWebhookSubscriptionView,
 } from './integration.webhook.service';
 import type { IntegrationConnection as IntegrationConnectionModel } from './integrationConnection.model';
+import {
+  endIntegrationSessionsForConnection,
+  invalidateViewerLinksForConnection,
+} from './integration.viewerLink.service';
 import type { IntegrationConnectionStatus } from './integration.constants';
 
 const connectionInclude = [
@@ -210,6 +215,13 @@ async function closeConnection(options: {
     },
     { where: { connectionId: connection.id, revokedAt: null } },
   );
+
+  // Viewer links and unused link requests of this connection are invalidated together with its
+  // credentials, and every live screen session started through it ends.
+  await sequelize.transaction((transaction) =>
+    invalidateViewerLinksForConnection({ connectionId: connection.id, transaction }),
+  );
+  await endIntegrationSessionsForConnection(connection.id);
 
   // Webhook subscriptions stop immediately; delivery logs are retained for audit.
   await IntegrationWebhookSubscription.update(

@@ -42,6 +42,10 @@ import { initIntegrationAuthorizationRequest } from '../modules/integrations/int
 import { initIntegrationAuthorizationCode } from '../modules/integrations/integrationAuthorizationCode.model';
 import { initIntegrationCredential } from '../modules/integrations/integrationCredential.model';
 import { initIntegrationEmployeeMapping } from '../modules/integrations/integrationEmployeeMapping.model';
+import {
+  initIntegrationViewerLink,
+  initIntegrationViewerLinkRequest,
+} from '../modules/integrations/integrationViewerLink.model';
 import { initIntegrationWebhookSubscription } from '../modules/integrations/integrationWebhookSubscription.model';
 import { initIntegrationWebhookEvent } from '../modules/integrations/integrationWebhookEvent.model';
 import { initIntegrationWebhookDelivery } from '../modules/integrations/integrationWebhookDelivery.model';
@@ -90,6 +94,8 @@ export function initModels(sequelize: Sequelize) {
   const IntegrationAuthorizationCode = initIntegrationAuthorizationCode(sequelize);
   const IntegrationCredential = initIntegrationCredential(sequelize);
   const IntegrationEmployeeMapping = initIntegrationEmployeeMapping(sequelize);
+  const IntegrationViewerLinkRequest = initIntegrationViewerLinkRequest(sequelize);
+  const IntegrationViewerLink = initIntegrationViewerLink(sequelize);
   const IntegrationWebhookSubscription = initIntegrationWebhookSubscription(sequelize);
   const IntegrationWebhookEvent = initIntegrationWebhookEvent(sequelize);
   const IntegrationWebhookDelivery = initIntegrationWebhookDelivery(sequelize);
@@ -1452,6 +1458,8 @@ export function initModels(sequelize: Sequelize) {
     IntegrationAuthorizationCode,
     IntegrationCredential,
     IntegrationEmployeeMapping,
+    IntegrationViewerLinkRequest,
+    IntegrationViewerLink,
     IntegrationWebhookSubscription,
     IntegrationWebhookEvent,
     IntegrationWebhookDelivery,

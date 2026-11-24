@@ -173,3 +173,155 @@ export function renderErrorPage(options: { title: string; message: string }): st
      )}.</p>`,
   );
 }
+
+export type ViewerLinkPageDetails = {
+  clientName: string;
+  workzenOrganizationName: string;
+  externalOrganizationLabel: string;
+  externalOrganizationId: string;
+  externalUserLabel: string;
+  externalUserId: string;
+  expiresAt: Date;
+};
+
+function viewerLinkDetails(details: ViewerLinkPageDetails): string {
+  return `<div class="meta">
+       <div><strong>WorkZen organization</strong><br>${escapeHtml(details.workzenOrganizationName)}</div>
+       <div style="margin-top:10px"><strong>${escapeHtml(details.clientName)} organization</strong><br>${escapeHtml(
+         details.externalOrganizationLabel,
+       )}<br><code>${escapeHtml(details.externalOrganizationId)}</code></div>
+       <div style="margin-top:10px"><strong>${escapeHtml(details.clientName)} account to link</strong><br>${escapeHtml(
+         details.externalUserLabel,
+       )}<br><code>${escapeHtml(details.externalUserId)}</code></div>
+       <div style="margin-top:10px;font-size:.8rem">The names above are reported by ${escapeHtml(
+         details.clientName,
+       )}. The ID is what WorkZen will remember. This request expires at ${escapeHtml(
+         details.expiresAt.toISOString(),
+       )}.</div>
+     </div>`;
+}
+
+export function renderViewerLinkLoginPage(options: {
+  requestId: string;
+  details: ViewerLinkPageDetails;
+  csrfToken: string;
+  error?: string;
+}): string {
+  const { requestId, details, csrfToken, error } = options;
+  return layout(
+    'Link live screen access',
+    `<h1>Sign in to link ${escapeHtml(details.clientName)}</h1>
+     <p>Sign in as the WorkZen owner who will watch live screens through ${escapeHtml(
+       details.clientName,
+     )}. Only an owner of the organization can approve this.</p>
+     ${viewerLinkDetails(details)}
+     ${error ? `<div class="error" role="alert" style="margin-top:14px">${escapeHtml(error)}</div>` : ''}
+     <form method="post" action="/api/v1/integrations/viewer-links/login" autocomplete="on">
+       <input type="hidden" name="request_id" value="${escapeHtml(requestId)}">
+       <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+       <label for="email">Email</label>
+       <input id="email" name="email" type="email" required autocomplete="username">
+       <label for="password">Password</label>
+       <input id="password" name="password" type="password" required autocomplete="current-password">
+       <div class="actions"><button class="primary" type="submit">Sign in</button></div>
+     </form>
+     <p class="footer">This page is served by WorkZen. Your ${escapeHtml(
+       details.clientName,
+     )} password is never used here.</p>`,
+  );
+}
+
+export function renderViewerLinkConsentPage(options: {
+  requestId: string;
+  details: ViewerLinkPageDetails;
+  userName: string;
+  userEmail: string;
+  csrfToken: string | null;
+  error?: string;
+}): string {
+  const { requestId, details, userName, userEmail, csrfToken, error } = options;
+  const csrfField = csrfToken
+    ? `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">`
+    : '';
+  return layout(
+    'Approve live screen link',
+    `<h1>Link ${escapeHtml(details.clientName)} to your WorkZen owner account</h1>
+     <p>You are signed in as <strong>${escapeHtml(userName)}</strong> (${escapeHtml(
+       userEmail,
+     )}), an owner of <strong>${escapeHtml(details.workzenOrganizationName)}</strong>.</p>
+     ${viewerLinkDetails(details)}
+     ${error ? `<div class="error" role="alert" style="margin-top:14px">${escapeHtml(error)}</div>` : ''}
+     <h2 style="font-size:.95rem;margin:18px 0 8px;">If you approve</h2>
+     <ul class="scopes">
+       <li><strong>Live screens, as you</strong><span>The ${escapeHtml(
+         details.clientName,
+       )} account above can start live screen sessions for employees you have mapped. Every session is recorded in WorkZen under your name.</span></li>
+       <li><strong>Employees are told</strong><span>An indicator stays visible on the employee's screen for as long as it is being viewed. Employees on older desktop apps cannot be viewed.</span></li>
+       <li><strong>Your WorkZen rules still apply</strong><span>Monitoring policy, employee eligibility and your owner role are checked on every request. You can revoke this at any time.</span></li>
+     </ul>
+     <form method="post" action="/api/v1/integrations/viewer-links/decision">
+       ${csrfField}
+       <input type="hidden" name="request_id" value="${escapeHtml(requestId)}">
+       <div class="actions">
+         <button class="secondary" type="submit" name="decision" value="deny">Deny</button>
+         <button class="primary" type="submit" name="decision" value="approve">Approve link</button>
+       </div>
+     </form>
+     <p class="footer">Only approve if the ${escapeHtml(details.clientName)} account above is yours.</p>`,
+  );
+}
+
+/**
+ * First page of the approval flow. It holds no secret: a script served from this origin reads the
+ * one-time nonce from the URL fragment, removes it from the address bar and history entry, and posts
+ * it in a request body.
+ */
+export function renderViewerLinkShellPage(options: { requestId: string; scriptPath: string }): string {
+  return layout(
+    'Link live screen access',
+    `<div id="viewer-link" data-request="${escapeHtml(options.requestId)}">
+       <h1>Opening your approval request</h1>
+       <p id="viewer-link-message">One moment.</p>
+       <noscript><p>This page needs JavaScript to open the approval request securely.</p></noscript>
+     </div>
+     <script src="${escapeHtml(options.scriptPath)}"></script>`,
+  );
+}
+
+export const VIEWER_LINK_SCRIPT = `(function () {
+  var root = document.getElementById('viewer-link');
+  var message = document.getElementById('viewer-link-message');
+  if (!root) return;
+  var requestId = root.getAttribute('data-request');
+  var match = /(?:^|&)n=([A-Za-z0-9_-]{20,200})(?:&|$)/.exec(window.location.hash.slice(1));
+  // Take the secret out of the address bar and the history entry before doing anything else.
+  try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (e) {}
+  if (!requestId || !match) {
+    message.textContent = 'This approval link is incomplete or was already opened. Start again from Flowtrium.';
+    return;
+  }
+  var form = document.createElement('form');
+  form.method = 'post';
+  form.action = '/api/v1/integrations/viewer-links/open';
+  [['request_id', requestId], ['nonce', match[1]]].forEach(function (pair) {
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = pair[0];
+    input.value = pair[1];
+    form.appendChild(input);
+  });
+  document.body.appendChild(form);
+  form.submit();
+})();
+`;
+
+export function renderViewerLinkDonePage(options: { clientName: string; approved: boolean }): string {
+  return layout(
+    options.approved ? 'Link approved' : 'Link denied',
+    options.approved
+      ? `<h1>Approved</h1><p>Return to ${escapeHtml(
+          options.clientName,
+        )} to finish linking. Nothing is active until it does.</p>`
+      : `<h1>Denied</h1><p>No link was created. You can close this window.</p>`,
+  );
+}

@@ -85,7 +85,10 @@ export class AgentSocket {
       headers: {
         Authorization: `Bearer ${credentials.accessToken}`,
         'X-Agent-Id': credentials.agentId,
-        'X-Agent-Key': credentials.agentKey
+        'X-Agent-Key': credentials.agentKey,
+        // This build can show the live viewing indicator. The server reads the capability from the live
+        // connection, so an older build (which does not send it) is never offered an integration viewer.
+        'X-Agent-Capabilities': 'live-indicator.v1'
       }
     })
     this.socket = socket

@@ -5,6 +5,7 @@ import type { User } from '../users/user.model';
 import type { DesktopAgent } from '../desktopAgents/desktopAgent.model';
 import type { TimeSession } from '../timeTracking/timeSession.model';
 import type { ScreenLiveViewer } from './screenLiveViewer.model';
+import type { ScreenLiveOrigin } from '../integrations/integration.constants';
 
 export const SCREEN_LIVE_SESSION_STATUSES = ['ACTIVE', 'ENDED'] as const;
 export type ScreenLiveSessionStatus = (typeof SCREEN_LIVE_SESSION_STATUSES)[number];
@@ -20,6 +21,11 @@ export const SCREEN_LIVE_TERMINATION_REASONS = [
   'ORGANIZATION_SUSPENDED',
   'AGENT_REVOKED',
   'SERVER_SHUTDOWN',
+  'VIEWER_LINK_REVOKED',
+  'INTEGRATION_DISCONNECTED',
+  'INDICATOR_UNAVAILABLE',
+  'FEATURE_DISABLED',
+  'VERIFICATION_UNAVAILABLE',
 ] as const;
 export type ScreenLiveTerminationReason = (typeof SCREEN_LIVE_TERMINATION_REASONS)[number];
 
@@ -35,6 +41,14 @@ export interface ScreenLiveSessionAttributes {
   expiresAt: Date;
   endedAt: Date | null;
   terminationReason: string | null;
+  /** WORKZEN for the in-product flow, INTEGRATION for a linked partner viewer. */
+  origin: ScreenLiveOrigin;
+  integrationConnectionId: string | null;
+  integrationViewerLinkId: string | null;
+  externalOrganizationId: string | null;
+  externalUserId: string | null;
+  /** When the employee's desktop agent confirmed its on-screen indicator is visible. */
+  indicatorConfirmedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -45,6 +59,12 @@ export type ScreenLiveSessionCreationAttributes = Optional<
   | 'status'
   | 'endedAt'
   | 'terminationReason'
+  | 'origin'
+  | 'integrationConnectionId'
+  | 'integrationViewerLinkId'
+  | 'externalOrganizationId'
+  | 'externalUserId'
+  | 'indicatorConfirmedAt'
   | 'createdAt'
   | 'updatedAt'
 >;
@@ -64,6 +84,12 @@ export class ScreenLiveSession
   declare expiresAt: Date;
   declare endedAt: Date | null;
   declare terminationReason: string | null;
+  declare origin: ScreenLiveOrigin;
+  declare integrationConnectionId: string | null;
+  declare integrationViewerLinkId: string | null;
+  declare externalOrganizationId: string | null;
+  declare externalUserId: string | null;
+  declare indicatorConfirmedAt: Date | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 
@@ -148,6 +174,42 @@ export function initScreenLiveSession(sequelize: Sequelize): typeof ScreenLiveSe
         type: DataTypes.STRING(64),
         allowNull: true,
         field: 'termination_reason',
+      },
+      origin: {
+        type: DataTypes.STRING(16),
+        allowNull: false,
+        defaultValue: 'WORKZEN',
+      },
+      integrationConnectionId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: 'integration_connection_id',
+        references: { model: 'integration_connections', key: 'id' },
+        onDelete: 'SET NULL',
+        onUpdate: 'CASCADE',
+      },
+      integrationViewerLinkId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        field: 'integration_viewer_link_id',
+        references: { model: 'integration_viewer_links', key: 'id' },
+        onDelete: 'SET NULL',
+        onUpdate: 'CASCADE',
+      },
+      externalOrganizationId: {
+        type: DataTypes.STRING(200),
+        allowNull: true,
+        field: 'external_organization_id',
+      },
+      externalUserId: {
+        type: DataTypes.STRING(200),
+        allowNull: true,
+        field: 'external_user_id',
+      },
+      indicatorConfirmedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'indicator_confirmed_at',
       },
       createdAt: {
         type: DataTypes.DATE,

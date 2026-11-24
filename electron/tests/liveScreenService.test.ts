@@ -5,7 +5,7 @@ import WebSocket from 'ws'
 import type { PendingScreenLiveSession, ScreenLiveStartCommand } from '../electron/backendTypes'
 import type { LiveFrameCapture } from '../electron/screenCapture'
 import { ScreenshotOperationError } from '../electron/screenshotErrors'
-import { LiveScreenService } from '../electron/liveScreenService'
+import { LiveScreenService, type LiveIndicator } from '../electron/liveScreenService'
 
 class FakeSocket extends EventEmitter {
   readyState: number = WebSocket.CONNECTING
@@ -61,7 +61,7 @@ function command(
   }
 }
 
-function createHarness(options: { capture?: LiveFrameCapture } = {}) {
+function createHarness(options: { capture?: LiveFrameCapture; indicator?: LiveIndicator } = {}) {
   const sockets: FakeSocket[] = []
   const reports: Array<{ liveSessionId: string; code: string; message: string }> = []
   const capture =
@@ -78,6 +78,7 @@ function createHarness(options: { capture?: LiveFrameCapture } = {}) {
     getCredentials: () => ({ accessToken: 'token-1', agentId: 'agent-1', agentKey: 'key-1' }),
     refreshAccessToken,
     capture,
+    indicator: options.indicator,
     createSocket: (url, headers) => {
       const socket = new FakeSocket(url, headers)
       sockets.push(socket)
@@ -279,5 +280,171 @@ describe('LiveScreenService', () => {
 
     expect(harness.refreshAccessToken).toHaveBeenCalledTimes(1)
     expect(harness.sockets).toHaveLength(2)
+  })
+})
+
+function fakeIndicator(options: { shows?: boolean } = {}) {
+  const shows = options.shows ?? true
+  let visible = false
+  let onLost: (() => void) | null = null
+  const indicator = {
+    show: vi.fn(async (callback: () => void) => {
+      onLost = callback
+      visible = shows
+      return shows
+    }),
+    hide: vi.fn(() => {
+      visible = false
+    }),
+    isVisible: () => visible
+  } satisfies LiveIndicator
+  return {
+    indicator,
+    /** Simulates the window disappearing while it is needed. */
+    lose() {
+      visible = false
+      onLost?.()
+    },
+    /** Simulates the window being hidden without the OS telling us. */
+    conceal() {
+      visible = false
+    }
+  }
+}
+
+function jsonMessages(socket: FakeSocket): Array<Record<string, unknown>> {
+  return socket.sent
+    .filter((message) => !message.binary)
+    .map((message) => JSON.parse(message.data.toString()) as Record<string, unknown>)
+}
+
+describe('LiveScreenService employee indicator', () => {
+  it('shows the indicator before opening the stream and confirms it before the first frame', async () => {
+    const fake = fakeIndicator()
+    const harness = createHarness({ indicator: fake.indicator })
+    const start = command({ requireIndicator: true })
+
+    harness.service.handleStart(start)
+    // The stream is not opened until the indicator is on screen.
+    expect(fake.indicator.show).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1), { timeout: 1_000 })
+    const socket = harness.sockets[0]
+    expect(socket.headers['X-Live-Indicator']).toBe('v1')
+    expect(harness.capture).not.toHaveBeenCalled()
+
+    socket.open()
+    socket.receive({ type: 'live.ready', liveSessionId: start.liveSessionId })
+    await vi.waitFor(() => expect(socket.sent.length).toBeGreaterThan(1), { timeout: 1_000 })
+
+    // The very first thing sent is the confirmation; every frame comes after it.
+    expect(socket.sent[0].binary).toBeUndefined()
+    expect(jsonMessages(socket)[0]).toEqual({ type: 'live.indicator', state: 'visible' })
+    expect(socket.sent.slice(1).every((message) => message.binary === true)).toBe(true)
+    expect(harness.service.getState().phase).toBe('streaming')
+
+    harness.service.handleStop(start.liveSessionId)
+    expect(fake.indicator.hide).toHaveBeenCalled()
+    expect(jsonMessages(socket).at(-1)).toEqual({ type: 'live.indicator', state: 'hidden' })
+  })
+
+  it('refuses a session that needs an indicator when none is available', async () => {
+    const harness = createHarness()
+    const start = command({ requireIndicator: true })
+    harness.service.handleStart(start)
+    await settle()
+
+    expect(harness.sockets).toHaveLength(0)
+    expect(harness.capture).not.toHaveBeenCalled()
+    expect(harness.service.getState().phase).toBe('failed')
+    expect(harness.reports).toEqual([
+      expect.objectContaining({ liveSessionId: start.liveSessionId, code: 'INDICATOR_UNAVAILABLE' })
+    ])
+  })
+
+  it('refuses when the indicator cannot be shown', async () => {
+    const fake = fakeIndicator({ shows: false })
+    const harness = createHarness({ indicator: fake.indicator })
+    harness.service.handleStart(command({ requireIndicator: true }))
+    await settle()
+
+    expect(harness.sockets).toHaveLength(0)
+    expect(harness.capture).not.toHaveBeenCalled()
+    expect(harness.reports[0]?.code).toBe('INDICATOR_UNAVAILABLE')
+  })
+
+  it('stops, reports and removes the indicator when it disappears mid-stream', async () => {
+    const fake = fakeIndicator()
+    const harness = createHarness({ indicator: fake.indicator })
+    const start = command({ requireIndicator: true })
+    harness.service.handleStart(start)
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1), { timeout: 1_000 })
+    const socket = harness.sockets[0]
+    socket.open()
+    socket.receive({ type: 'live.ready', liveSessionId: start.liveSessionId })
+    await vi.waitFor(() => expect(socket.sent.length).toBeGreaterThan(1), { timeout: 1_000 })
+
+    fake.lose()
+    const sentAtLoss = socket.sent.length
+    expect(harness.service.getState().phase).toBe('failed')
+    expect(harness.reports.at(-1)?.code).toBe('INDICATOR_LOST')
+    await settle(5)
+    expect(socket.sent.length).toBe(sentAtLoss + 0)
+    expect(jsonMessages(socket).at(-1)).toEqual({ type: 'live.indicator', state: 'hidden' })
+    expect(fake.indicator.hide).toHaveBeenCalled()
+  })
+
+  it('sends no frame if the indicator is concealed without any notification', async () => {
+    const fake = fakeIndicator()
+    const harness = createHarness({ indicator: fake.indicator })
+    const start = command({ requireIndicator: true })
+    harness.service.handleStart(start)
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1), { timeout: 1_000 })
+    const socket = harness.sockets[0]
+    socket.open()
+    fake.conceal() // hidden between the open and the server's ready message
+    socket.receive({ type: 'live.ready', liveSessionId: start.liveSessionId })
+    await settle(5)
+
+    expect(socket.sent.filter((message) => message.binary)).toHaveLength(0)
+    expect(harness.capture).not.toHaveBeenCalled()
+    expect(harness.reports.at(-1)?.code).toBe('INDICATOR_UNAVAILABLE')
+  })
+
+  it('checks the indicator before every frame', async () => {
+    const fake = fakeIndicator()
+    const harness = createHarness({ indicator: fake.indicator })
+    const start = command({ requireIndicator: true })
+    harness.service.handleStart(start)
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1), { timeout: 1_000 })
+    const socket = harness.sockets[0]
+    socket.open()
+    socket.receive({ type: 'live.ready', liveSessionId: start.liveSessionId })
+    await vi.waitFor(() => expect(socket.sent.filter((m) => m.binary).length).toBeGreaterThan(0), {
+      timeout: 1_000
+    })
+
+    fake.conceal()
+    const frames = socket.sent.filter((message) => message.binary).length
+    await vi.waitFor(() => expect(harness.service.getState().phase).toBe('failed'), { timeout: 2_000 })
+    expect(socket.sent.filter((message) => message.binary).length).toBeLessThanOrEqual(frames + 1)
+    expect(harness.reports.at(-1)?.code).toBe('INDICATOR_LOST')
+  })
+
+  it('leaves existing owner sessions exactly as they were', async () => {
+    const fake = fakeIndicator()
+    const harness = createHarness({ indicator: fake.indicator })
+    const start = command()
+    harness.service.handleStart(start)
+
+    // A native session needs no indicator: the stream opens immediately and nothing is shown.
+    expect(harness.sockets).toHaveLength(1)
+    expect(fake.indicator.show).not.toHaveBeenCalled()
+    const socket = harness.sockets[0]
+    socket.open()
+    socket.receive({ type: 'live.ready', liveSessionId: start.liveSessionId })
+    await vi.waitFor(() => expect(socket.sent.length).toBeGreaterThan(0), { timeout: 1_000 })
+    expect(jsonMessages(socket)).toHaveLength(0)
+    harness.service.handleStop(start.liveSessionId)
+    expect(fake.indicator.hide).not.toHaveBeenCalled()
   })
 })

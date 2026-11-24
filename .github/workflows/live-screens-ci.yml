@@ -1,0 +1,153 @@
+name: Live screens CI
+
+# Verification for the Flowtrium live-screen integration. It runs only on the feature branch, on pull
+# requests that touch these areas, or by hand, and it deploys nothing.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/flowtrium-live-screens
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'electron/**'
+      - 'web/src/lib/types.ts'
+      - '.github/workflows/live-screens-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-screens-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (typecheck, build, migration, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workzen
+          POSTGRES_PASSWORD: workzen
+          POSTGRES_DB: workzen_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workzen"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PGPASSWORD: workzen
+      NODE_OPTIONS: --max-old-space-size=3072
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+
+      - name: Migration - apply every migration to an empty database
+        env:
+          DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_migrate
+        run: |
+          psql -h localhost -U workzen -d workzen_test -c "CREATE DATABASE workzen_migrate"
+          npx sequelize-cli db:migrate
+          npx sequelize-cli db:migrate:status | tail -3
+
+      - name: Migration - schema assertions (constraints, indexes, defaults, delete rules)
+        run: |
+          Q() { psql -h localhost -U workzen -d workzen_migrate -At -v ON_ERROR_STOP=1 -c "$1"; }
+          expect() { if [ "$1" != "$2" ]; then echo "FAIL: $3 (got '$1', want '$2')"; exit 1; fi; echo "ok: $3"; }
+          expect "$(Q "select count(*) from pg_indexes where indexname in ('integration_viewer_links_active_external_unique','integration_viewer_links_active_workzen_unique') and indexdef like '%UNIQUE%' and indexdef like '%ACTIVE%'")" 2 "partial unique indexes on active links"
+          expect "$(Q "select count(*) from pg_indexes where indexname = 'integration_viewer_link_requests_nonce_unique' and indexdef like '%UNIQUE%'")" 1 "nonce unique"
+          expect "$(Q "select column_default from information_schema.columns where table_name='screen_live_sessions' and column_name='origin'")" "'WORKZEN'::character varying" "origin default"
+          expect "$(Q "select is_nullable from information_schema.columns where table_name='screen_live_sessions' and column_name='origin'")" NO "origin not null"
+          expect "$(Q "select count(*) from information_schema.columns where table_name='screen_live_sessions' and column_name in ('integration_connection_id','integration_viewer_link_id','external_organization_id','external_user_id','indicator_confirmed_at') and is_nullable='YES'")" 5 "new session columns nullable"
+          expect "$(Q "select count(*) from pg_constraint where conname in ('screen_live_sessions_origin_check','integration_viewer_links_status_check','integration_viewer_link_requests_status_check') and convalidated")" 3 "check constraints validated"
+          expect "$(Q "select string_agg(distinct confdeltype::text, ',' order by confdeltype::text) from pg_constraint c join pg_class t on t.oid=c.conrelid where contype='f' and t.relname='screen_live_sessions' and c.conname like '%integration%'")" "n" "session integration FKs are ON DELETE SET NULL"
+          expect "$(Q "select count(*) from pg_constraint c join pg_class t on t.oid=c.conrelid where contype='f' and t.relname='integration_viewer_links' and confdeltype='c'")" 3 "link FKs cascade from connection, organization and user"
+
+      - name: Migration - rollback removes only what it added, then re-applies
+        env:
+          DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_migrate
+        run: |
+          Q() { psql -h localhost -U workzen -d workzen_migrate -At -v ON_ERROR_STOP=1 -c "$1"; }
+          before=$(Q "select count(*) from information_schema.columns where table_name='screen_live_sessions'")
+          npx sequelize-cli db:migrate:undo
+          after=$(Q "select count(*) from information_schema.columns where table_name='screen_live_sessions'")
+          [ "$((before - after))" = "6" ] || { echo "FAIL: rollback removed $((before - after)) columns, expected 6"; exit 1; }
+          [ "$(Q "select count(*) from information_schema.tables where table_name in ('integration_viewer_links','integration_viewer_link_requests')")" = "0" ] || { echo "FAIL: tables remain"; exit 1; }
+          [ "$(Q "select count(*) from information_schema.columns where table_name='screen_live_sessions' and column_name in ('id','organization_id','employee_id','desktop_agent_id','time_session_id','started_by_user_id','status','started_at','expires_at','ended_at','termination_reason')")" = "11" ] || { echo "FAIL: original columns changed"; exit 1; }
+          npx sequelize-cli db:migrate
+          echo "rollback and re-apply ok"
+
+      - name: Tests - live screens, integrations and everything they touch
+        env:
+          TEST_DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_test
+        run: >
+          npx vitest run
+          tests/integrationViewerLinks.test.ts
+          tests/integrationLiveScreens.test.ts
+          tests/screenLive.test.ts
+          tests/integrations.test.ts
+          tests/integrations-hosted-login.test.ts
+          tests/desktopAgents.test.ts
+          tests/websocket.test.ts
+
+      - name: Tests - full backend suite
+        env:
+          TEST_DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_test
+        run: npm test
+
+  electron:
+    name: Desktop app (typecheck, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: electron
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+
+  web:
+    name: Web (typecheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck

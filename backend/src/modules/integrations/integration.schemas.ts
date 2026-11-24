@@ -320,3 +320,79 @@ export const integrationWebhookDeliveryParamsSchema = z.object({
 });
 
 export const integrationWebhookListQuerySchema = paginationSchema;
+
+// --- Viewer links (live screens) ---------------------------------------------------------------
+
+const viewerLinkText = z.string().trim().min(1).max(200);
+
+/** The external user is identified by the integration's own id. The label is display text only. */
+export const integrationViewerLinkRequestBodySchema = z
+  .object({
+    externalUserId: viewerLinkText,
+    externalUserLabel: viewerLinkText,
+    externalOrganizationLabel: viewerLinkText,
+    // base64url(SHA-256(verifier)): exactly 43 characters.
+    codeChallenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'code challenge must be a base64url SHA-256'),
+  })
+  .strict();
+
+export const integrationViewerLinkRequestParamsSchema = z.object({
+  requestId: z.string().uuid('Request ID must be a valid UUID'),
+});
+
+export const integrationViewerLinkCompleteBodySchema = z
+  .object({
+    codeVerifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/, 'code verifier is not valid'),
+  })
+  .strict();
+
+export const integrationViewerLinkUserParamsSchema = z.object({
+  externalUserId: viewerLinkText,
+});
+
+// The approval page URL carries only the request id. The one-time nonce is in the URL fragment and is
+// exchanged by POST, so it is never part of a query string.
+export const viewerLinkApproveQuerySchema = z.object({ request: z.string().uuid() }).strip();
+
+export const viewerLinkOpenBodySchema = z
+  .object({
+    request_id: z.string().uuid(),
+    nonce: z.string().regex(/^[A-Za-z0-9_-]{20,200}$/),
+  })
+  .strict();
+
+export const viewerLinkLoginBodySchema = z
+  .object({
+    email: z.string().trim().email().max(254),
+    password: z.string().min(1).max(1024),
+    request_id: z.string().uuid(),
+    _csrf: z.string().min(1).max(256),
+  })
+  .strict();
+
+export const viewerLinkDecisionBodySchema = z
+  .object({
+    _csrf: z.string().min(1).optional(),
+    request_id: z.string().uuid(),
+    decision: z.enum(['approve', 'deny']),
+  })
+  .strict();
+
+export const integrationViewerLinkManageParamsSchema = z.object({
+  organizationId: z.string().uuid('Organization ID must be a valid UUID'),
+  linkId: z.string().uuid('Link ID must be a valid UUID'),
+});
+
+// --- Live screens (integration API) -------------------------------------------------------------
+
+export const integrationLiveActorQuerySchema = z.object({ externalUserId: viewerLinkText }).strict();
+
+export const integrationLiveActorBodySchema = z.object({ externalUserId: viewerLinkText }).strict();
+
+export const integrationLiveStartBodySchema = z
+  .object({ externalUserId: viewerLinkText, externalEmployeeId: viewerLinkText })
+  .strict();
+
+export const integrationLiveSessionParamsSchema = z.object({
+  sessionId: z.string().uuid('Session ID must be a valid UUID'),
+});

@@ -703,7 +703,12 @@ export type ScreenLiveTerminationReason =
   | "SESSION_ENDED"
   | "ORGANIZATION_SUSPENDED"
   | "AGENT_REVOKED"
-  | "SERVER_SHUTDOWN";
+  | "SERVER_SHUTDOWN"
+  | "VIEWER_LINK_REVOKED"
+  | "INTEGRATION_DISCONNECTED"
+  | "INDICATOR_UNAVAILABLE"
+  | "FEATURE_DISABLED"
+  | "VERIFICATION_UNAVAILABLE";
 
 export interface ScreenLiveSessionSummary {
   id: string;

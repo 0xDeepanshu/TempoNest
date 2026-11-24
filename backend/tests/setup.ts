@@ -25,6 +25,7 @@ process.env.ARGON2_PARALLELISM = '1';
 // The integration API is dark by default. The integration suite opts in here so
 // that configuration is fixed before any module reads it.
 process.env.INTEGRATION_ENABLED = 'true';
+process.env.INTEGRATION_LIVE_SCREENS_ENABLED = 'true';
 
 // Screenshot tests use the local adapter in an OS temp directory. The small
 // size cap makes oversized-upload tests cheap while still exercising Express'

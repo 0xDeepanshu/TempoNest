@@ -10,10 +10,13 @@ import {
   authorizeScreenLiveAgentStream,
   canScreenLiveViewerContinue,
   consumeScreenLiveViewerTicket,
+  isIntegrationSessionVerified,
   markScreenLiveViewerLeft,
+  setScreenLiveIndicatorState,
   terminateScreenLiveSession,
   touchScreenLiveViewer,
 } from '../modules/screenshots/screenLive.service';
+import { LIVE_INDICATOR_STREAM_HEADER, LIVE_INDICATOR_STREAM_VALUE } from './agentCapabilities';
 import { onScreenLiveSessionEnded } from '../modules/screenshots/screenLiveEvents';
 import type { ScreenLiveSessionSummary } from '../modules/screenshots/screenLive.mapper';
 import type { ScreenLiveViewerSummary } from '../modules/screenshots/screenLive.mapper';
@@ -43,6 +46,8 @@ type ViewerConnection = {
   lastAuthCheckAt: number;
   sawFrame: boolean;
   left: boolean;
+  /** Integration sessions are re-authorized on the integration interval, not the default one. */
+  integration: boolean;
 };
 
 type PendingViewer = {
@@ -62,6 +67,10 @@ type AgentStreamConnection = {
   lastFrameAt: number;
   lastAuthCheckAt: number;
   expiresAt: number;
+  /** True for integration sessions: no frame is forwarded until the agent confirms its indicator. */
+  requiresIndicator: boolean;
+  indicatorConfirmed: boolean;
+  unconfirmedFrames: number;
 };
 
 function header(value: string | string[] | undefined): string | undefined {
@@ -122,6 +131,9 @@ export class ScreenLiveRelay {
 
   private unsubscribe: (() => void) | null = null;
   private sweepTimer: NodeJS.Timeout | null = null;
+  private verifyTimer: NodeJS.Timeout | null = null;
+  /** Integration sessions that could not be ended in the database yet, retried until they are. */
+  private readonly pendingTerminations = new Set<string>();
   private closed = false;
 
   constructor(options: ScreenLiveRelayOptions = {}) {
@@ -153,6 +165,11 @@ export class ScreenLiveRelay {
 
     this.sweepTimer = setInterval(() => this.sweep(), config.timeTracking.wsSweepIntervalMs);
     this.sweepTimer.unref();
+    this.verifyTimer = setInterval(
+      () => this.enforceVerification(),
+      config.screenLive.integrationRevalidateMs,
+    );
+    this.verifyTimer.unref();
 
     this.viewerWss.on('close', () => this.viewerWss.clients.clear());
     this.agentWss.on('close', () => this.agentWss.clients.clear());
@@ -344,6 +361,7 @@ export class ScreenLiveRelay {
       lastAuthCheckAt: Date.now(),
       sawFrame: false,
       left: false,
+      integration: session.origin === 'INTEGRATION',
     };
 
     const set = this.viewers.get(session.id) ?? new Set<ViewerConnection>();
@@ -424,6 +442,26 @@ export class ScreenLiveRelay {
           employeeId: context.user.id,
           agentId: context.agent.id,
         });
+        if (
+          session.origin === 'INTEGRATION' &&
+          header(req.headers[LIVE_INDICATOR_STREAM_HEADER]) !== LIVE_INDICATOR_STREAM_VALUE
+        ) {
+          // An older desktop app cannot show the employee the indicator. It is refused, and the session
+          // ends instead of waiting for an app that can never confirm.
+          void terminateScreenLiveSession({
+            sessionId: session.id,
+            organizationId: session.organizationId,
+            reason: 'INDICATOR_UNAVAILABLE',
+            metadata: { code: 'SCREEN_LIVE_INDICATOR_UNSUPPORTED' },
+          }).catch((error) => logger.warn({ err: error }, 'failed to end session for unsupported agent'));
+          rejectUpgrade(
+            socket,
+            403,
+            'SCREEN_LIVE_INDICATOR_UNSUPPORTED',
+            'The desktop app must be updated to show the live viewing indicator',
+          );
+          return;
+        }
         if (this.closed) {
           rejectUpgrade(socket, 503, 'RELAY_UNAVAILABLE', 'Live viewing is unavailable');
           return;
@@ -473,8 +511,20 @@ export class ScreenLiveRelay {
       lastFrameAt: 0,
       lastAuthCheckAt: Date.now(),
       expiresAt: session.expiresAt.getTime(),
+      requiresIndicator: session.origin === 'INTEGRATION',
+      indicatorConfirmed: false,
+      unconfirmedFrames: 0,
     };
     this.agentStreams.set(session.id, connection);
+    if (connection.requiresIndicator) {
+      // Every stream connection starts unconfirmed, even if an earlier one was confirmed.
+      void setScreenLiveIndicatorState({
+        sessionId: session.id,
+        organizationId: session.organizationId,
+        agentId: session.desktopAgentId,
+        visible: false,
+      }).catch((error) => logger.warn({ err: error }, 'failed to reset indicator state'));
+    }
     this.ensureExpiryTimer(session.id, connection.expiresAt);
 
     sendJson(ws, {
@@ -484,6 +534,7 @@ export class ScreenLiveRelay {
       expiresAt: session.expiresAt.toISOString(),
       maxFps: config.screenLive.maxFps,
       maxFrameBytes: config.screenLive.maxFrameBytes,
+      requireIndicator: connection.requiresIndicator,
     });
 
     ws.on('pong', () => {
@@ -492,14 +543,16 @@ export class ScreenLiveRelay {
 
     ws.on('message', (raw: RawData, isBinary: boolean) => {
       if (!isBinary) {
-        let message: { type?: unknown };
+        let message: { type?: unknown; state?: unknown };
         try {
-          message = JSON.parse(raw.toString()) as { type?: unknown };
+          message = JSON.parse(raw.toString()) as { type?: unknown; state?: unknown };
         } catch {
           return;
         }
         if (message.type === 'ping') {
           sendJson(ws, { type: 'pong', serverTime: new Date().toISOString() });
+        } else if (message.type === 'live.indicator') {
+          this.handleIndicatorMessage(connection, message.state === 'visible');
         }
         return;
       }
@@ -509,6 +562,15 @@ export class ScreenLiveRelay {
     ws.on('close', () => {
       if (this.agentStreams.get(connection.sessionId) !== connection) return;
       this.agentStreams.delete(connection.sessionId);
+      if (connection.requiresIndicator) {
+        connection.indicatorConfirmed = false;
+        void setScreenLiveIndicatorState({
+          sessionId: connection.sessionId,
+          organizationId: connection.organizationId,
+          agentId: connection.agentId,
+          visible: false,
+        }).catch((error) => logger.warn({ err: error }, 'failed to clear indicator state'));
+      }
       if (this.closed) return;
       this.scheduleAgentGrace(connection.sessionId);
     });
@@ -516,6 +578,65 @@ export class ScreenLiveRelay {
     ws.on('error', (error) => {
       logger.debug({ err: error }, 'live screen agent transport error');
     });
+  }
+
+  /**
+   * The agent's statement that its on-screen indicator is (or is no longer) visible. Frames of an
+   * integration session are forwarded only between a `visible` and the next `hidden`.
+   */
+  private handleIndicatorMessage(connection: AgentStreamConnection, visible: boolean): void {
+    if (!connection.requiresIndicator) return;
+    connection.indicatorConfirmed = visible;
+    void setScreenLiveIndicatorState({
+      sessionId: connection.sessionId,
+      organizationId: connection.organizationId,
+      agentId: connection.agentId,
+      visible,
+    })
+      .then(() => {
+        if (visible) {
+          for (const viewer of this.viewers.get(connection.sessionId) ?? []) {
+            sendJson(viewer.ws, {
+              type: 'live.indicator',
+              state: 'visible',
+              serverTime: new Date().toISOString(),
+            });
+          }
+          return;
+        }
+        // The indicator went away: nothing may be shown, and the session does not continue.
+        return terminateScreenLiveSession({
+          sessionId: connection.sessionId,
+          organizationId: connection.organizationId,
+          reason: 'INDICATOR_UNAVAILABLE',
+          metadata: { code: 'SCREEN_LIVE_INDICATOR_HIDDEN' },
+        });
+      })
+      .catch((error) => logger.warn({ err: error }, 'failed to record live indicator state'));
+  }
+
+  /**
+   * Fail-closed check for integration streams. A stream whose session could not be re-authorized within
+   * the verification window (the database or the revalidation loop is not working) is shown to nobody:
+   * frames are already dropped by `handleFrame`, and here the sockets are closed and the session ended,
+   * retrying until the database accepts the change. Public so tests can run a pass on demand.
+   */
+  enforceVerification(): void {
+    if (this.closed) return;
+    for (const agent of [...this.agentStreams.values()]) {
+      if (!agent.requiresIndicator || isIntegrationSessionVerified(agent.sessionId)) continue;
+      this.pendingTerminations.add(agent.sessionId);
+      this.endLocal(agent.sessionId, 'VERIFICATION_UNAVAILABLE');
+    }
+    for (const sessionId of [...this.pendingTerminations]) {
+      void terminateScreenLiveSession({
+        sessionId,
+        reason: 'VERIFICATION_UNAVAILABLE',
+        metadata: { code: 'SCREEN_LIVE_VERIFICATION_UNAVAILABLE' },
+      })
+        .then(() => this.pendingTerminations.delete(sessionId))
+        .catch((error) => logger.warn({ err: error, sessionId }, 'will retry ending unverifiable session'));
+    }
   }
 
   private handleFrame(connection: AgentStreamConnection, raw: RawData): void {
@@ -528,6 +649,29 @@ export class ScreenLiveRelay {
       }).catch((error) => logger.warn({ err: error }, 'failed to expire live screen session'));
       return;
     }
+
+    // Hard gate: an integration session shows nothing until the employee's indicator is confirmed.
+    // Early frames are dropped, never forwarded or buffered; an agent that keeps sending them is cut off.
+    if (connection.requiresIndicator && !connection.indicatorConfirmed) {
+      connection.unconfirmedFrames += 1;
+      if (connection.unconfirmedFrames >= 3) {
+        void terminateScreenLiveSession({
+          sessionId: connection.sessionId,
+          organizationId: connection.organizationId,
+          reason: 'INDICATOR_UNAVAILABLE',
+          metadata: { code: 'SCREEN_LIVE_INDICATOR_REQUIRED' },
+        }).catch((error) => logger.warn({ err: error }, 'failed to end session without indicator'));
+        try {
+          connection.ws.close(4003, 'INDICATOR_REQUIRED');
+        } catch {
+          // The close handler applies the agent grace period.
+        }
+      }
+      return;
+    }
+
+    // Fail closed: no frame leaves while the session cannot be positively re-authorized.
+    if (connection.requiresIndicator && !isIntegrationSessionVerified(connection.sessionId)) return;
 
     const frame = toBuffer(raw);
     if (frame.length === 0 || frame.length > config.screenLive.maxFrameBytes) return;
@@ -705,7 +849,10 @@ export class ScreenLiveRelay {
       void touchScreenLiveViewer(viewer.viewerId).catch(() => undefined);
 
       const now = Date.now();
-      if (now - viewer.lastAuthCheckAt < AUTH_RECHECK_INTERVAL_MS) continue;
+      const recheckMs = viewer.integration
+        ? Math.min(AUTH_RECHECK_INTERVAL_MS, config.screenLive.integrationRevalidateMs)
+        : AUTH_RECHECK_INTERVAL_MS;
+      if (now - viewer.lastAuthCheckAt < recheckMs) continue;
       viewer.lastAuthCheckAt = now;
       void canScreenLiveViewerContinue(viewer.viewerId)
         .then((allowed) => {
@@ -736,7 +883,10 @@ export class ScreenLiveRelay {
       }
 
       const now = Date.now();
-      if (now - agent.lastAuthCheckAt < AUTH_RECHECK_INTERVAL_MS) continue;
+      const agentRecheckMs = agent.requiresIndicator
+        ? Math.min(AUTH_RECHECK_INTERVAL_MS, config.screenLive.integrationRevalidateMs)
+        : AUTH_RECHECK_INTERVAL_MS;
+      if (now - agent.lastAuthCheckAt < agentRecheckMs) continue;
       agent.lastAuthCheckAt = now;
       void authorizeScreenLiveAgentStream({
         organizationId: agent.organizationId,
@@ -785,6 +935,10 @@ export class ScreenLiveRelay {
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = null;
+    }
+    if (this.verifyTimer) {
+      clearInterval(this.verifyTimer);
+      this.verifyTimer = null;
     }
     for (const timers of [
       this.viewerGraceTimers,
