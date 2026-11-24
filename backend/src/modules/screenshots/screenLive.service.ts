@@ -1533,6 +1533,12 @@ export async function evaluateIntegrationSessionAuthorization(
   ) {
     return { reason: 'VIEWER_LINK_REVOKED', code: 'VIEWER_LINK_REVOKED' };
   }
+  // The link is a lease the partner keeps renewing. If it lapses (the partner is down, unreachable or stopped
+  // vouching), the stream ends here even though nothing was ever revoked. The link itself stays, so a renewal
+  // restores it; only the sessions end.
+  if (!link.leaseExpiresAt || link.leaseExpiresAt.getTime() <= now.getTime()) {
+    return { reason: 'LINK_LEASE_EXPIRED', code: 'VIEWER_LINK_LEASE_EXPIRED' };
+  }
 
   const connection = session.integrationConnectionId
     ? await IntegrationConnection.findByPk(session.integrationConnectionId, {

@@ -130,6 +130,9 @@ const envSchema = z
     SCREEN_LIVE_INTEGRATION_REVALIDATE_SECONDS: z.coerce.number().int().min(2).max(15).default(10),
     // How long an integration session may run without the employee's indicator being confirmed.
     SCREEN_LIVE_INDICATOR_CONFIRM_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(60).default(20),
+    // An integration viewer link is a lease: the partner must renew it, and when it lapses every live session
+    // started through it ends. This bounds how long a stream can outlive a partner that stopped vouching for it.
+    SCREEN_LIVE_LINK_LEASE_SECONDS: z.coerce.number().int().min(15).max(300).default(45),
 
     // Mobile attendance evidence is uploaded to the same private object store
     // as screenshots, but has its own request lifetime and location policy.
@@ -533,6 +536,7 @@ export const config = {
     viewerGraceMs: env.SCREEN_LIVE_VIEWER_GRACE_SECONDS * 1000,
     integrationRevalidateMs: env.SCREEN_LIVE_INTEGRATION_REVALIDATE_SECONDS * 1000,
     indicatorConfirmTimeoutMs: env.SCREEN_LIVE_INDICATOR_CONFIRM_TIMEOUT_SECONDS * 1000,
+    linkLeaseMs: env.SCREEN_LIVE_LINK_LEASE_SECONDS * 1000,
     viewerPath: '/ws/screen-live',
     agentPath: '/ws/screen-stream',
   },

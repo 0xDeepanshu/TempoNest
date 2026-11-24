@@ -156,6 +156,7 @@ export interface IntegrationViewerLinkAttributes {
   status: IntegrationViewerLinkStatus;
   requestId: string | null;
   linkedAt: Date;
+  leaseExpiresAt: Date | null;
   revokedAt: Date | null;
   revokedByUserId: string | null;
   revokeReason: string | null;
@@ -168,6 +169,7 @@ export type IntegrationViewerLinkCreationAttributes = Optional<
   | 'id'
   | 'status'
   | 'requestId'
+  | 'leaseExpiresAt'
   | 'revokedAt'
   | 'revokedByUserId'
   | 'revokeReason'
@@ -188,6 +190,7 @@ export class IntegrationViewerLink
   declare status: IntegrationViewerLinkStatus;
   declare requestId: string | null;
   declare linkedAt: Date;
+  declare leaseExpiresAt: Date | null;
   declare revokedAt: Date | null;
   declare revokedByUserId: string | null;
   declare revokeReason: string | null;
@@ -249,6 +252,7 @@ export function initIntegrationViewerLink(sequelize: Sequelize): typeof Integrat
         onUpdate: 'CASCADE',
       },
       linkedAt: { type: DataTypes.DATE, allowNull: false, field: 'linked_at' },
+      leaseExpiresAt: { type: DataTypes.DATE, allowNull: true, field: 'lease_expires_at' },
       revokedAt: { type: DataTypes.DATE, allowNull: true, field: 'revoked_at' },
       revokedByUserId: {
         type: DataTypes.UUID,

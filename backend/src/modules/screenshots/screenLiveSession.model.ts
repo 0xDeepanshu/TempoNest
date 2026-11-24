@@ -26,6 +26,7 @@ export const SCREEN_LIVE_TERMINATION_REASONS = [
   'INDICATOR_UNAVAILABLE',
   'FEATURE_DISABLED',
   'VERIFICATION_UNAVAILABLE',
+  'LINK_LEASE_EXPIRED',
 ] as const;
 export type ScreenLiveTerminationReason = (typeof SCREEN_LIVE_TERMINATION_REASONS)[number];
 

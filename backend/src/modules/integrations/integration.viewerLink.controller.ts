@@ -32,6 +32,7 @@ import {
   loadApprovalContext,
   openViewerLinkRequest,
   revokeViewerLinkById,
+  renewViewerLink,
   revokeViewerLinkForExternalUser,
   type ApprovalPageData,
 } from './integration.viewerLink.service';
@@ -397,6 +398,18 @@ export const getViewerLinkStatusHandler = asyncHandler(async (req: Request, res:
   });
   res.set('Cache-Control', 'no-store');
   res.status(200).json({ data: { linked: link !== null, link } });
+});
+
+export const renewViewerLinkHandler = asyncHandler(async (req: Request, res: Response) => {
+  const { leaseExpiresAt } = await renewViewerLink({
+    connectionId: req.integration!.connection.id,
+    externalUserId: req.params.externalUserId!,
+    context: integrationAuditContext(req),
+  });
+  res.set('Cache-Control', 'no-store');
+  res.status(200).json({
+    data: { leaseExpiresAt: leaseExpiresAt.toISOString(), leaseSeconds: Math.round(config.screenLive.linkLeaseMs / 1000) },
+  });
 });
 
 export const revokeViewerLinkHandler = asyncHandler(async (req: Request, res: Response) => {

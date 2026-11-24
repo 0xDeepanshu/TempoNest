@@ -708,7 +708,8 @@ export type ScreenLiveTerminationReason =
   | "INTEGRATION_DISCONNECTED"
   | "INDICATOR_UNAVAILABLE"
   | "FEATURE_DISABLED"
-  | "VERIFICATION_UNAVAILABLE";
+  | "VERIFICATION_UNAVAILABLE"
+  | "LINK_LEASE_EXPIRED";
 
 export interface ScreenLiveSessionSummary {
   id: string;

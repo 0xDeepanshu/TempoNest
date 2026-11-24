@@ -86,6 +86,14 @@ Each pass checks, from durable state: session not expired; link ACTIVE and bound
 
 A transient database error never ends a healthy session; the next tick retries.
 
+### Link lease
+
+A viewer link is a **lease**. It starts when the link is activated and must be renewed by the partner (`POST /viewer-links/users/:id/renew`) for as long as the partner still vouches for that owner. `SCREEN_LIVE_LINK_LEASE_SECONDS` sets its length (default **45 s**, allowed 15 to 300); a partner should renew at least three times per lease, for example on a 10 to 15 second timer.
+
+- While the lease is valid everything works as described above.
+- When it lapses, the next re-authorization pass (within the revalidation interval, at most 15 s) ends every live session started through the link with reason `LINK_LEASE_EXPIRED` and closes the viewer and agent sockets. New sessions, tickets and employee lists are refused with `403 VIEWER_LINK_LEASE_EXPIRED` until a renewal arrives. The link itself is **not** revoked, so a partner that was only unreachable recovers with one renewal; a revoked link cannot be renewed.
+- This closes the gap that remained when a partner could not tell WorkZen to stop a stream: the longest a stream can outlive a partner that stopped renewing is **the lease plus one check interval** (default 45 + 10 = 55 s, at most 315 s), instead of the session lifetime (default 15 minutes). A null lease counts as lapsed.
+
 ### Feature switch and fail-closed behaviour
 
 - **Switching the feature off ends running streams.** `INTEGRATION_ENABLED` and `INTEGRATION_LIVE_SCREENS_ENABLED` are part of the evaluation above. After a restart with either `false`, the next pass (within the interval) ends every ACTIVE integration session with `FEATURE_DISABLED`, a new agent stream is refused, and the live and link routes answer `404 LIVE_SCREENS_DISABLED`. Revocation and status routes stay available. The process restart itself already drops every open socket; the pass cleans up the database rows.
@@ -102,6 +110,7 @@ Every call below names the Flowtrium user in `externalUserId`; WorkZen resolves 
 | `POST /viewer-links/requests/:id/complete` | `codeVerifier` | `200` link |
 | `GET /viewer-links/users/:externalUserId` | | `{linked, link}` (never gated) |
 | `DELETE /viewer-links/users/:externalUserId` | | `{revoked}` (never gated) |
+| `POST /viewer-links/users/:externalUserId/renew` | `{}` | `200 {leaseExpiresAt, leaseSeconds}`. Extends the link lease. `403 VIEWER_LINK_REQUIRED` for an unknown or revoked link; an owner who is no longer eligible has the link withdrawn instead. Not rate limited. |
 | `GET /screen-live/employees?externalUserId=` | | mapped employees with `availability`: `AVAILABLE`, `NOT_TRACKING`, `MONITORING_DISABLED`, `AGENT_OFFLINE`, `APP_UPDATE_REQUIRED` |
 | `POST /screen-live/sessions` | `externalUserId`, `externalEmployeeId` | `201 {session, reused, delivery}`; `session.indicator.confirmed` is false until the agent confirms |
 | `GET /screen-live/sessions/:id?externalUserId=` | | session state (poll `indicator.confirmed`) |

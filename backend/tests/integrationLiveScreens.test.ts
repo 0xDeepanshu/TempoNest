@@ -854,6 +854,66 @@ describe('feature switch and fail-closed behaviour', () => {
   });
 });
 
+describe('link lease and running streams', () => {
+  const renew = (fx: Fixture) =>
+    post(fx.team.token, `/viewer-links/users/${EXTERNAL_USER_ID}/renew`, {});
+
+  it('ends a running stream when the partner stops renewing, without revoking the link', async () => {
+    const { fx, sessionId, agent, viewer } = await streamingFixture('lease-lapse');
+    // The partner stops vouching (it is down, or unreachable). Nothing is revoked and nobody calls WorkZen.
+    await IntegrationViewerLink.update({ leaseExpiresAt: new Date(Date.now() - 1000) }, { where: { id: fx.link.id } });
+
+    expect(await revalidateIntegrationScreenLiveSessions()).toBe(1);
+    await vi.waitFor(() => expect(viewer.state.closeCode).not.toBeNull(), { timeout: 3000 });
+    await vi.waitFor(() => expect(agent.state.closeCode).not.toBeNull(), { timeout: 3000 });
+    expect((await sessionRow(sessionId)).terminationReason).toBe('LINK_LEASE_EXPIRED');
+    expect((await IntegrationViewerLink.findByPk(fx.link.id))?.status).toBe('ACTIVE');
+
+    // New work waits for a renewal, which restores the link.
+    const blocked = await startSession(fx);
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('VIEWER_LINK_LEASE_EXPIRED');
+    expect((await renew(fx)).status).toBe(200);
+    expect((await startSession(fx)).status).toBe(201);
+  });
+
+  it('ends a session by the passage of time alone once the lease runs out', async () => {
+    const fx = await liveFixture('lease-time');
+    fakeControlSocket(fx);
+    const started = await startSession(fx);
+    const sessionId = started.body.data.session.id as string;
+    await IntegrationViewerLink.update({ leaseExpiresAt: new Date(Date.now() + 1500) }, { where: { id: fx.link.id } });
+
+    expect(await revalidateIntegrationScreenLiveSessions()).toBe(0); // still inside the lease
+    await new Promise((resolve) => setTimeout(resolve, 1700));
+    expect(await revalidateIntegrationScreenLiveSessions()).toBe(1);
+    expect((await sessionRow(sessionId)).terminationReason).toBe('LINK_LEASE_EXPIRED');
+  });
+
+  it('keeps a session alive for as long as the partner keeps renewing', async () => {
+    const fx = await liveFixture('lease-renewing');
+    fakeControlSocket(fx);
+    const started = await startSession(fx);
+    const sessionId = started.body.data.session.id as string;
+    await IntegrationViewerLink.update({ leaseExpiresAt: new Date(Date.now() + 1500) }, { where: { id: fx.link.id } });
+
+    expect((await renew(fx)).status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 1700));
+    expect(await revalidateIntegrationScreenLiveSessions()).toBe(0);
+    expect((await sessionRow(sessionId)).status).toBe('ACTIVE');
+  });
+
+  it('bounds how long a stream can outlive a partner that disappears to the lease plus one check interval', () => {
+    // With no renewal at all, the longest an integration stream can run is the lease, plus the interval at which
+    // running sessions are re-checked (at most 15 s). Both are capped by configuration.
+    const worstCaseMs = config.screenLive.linkLeaseMs + config.screenLive.integrationRevalidateMs;
+    expect(config.screenLive.integrationRevalidateMs).toBeLessThanOrEqual(15_000);
+    expect(config.screenLive.linkLeaseMs).toBeLessThanOrEqual(300_000);
+    expect(worstCaseMs).toBeLessThanOrEqual(315_000);
+    expect(worstCaseMs).toBeLessThan(config.screenLive.maxSessionSeconds * 1000);
+  });
+});
+
 describe('viewer tickets', () => {
   it('are single use', async () => {
     const { fx, ticket } = await streamingFixture('replay-ticket');

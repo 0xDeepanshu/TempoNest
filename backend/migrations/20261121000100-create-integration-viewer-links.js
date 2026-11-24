@@ -117,6 +117,9 @@ module.exports = {
             onUpdate: 'CASCADE',
           },
           linked_at: { type: Sequelize.DATE, allowNull: false },
+          // The partner renews this. When it lapses, live sessions started through the link end and no new one
+          // starts until it is renewed. Null counts as lapsed.
+          lease_expires_at: { type: Sequelize.DATE, allowNull: true },
           revoked_at: { type: Sequelize.DATE, allowNull: true },
           revoked_by_user_id: {
             type: Sequelize.UUID,

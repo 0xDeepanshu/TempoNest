@@ -11,6 +11,7 @@ import {
   sequelize,
 } from '../src/database';
 import { hashIntegrationValue } from '../src/modules/integrations/integration.crypto';
+import { config } from '../src/config/env';
 import { resolveVerifiedViewer } from '../src/modules/integrations/integration.viewerLink.service';
 import {
   API,
@@ -630,5 +631,84 @@ describe('revocation', () => {
     expect((await IntegrationViewerLink.findByPk(first.link.id))?.revokeReason).toBe('RELINKED');
     expect((await ScreenLiveSession.findByPk(session.id))?.terminationReason).toBe('VIEWER_LINK_REVOKED');
     expect(await IntegrationViewerLink.count({ where: { status: 'ACTIVE' } })).toBe(1);
+  });
+});
+
+describe('link lease', () => {
+  const renew = (token: string, user = EXTERNAL_USER_ID) => integrationPost(token, `/viewer-links/users/${user}/renew`, {});
+
+  it('starts a lease when the link is activated, and a renewal extends it', async () => {
+    const team = await createTeam('lease-renew');
+    const { link } = await linkOwner(team);
+    const leaseMs = config.screenLive.linkLeaseMs;
+    const first = (await IntegrationViewerLink.findByPk(link.id))!.leaseExpiresAt!.getTime();
+    expect(first).toBeGreaterThan(Date.now());
+    expect(first).toBeLessThanOrEqual(Date.now() + leaseMs);
+
+    await IntegrationViewerLink.update({ leaseExpiresAt: new Date(Date.now() + 1000) }, { where: { id: link.id } });
+    const renewed = await renew(team.token);
+    expect(renewed.status).toBe(200);
+    expect(renewed.body.data.leaseSeconds).toBe(leaseMs / 1000);
+    const after = (await IntegrationViewerLink.findByPk(link.id))!.leaseExpiresAt!.getTime();
+    expect(after - Date.now()).toBeGreaterThan(leaseMs - 5000);
+  });
+
+  it('refuses to renew an unknown link, and a link that was revoked', async () => {
+    const team = await createTeam('lease-unknown');
+    const unknown = await renew(team.token, 'nobody');
+    expect(unknown.status).toBe(403);
+    expect(unknown.body.error.code).toBe('VIEWER_LINK_REQUIRED');
+
+    await linkOwner(team);
+    expect((await integrationDelete(team.token, `/viewer-links/users/${EXTERNAL_USER_ID}`)).status).toBe(200);
+    expect((await renew(team.token)).body.error.code).toBe('VIEWER_LINK_REQUIRED');
+  });
+
+  it('withdraws the link instead of renewing it when the owner is no longer an owner', async () => {
+    const team = await createTeam('lease-demoted');
+    const { link } = await linkOwner(team);
+    await Membership.update({ role: 'ADMIN' }, { where: { userId: team.owner.user.id, organizationId: team.orgId } });
+    const response = await renew(team.token);
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('VIEWER_LINK_OWNER_REQUIRED');
+    const row = await IntegrationViewerLink.findByPk(link.id);
+    expect(row?.status).toBe('REVOKED');
+    expect(row?.revokeReason).toBe('IDENTITY_NO_LONGER_ELIGIBLE');
+  });
+
+  it('needs the screens:live scope', async () => {
+    const owner = await createOwner(uniqueEmail('lease-scope'), 'Lease Scope Org');
+    const client = await createClient();
+    const connected = await connect({
+      approver: owner,
+      organizationId: owner.organization.id,
+      client,
+      scopes: ['attendance:read', 'employees:read'],
+      externalOrganizationId: 'flowtrium-org-lease-scope',
+    });
+    if (!('accessToken' in connected)) throw new Error('connection failed');
+    const response = await renew(connected.accessToken);
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('INTEGRATION_SCOPE_DENIED');
+  });
+
+  it('blocks live calls while the lease has lapsed, and a renewal restores them', async () => {
+    const team = await createTeam('lease-lapsed');
+    const { link } = await linkOwner(team);
+    await IntegrationViewerLink.update({ leaseExpiresAt: new Date(Date.now() - 1000) }, { where: { id: link.id } });
+
+    const blocked = await integrationGet(team.token, `/screen-live/employees?externalUserId=${EXTERNAL_USER_ID}`);
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('VIEWER_LINK_LEASE_EXPIRED');
+    expect((await IntegrationViewerLink.findByPk(link.id))?.status).toBe('ACTIVE'); // lapsed, not revoked
+
+    expect((await renew(team.token)).status).toBe(200);
+    const restored = await integrationGet(team.token, `/screen-live/employees?externalUserId=${EXTERNAL_USER_ID}`);
+    expect(restored.status).toBe(200);
+  });
+
+  it('keeps the lease inside its documented bounds', () => {
+    expect(config.screenLive.linkLeaseMs).toBeGreaterThanOrEqual(15_000);
+    expect(config.screenLive.linkLeaseMs).toBeLessThanOrEqual(300_000);
   });
 });

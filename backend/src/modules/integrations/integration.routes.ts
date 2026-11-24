@@ -25,6 +25,7 @@ import {
   completeViewerLinkRequestHandler,
   createViewerLinkRequestHandler,
   getViewerLinkStatusHandler,
+  renewViewerLinkHandler,
   revokeViewerLinkHandler,
 } from './integration.viewerLink.controller';
 import { createApiRateLimiter } from '../../middleware/rateLimit';
@@ -225,6 +226,15 @@ export function createIntegrationDataRouter(): Router {
     requireIntegrationAuth(['screens:live']),
     validate({ params: integrationViewerLinkUserParamsSchema }),
     getViewerLinkStatusHandler,
+  );
+
+  // Lease renewal. Deliberately not rate limited: the partner calls it every few seconds for each linked owner.
+  router.post(
+    '/viewer-links/users/:externalUserId/renew',
+    requireLiveScreensEnabled,
+    requireIntegrationAuth(['screens:live']),
+    validate({ params: integrationViewerLinkUserParamsSchema }),
+    renewViewerLinkHandler,
   );
 
   router.delete(

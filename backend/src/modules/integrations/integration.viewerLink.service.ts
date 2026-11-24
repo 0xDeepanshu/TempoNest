@@ -535,6 +535,7 @@ export async function completeViewerLinkRequest(options: {
         externalUserLabel: request.externalUserLabel,
         requestId: request.id,
         linkedAt: now,
+        leaseExpiresAt: new Date(now.getTime() + config.screenLive.linkLeaseMs),
       },
       { transaction },
     );
@@ -618,6 +619,12 @@ export async function resolveVerifiedViewer(options: {
     throw AppError.forbidden(
       'This Flowtrium account is not linked to a WorkZen owner',
       'VIEWER_LINK_REQUIRED',
+    );
+  }
+  if (!link.leaseExpiresAt || link.leaseExpiresAt.getTime() <= Date.now()) {
+    throw AppError.forbidden(
+      'The partner has not renewed this link in time. Renew it and try again.',
+      'VIEWER_LINK_LEASE_EXPIRED',
     );
   }
   try {
@@ -720,6 +727,37 @@ export async function revokeViewerLinkForExternalUser(options: {
   });
   if (!link) return false;
   return revokeViewerLinkById({ linkId: link.id, reason: 'EXTERNAL_REVOKED', context: options.context });
+}
+
+/**
+ * Extends the lease of an ACTIVE link. The partner calls this on a short timer for every link it still vouches for.
+ * The same eligibility rules as for any call apply: an owner who is no longer eligible has the link withdrawn
+ * instead of renewed. A lapsed link is renewed too, which is what lets a partner recover after an outage, but never a
+ * revoked one.
+ */
+export async function renewViewerLink(options: {
+  connectionId: string;
+  externalUserId: string;
+  context?: AuditContext;
+}): Promise<{ leaseExpiresAt: Date }> {
+  const link = await IntegrationViewerLink.findOne({
+    where: { connectionId: options.connectionId, externalUserId: options.externalUserId, status: 'ACTIVE' },
+  });
+  if (!link) {
+    throw AppError.forbidden('This Flowtrium account is not linked to a WorkZen owner', 'VIEWER_LINK_REQUIRED');
+  }
+  try {
+    await assertEligibleLinkOwner({ userId: link.workzenUserId, organizationId: link.organizationId });
+    await assertConnectionAllowsLiveScreens(link.connectionId);
+  } catch (error) {
+    if (error instanceof AppError && error.code !== 'SCREEN_LIVE_POLICY_DISABLED') {
+      await revokeViewerLinkById({ linkId: link.id, reason: 'IDENTITY_NO_LONGER_ELIGIBLE', context: options.context });
+    }
+    throw error;
+  }
+  const leaseExpiresAt = new Date(Date.now() + config.screenLive.linkLeaseMs);
+  await link.update({ leaseExpiresAt });
+  return { leaseExpiresAt };
 }
 
 export async function listViewerLinks(organizationId: string): Promise<ViewerLinkView[]> {
