@@ -8,6 +8,7 @@ import {
   IntegrationViewerLinkRequest,
   Membership,
   ScreenLiveSession,
+  sequelize,
 } from '../src/database';
 import { hashIntegrationValue } from '../src/modules/integrations/integration.crypto';
 import { resolveVerifiedViewer } from '../src/modules/integrations/integration.viewerLink.service';
@@ -331,16 +332,18 @@ describe('identity link flow', () => {
     expect(await IntegrationViewerLink.count({ where: { connectionId: team.connectionId } })).toBe(1);
   });
 
-  it('decides exactly once when two approvals race', async () => {
+  // Two approvals racing needs real row locks and separate connections, which PostgreSQL provides. The
+  // in-memory SQLite test database has one shared connection, where overlapping transactions corrupt each
+  // other (and the next test), so this runs on PostgreSQL (CI runs it there). The sequential replay and
+  // re-decision cases above cover the same guarantee on every database.
+  it.runIf(sequelize.getDialect() === 'postgres')('decides exactly once when two approvals race', async () => {
     const team = await createTeam('race');
     const { response } = await requestLink(team.token);
     const { requestId, approvalUrl } = response.body.data;
     await openApproval(team.owner, approvalUrl);
     const results = await Promise.all([decide(team.owner, requestId), decide(team.owner, requestId)]);
-    // Exactly one decision is recorded. The loser is refused (410 under PostgreSQL row locking; on the
-    // single-writer in-memory test database it can surface as a server error), and never also succeeds.
-    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
-    expect(results.filter((r) => r.status !== 200).every((r) => r.status >= 400)).toBe(true);
+    // Exactly one decision wins; the other is refused as already decided.
+    expect(results.map((r) => r.status).sort()).toEqual([200, 410]);
     expect((await IntegrationViewerLinkRequest.findByPk(requestId))?.status).toBe('APPROVED');
     expect(
       await AuditEvent.count({

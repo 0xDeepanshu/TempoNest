@@ -8,14 +8,18 @@ import { revalidateIntegrationScreenLiveSessions } from './screenLive.service';
  * schema caps at 15 seconds, so a revocation reaches a running stream within that bound (plus the time
  * one evaluation takes).
  */
+/** Stop function that also lets a caller wait for the pass that is running, for clean shutdown and tests. */
+export type IntegrationRevalidationHandle = (() => void) & { idle: () => Promise<void> };
+
 export function startIntegrationScreenLiveRevalidation(
   intervalMs = config.screenLive.integrationRevalidateMs,
-): () => void {
+): IntegrationRevalidationHandle {
   let running = false;
+  let current: Promise<unknown> = Promise.resolve();
   const run = () => {
     if (running) return;
     running = true;
-    void revalidateIntegrationScreenLiveSessions()
+    current = revalidateIntegrationScreenLiveSessions()
       .then((ended) => {
         if (ended > 0) logger.info({ ended }, 'integration live sessions ended by revalidation');
       })
@@ -28,5 +32,9 @@ export function startIntegrationScreenLiveRevalidation(
   run();
   const timer = setInterval(run, intervalMs);
   timer.unref();
-  return () => clearInterval(timer);
+  const stop = (() => clearInterval(timer)) as IntegrationRevalidationHandle;
+  stop.idle = async () => {
+    await current;
+  };
+  return stop;
 }

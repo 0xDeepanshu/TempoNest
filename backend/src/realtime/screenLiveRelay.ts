@@ -129,6 +129,9 @@ export class ScreenLiveRelay {
   private readonly expiryTimers = new Map<string, NodeJS.Timeout>();
   private readonly handshakeTimeoutMs: number;
 
+  /** Background database work started by socket events and timers, so shutdown and tests can await it. */
+  private readonly inFlight = new Set<Promise<unknown>>();
+
   private unsubscribe: (() => void) | null = null;
   private sweepTimer: NodeJS.Timeout | null = null;
   private verifyTimer: NodeJS.Timeout | null = null;
@@ -138,6 +141,29 @@ export class ScreenLiveRelay {
 
   constructor(options: ScreenLiveRelayOptions = {}) {
     this.handshakeTimeoutMs = options.viewerHandshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
+  }
+
+  /**
+   * Runs a fire-and-forget task (a database write started by a socket event or a timer). A failure is
+   * logged, never thrown, and the task is remembered until it settles so `idle()` can wait for it.
+   */
+  private fire(task: Promise<unknown>): void {
+    const tracked: Promise<unknown> = task
+      .then(
+        () => undefined,
+        (error: unknown) => logger.warn({ err: error }, 'live screen relay background task failed'),
+      )
+      .finally(() => {
+        this.inFlight.delete(tracked);
+      });
+    this.inFlight.add(tracked);
+  }
+
+  /** Resolves once every background task started so far, and any it started in turn, has settled. */
+  async idle(): Promise<void> {
+    while (this.inFlight.size > 0) {
+      await Promise.all([...this.inFlight]);
+    }
   }
 
   attach(server: HttpServer): this {
@@ -219,7 +245,7 @@ export class ScreenLiveRelay {
         );
       }, this.handshakeTimeoutMs),
       onMessage: (raw: RawData, isBinary: boolean) => {
-        void this.handleViewerAuthMessage(pending, raw, isBinary);
+        this.fire(this.handleViewerAuthMessage(pending, raw, isBinary));
       },
     };
     pending.timer.unref();
@@ -434,7 +460,7 @@ export class ScreenLiveRelay {
       return;
     }
 
-    void authenticateAgentUpgrade(req)
+    this.fire(authenticateAgentUpgrade(req)
       .then(async (context) => {
         const session = await authorizeScreenLiveAgentStream({
           organizationId: context.organization.id,
@@ -448,12 +474,12 @@ export class ScreenLiveRelay {
         ) {
           // An older desktop app cannot show the employee the indicator. It is refused, and the session
           // ends instead of waiting for an app that can never confirm.
-          void terminateScreenLiveSession({
+          this.fire(terminateScreenLiveSession({
             sessionId: session.id,
             organizationId: session.organizationId,
             reason: 'INDICATOR_UNAVAILABLE',
             metadata: { code: 'SCREEN_LIVE_INDICATOR_UNSUPPORTED' },
-          }).catch((error) => logger.warn({ err: error }, 'failed to end session for unsupported agent'));
+          }).catch((error) => logger.warn({ err: error }, 'failed to end session for unsupported agent')));
           rejectUpgrade(
             socket,
             403,
@@ -478,7 +504,7 @@ export class ScreenLiveRelay {
         const code = (error as { code?: string }).code ?? 'UNAUTHENTICATED';
         const message = error instanceof Error ? error.message : 'Authorization failed';
         rejectUpgrade(socket, status, code, message);
-      });
+      }));
   }
 
   private registerAgent(
@@ -518,12 +544,12 @@ export class ScreenLiveRelay {
     this.agentStreams.set(session.id, connection);
     if (connection.requiresIndicator) {
       // Every stream connection starts unconfirmed, even if an earlier one was confirmed.
-      void setScreenLiveIndicatorState({
+      this.fire(setScreenLiveIndicatorState({
         sessionId: session.id,
         organizationId: session.organizationId,
         agentId: session.desktopAgentId,
         visible: false,
-      }).catch((error) => logger.warn({ err: error }, 'failed to reset indicator state'));
+      }).catch((error) => logger.warn({ err: error }, 'failed to reset indicator state')));
     }
     this.ensureExpiryTimer(session.id, connection.expiresAt);
 
@@ -564,12 +590,12 @@ export class ScreenLiveRelay {
       this.agentStreams.delete(connection.sessionId);
       if (connection.requiresIndicator) {
         connection.indicatorConfirmed = false;
-        void setScreenLiveIndicatorState({
+        this.fire(setScreenLiveIndicatorState({
           sessionId: connection.sessionId,
           organizationId: connection.organizationId,
           agentId: connection.agentId,
           visible: false,
-        }).catch((error) => logger.warn({ err: error }, 'failed to clear indicator state'));
+        }).catch((error) => logger.warn({ err: error }, 'failed to clear indicator state')));
       }
       if (this.closed) return;
       this.scheduleAgentGrace(connection.sessionId);
@@ -587,7 +613,7 @@ export class ScreenLiveRelay {
   private handleIndicatorMessage(connection: AgentStreamConnection, visible: boolean): void {
     if (!connection.requiresIndicator) return;
     connection.indicatorConfirmed = visible;
-    void setScreenLiveIndicatorState({
+    this.fire(setScreenLiveIndicatorState({
       sessionId: connection.sessionId,
       organizationId: connection.organizationId,
       agentId: connection.agentId,
@@ -612,7 +638,7 @@ export class ScreenLiveRelay {
           metadata: { code: 'SCREEN_LIVE_INDICATOR_HIDDEN' },
         });
       })
-      .catch((error) => logger.warn({ err: error }, 'failed to record live indicator state'));
+      .catch((error) => logger.warn({ err: error }, 'failed to record live indicator state')));
   }
 
   /**
@@ -629,24 +655,24 @@ export class ScreenLiveRelay {
       this.endLocal(agent.sessionId, 'VERIFICATION_UNAVAILABLE');
     }
     for (const sessionId of [...this.pendingTerminations]) {
-      void terminateScreenLiveSession({
+      this.fire(terminateScreenLiveSession({
         sessionId,
         reason: 'VERIFICATION_UNAVAILABLE',
         metadata: { code: 'SCREEN_LIVE_VERIFICATION_UNAVAILABLE' },
       })
         .then(() => this.pendingTerminations.delete(sessionId))
-        .catch((error) => logger.warn({ err: error, sessionId }, 'will retry ending unverifiable session'));
+        .catch((error) => logger.warn({ err: error, sessionId }, 'will retry ending unverifiable session')));
     }
   }
 
   private handleFrame(connection: AgentStreamConnection, raw: RawData): void {
     const now = Date.now();
     if (now >= connection.expiresAt) {
-      void terminateScreenLiveSession({
+      this.fire(terminateScreenLiveSession({
         sessionId: connection.sessionId,
         organizationId: connection.organizationId,
         reason: 'EXPIRED',
-      }).catch((error) => logger.warn({ err: error }, 'failed to expire live screen session'));
+      }).catch((error) => logger.warn({ err: error }, 'failed to expire live screen session')));
       return;
     }
 
@@ -655,12 +681,12 @@ export class ScreenLiveRelay {
     if (connection.requiresIndicator && !connection.indicatorConfirmed) {
       connection.unconfirmedFrames += 1;
       if (connection.unconfirmedFrames >= 3) {
-        void terminateScreenLiveSession({
+        this.fire(terminateScreenLiveSession({
           sessionId: connection.sessionId,
           organizationId: connection.organizationId,
           reason: 'INDICATOR_UNAVAILABLE',
           metadata: { code: 'SCREEN_LIVE_INDICATOR_REQUIRED' },
-        }).catch((error) => logger.warn({ err: error }, 'failed to end session without indicator'));
+        }).catch((error) => logger.warn({ err: error }, 'failed to end session without indicator')));
         try {
           connection.ws.close(4003, 'INDICATOR_REQUIRED');
         } catch {
@@ -733,10 +759,10 @@ export class ScreenLiveRelay {
     }
     this.viewerMeta.delete(connection.ws);
 
-    void markScreenLiveViewerLeft({
+    this.fire(markScreenLiveViewerLeft({
       viewerId: connection.viewerId,
       reason,
-    }).catch((error) => logger.warn({ err: error }, 'failed to record viewer departure'));
+    }).catch((error) => logger.warn({ err: error }, 'failed to record viewer departure')));
   }
 
   private scheduleViewerGrace(sessionId: string): void {
@@ -745,10 +771,10 @@ export class ScreenLiveRelay {
       this.viewerGraceTimers.delete(sessionId);
       if (this.closed) return;
       if ((this.viewers.get(sessionId)?.size ?? 0) > 0) return;
-      void terminateScreenLiveSession({
+      this.fire(terminateScreenLiveSession({
         sessionId,
         reason: 'ALL_VIEWERS_LEFT',
-      }).catch((error) => logger.warn({ err: error }, 'failed to stop unattended live session'));
+      }).catch((error) => logger.warn({ err: error }, 'failed to stop unattended live session')));
     }, config.screenLive.viewerGraceMs);
     timer.unref();
     this.viewerGraceTimers.set(sessionId, timer);
@@ -760,10 +786,10 @@ export class ScreenLiveRelay {
       this.agentGraceTimers.delete(sessionId);
       if (this.closed) return;
       if (this.agentStreams.has(sessionId)) return;
-      void terminateScreenLiveSession({
+      this.fire(terminateScreenLiveSession({
         sessionId,
         reason: 'AGENT_DISCONNECTED',
-      }).catch((error) => logger.warn({ err: error }, 'failed to stop disconnected live session'));
+      }).catch((error) => logger.warn({ err: error }, 'failed to stop disconnected live session')));
     }, config.screenLive.agentGraceMs);
     timer.unref();
     this.agentGraceTimers.set(sessionId, timer);
@@ -775,9 +801,9 @@ export class ScreenLiveRelay {
     const timer = setTimeout(() => {
       this.expiryTimers.delete(sessionId);
       if (this.closed) return;
-      void terminateScreenLiveSession({ sessionId, reason: 'EXPIRED' }).catch((error) =>
+      this.fire(terminateScreenLiveSession({ sessionId, reason: 'EXPIRED' }).catch((error) =>
         logger.warn({ err: error }, 'failed to expire live screen session'),
-      );
+      ));
     }, delay);
     timer.unref();
     this.expiryTimers.set(sessionId, timer);
@@ -846,7 +872,7 @@ export class ScreenLiveRelay {
         ws.terminate();
         continue;
       }
-      void touchScreenLiveViewer(viewer.viewerId).catch(() => undefined);
+      this.fire(touchScreenLiveViewer(viewer.viewerId).catch(() => undefined));
 
       const now = Date.now();
       const recheckMs = viewer.integration
@@ -854,7 +880,7 @@ export class ScreenLiveRelay {
         : AUTH_RECHECK_INTERVAL_MS;
       if (now - viewer.lastAuthCheckAt < recheckMs) continue;
       viewer.lastAuthCheckAt = now;
-      void canScreenLiveViewerContinue(viewer.viewerId)
+      this.fire(canScreenLiveViewerContinue(viewer.viewerId)
         .then((allowed) => {
           if (allowed || this.closed) return;
           sendJson(ws, {
@@ -866,7 +892,7 @@ export class ScreenLiveRelay {
         })
         .catch((error) =>
           logger.warn({ err: error }, 'failed to revalidate live screen viewer'),
-        );
+        ));
     }
 
     for (const agent of [...this.agentStreams.values()]) {
@@ -888,7 +914,7 @@ export class ScreenLiveRelay {
         : AUTH_RECHECK_INTERVAL_MS;
       if (now - agent.lastAuthCheckAt < agentRecheckMs) continue;
       agent.lastAuthCheckAt = now;
-      void authorizeScreenLiveAgentStream({
+      this.fire(authorizeScreenLiveAgentStream({
         organizationId: agent.organizationId,
         sessionId: agent.sessionId,
         employeeId: agent.employeeId,
@@ -917,7 +943,7 @@ export class ScreenLiveRelay {
           } catch {
             agent.ws.terminate();
           }
-        });
+        }));
     }
   }
 

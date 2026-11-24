@@ -25,6 +25,7 @@ import {
   evaluateIntegrationSessionAuthorization,
   revalidateIntegrationScreenLiveSessions,
   setScreenLiveIndicatorState,
+  terminateScreenLiveSession,
 } from '../src/modules/screenshots/screenLive.service';
 import { API, app, createOwner, loginBrowser, resetDatabase, uniqueEmail } from './helpers';
 import {
@@ -50,7 +51,17 @@ beforeAll(async () => {
   server = createServer(createApp());
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   agentWss = attachAgentWebSocketServer(server);
+  // The relay starts its own periodic timers (socket sweep, verification) when it is attached. Tests
+  // drive every pass explicitly (revalidate..., relay.enforceVerification()), so those timers are
+  // pushed out of reach here: a timer firing in the middle of another test would run database work
+  // on the shared in-memory SQLite connection. The real timer path is covered by its own test.
+  const savedSweep = config.timeTracking.wsSweepIntervalMs;
+  const savedRevalidate = config.screenLive.integrationRevalidateMs;
+  config.timeTracking.wsSweepIntervalMs = 3_600_000;
+  config.screenLive.integrationRevalidateMs = 3_600_000;
   relay = attachScreenLiveRelay(server, { viewerHandshakeTimeoutMs: 400 });
+  config.timeTracking.wsSweepIntervalMs = savedSweep;
+  config.screenLive.integrationRevalidateMs = savedRevalidate;
   port = (server.address() as AddressInfo).port;
 });
 
@@ -62,19 +73,44 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-beforeEach(async () => {
-  agentHub.closeAll(1001, 'test reset');
-  for (const ws of clients) ws.terminate();
+/**
+ * Leaves nothing running behind a test: sessions are ended through the service (which makes the relay
+ * clear their grace and expiry timers), every socket is closed and awaited, and the relay's background
+ * database work is drained. Without this, work from one test can land in the middle of the next test's
+ * transaction on the single in-memory SQLite connection.
+ */
+async function settle(endSessions: boolean): Promise<void> {
+  if (endSessions) {
+    for (const row of await ScreenLiveSession.findAll({ where: { status: 'ACTIVE' } })) {
+      await terminateScreenLiveSession({
+        sessionId: row.id,
+        organizationId: row.organizationId,
+        reason: 'SERVER_SHUTDOWN',
+      });
+    }
+  }
+  agentHub.closeAll(1001, 'test finished');
+  await Promise.all(
+    [...clients].map(
+      (ws) =>
+        new Promise<void>((resolve) => {
+          if (ws.readyState === WebSocket.CLOSED) return resolve();
+          ws.once('close', () => resolve());
+          ws.terminate();
+        }),
+    ),
+  );
   clients.clear();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await relay.idle();
+}
+
+beforeEach(async () => {
+  await settle(false);
   await resetDatabase();
 });
 
 afterEach(async () => {
-  agentHub.closeAll(1001, 'test finished');
-  for (const ws of clients) ws.terminate();
-  clients.clear();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await settle(true);
 });
 
 // --- WebSocket helpers -------------------------------------------------------------------------
@@ -556,6 +592,7 @@ describe('continuity of running integration sessions', () => {
       expect((await sessionRow(session.id)).terminationReason).toBe('VIEWER_LINK_REVOKED');
     } finally {
       stop();
+      await stop.idle();
     }
   });
 });
