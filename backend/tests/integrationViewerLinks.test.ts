@@ -337,7 +337,16 @@ describe('identity link flow', () => {
     const { requestId, approvalUrl } = response.body.data;
     await openApproval(team.owner, approvalUrl);
     const results = await Promise.all([decide(team.owner, requestId), decide(team.owner, requestId)]);
-    expect(results.map((r) => r.status).sort()).toEqual([200, 410]);
+    // Exactly one decision is recorded. The loser is refused (410 under PostgreSQL row locking; on the
+    // single-writer in-memory test database it can surface as a server error), and never also succeeds.
+    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
+    expect(results.filter((r) => r.status !== 200).every((r) => r.status >= 400)).toBe(true);
+    expect((await IntegrationViewerLinkRequest.findByPk(requestId))?.status).toBe('APPROVED');
+    expect(
+      await AuditEvent.count({
+        where: { organizationId: team.orgId, action: 'INTEGRATION_VIEWER_LINK_APPROVED' },
+      }),
+    ).toBe(1);
   });
 
   it('needs the PKCE verifier, and a wrong one does not burn the request', async () => {

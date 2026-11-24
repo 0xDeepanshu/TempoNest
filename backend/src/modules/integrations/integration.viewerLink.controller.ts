@@ -84,8 +84,9 @@ function detailsFrom(data: ApprovalPageData): ViewerLinkPageDetails {
   };
 }
 
+/** A refusal keeps its own status. Anything unexpected (for example a database error) is a server error. */
 function errorStatus(error: unknown): number {
-  return error instanceof AppError ? error.statusCode : 400;
+  return error instanceof AppError ? error.statusCode : 500;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
