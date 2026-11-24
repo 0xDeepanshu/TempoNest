@@ -114,7 +114,8 @@ jobs:
           TEST_DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_test
         run: |
           exec > >(tee "$RUNNER_TEMP/backend-tests-focused.log") 2>&1
-          npx vitest run \
+          # One file at a time: the suites share this single PostgreSQL database.
+          npx vitest run --no-file-parallelism \
             tests/integrationViewerLinks.test.ts \
             tests/integrationLiveScreens.test.ts \
             tests/screenLive.test.ts \
@@ -123,9 +124,7 @@ jobs:
             tests/desktopAgents.test.ts \
             tests/websocket.test.ts
 
-      - name: Tests - full backend suite
-        env:
-          TEST_DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_test
+      - name: Tests - full backend suite (the repository default, in-memory database)
         run: |
           exec > >(tee "$RUNNER_TEMP/backend-tests-full.log") 2>&1
           npm test
@@ -136,7 +135,7 @@ jobs:
         run: |
           for f in "$RUNNER_TEMP"/*.log; do
             [ -f "$f" ] || continue
-            body=$(grep -E "$ANNOTATE_PATTERN" "$f" | head -70 | cut -c1-400 | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
+            body=$( (grep -E "$ANNOTATE_PATTERN" "$f" || true) | head -70 | cut -c1-400 | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
             [ -n "$body" ] && echo "::error title=$(basename "$f" .log)::$body"
           done
           exit 0
@@ -173,7 +172,7 @@ jobs:
         run: |
           for f in "$RUNNER_TEMP"/*.log; do
             [ -f "$f" ] || continue
-            body=$(grep -E "$ANNOTATE_PATTERN" "$f" | head -70 | cut -c1-400 | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
+            body=$( (grep -E "$ANNOTATE_PATTERN" "$f" || true) | head -70 | cut -c1-400 | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
             [ -n "$body" ] && echo "::error title=$(basename "$f" .log)::$body"
           done
           exit 0
@@ -206,7 +205,7 @@ jobs:
         run: |
           for f in "$RUNNER_TEMP"/*.log; do
             [ -f "$f" ] || continue
-            body=$(grep -E "$ANNOTATE_PATTERN" "$f" | head -70 | cut -c1-400 | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
+            body=$( (grep -E "$ANNOTATE_PATTERN" "$f" || true) | head -70 | cut -c1-400 | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
             [ -n "$body" ] && echo "::error title=$(basename "$f" .log)::$body"
           done
           exit 0
