@@ -2,6 +2,10 @@ name: Live screens CI
 
 # Verification for the Flowtrium live-screen integration. It runs only on the feature branch, on pull
 # requests that touch these areas, or by hand, and it deploys nothing.
+#
+# Every step copies its output to a log in $RUNNER_TEMP. When a job fails, the last step turns the
+# interesting lines of those logs into one annotation per log, so the reason for a failure is visible on
+# the run page and through the public check-run annotations without downloading raw job logs.
 on:
   workflow_dispatch:
   push:
@@ -20,6 +24,9 @@ permissions:
 concurrency:
   group: live-screens-ci-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  ANNOTATE_PATTERN: 'error TS|FAIL|AssertionError|Error:|ERROR|expected|Expected|Received|Cannot find|TypeError|ReferenceError|SyntaxError|✗|×|not ok|relation .* does not exist|violates|column .* does not exist|npm ERR!'
 
 jobs:
   backend:
@@ -42,6 +49,7 @@ jobs:
           --health-retries 12
     defaults:
       run:
+        shell: bash
         working-directory: backend
     env:
       PGPASSWORD: workzen
@@ -55,20 +63,26 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - name: Typecheck
-        run: npm run typecheck
+        run: |
+          exec > >(tee "$RUNNER_TEMP/backend-typecheck.log") 2>&1
+          npm run typecheck
       - name: Build
-        run: npm run build
+        run: |
+          exec > >(tee "$RUNNER_TEMP/backend-build.log") 2>&1
+          npm run build
 
       - name: Migration - apply every migration to an empty database
         env:
           DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_migrate
         run: |
+          exec > >(tee "$RUNNER_TEMP/backend-migrate.log") 2>&1
           psql -h localhost -U workzen -d workzen_test -c "CREATE DATABASE workzen_migrate"
           npx sequelize-cli db:migrate
           npx sequelize-cli db:migrate:status | tail -3
 
       - name: Migration - schema assertions (constraints, indexes, defaults, delete rules)
         run: |
+          exec > >(tee "$RUNNER_TEMP/backend-schema.log") 2>&1
           Q() { psql -h localhost -U workzen -d workzen_migrate -At -v ON_ERROR_STOP=1 -c "$1"; }
           expect() { if [ "$1" != "$2" ]; then echo "FAIL: $3 (got '$1', want '$2')"; exit 1; fi; echo "ok: $3"; }
           expect "$(Q "select count(*) from pg_indexes where indexname in ('integration_viewer_links_active_external_unique','integration_viewer_links_active_workzen_unique') and indexdef like '%UNIQUE%' and indexdef like '%ACTIVE%'")" 2 "partial unique indexes on active links"
@@ -84,6 +98,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_migrate
         run: |
+          exec > >(tee "$RUNNER_TEMP/backend-rollback.log") 2>&1
           Q() { psql -h localhost -U workzen -d workzen_migrate -At -v ON_ERROR_STOP=1 -c "$1"; }
           before=$(Q "select count(*) from information_schema.columns where table_name='screen_live_sessions'")
           npx sequelize-cli db:migrate:undo
@@ -97,20 +112,34 @@ jobs:
       - name: Tests - live screens, integrations and everything they touch
         env:
           TEST_DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_test
-        run: >
-          npx vitest run
-          tests/integrationViewerLinks.test.ts
-          tests/integrationLiveScreens.test.ts
-          tests/screenLive.test.ts
-          tests/integrations.test.ts
-          tests/integrations-hosted-login.test.ts
-          tests/desktopAgents.test.ts
-          tests/websocket.test.ts
+        run: |
+          exec > >(tee "$RUNNER_TEMP/backend-tests-focused.log") 2>&1
+          npx vitest run \
+            tests/integrationViewerLinks.test.ts \
+            tests/integrationLiveScreens.test.ts \
+            tests/screenLive.test.ts \
+            tests/integrations.test.ts \
+            tests/integrations-hosted-login.test.ts \
+            tests/desktopAgents.test.ts \
+            tests/websocket.test.ts
 
       - name: Tests - full backend suite
         env:
           TEST_DATABASE_URL: postgresql://workzen:workzen@localhost:5432/workzen_test
-        run: npm test
+        run: |
+          exec > >(tee "$RUNNER_TEMP/backend-tests-full.log") 2>&1
+          npm test
+
+      - name: Annotate failures
+        if: failure()
+        working-directory: .
+        run: |
+          for f in "$RUNNER_TEMP"/*.log; do
+            [ -f "$f" ] || continue
+            body=$(grep -E "$ANNOTATE_PATTERN" "$f" | head -70 | cut -c1-400 | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
+            [ -n "$body" ] && echo "::error title=$(basename "$f" .log)::$body"
+          done
+          exit 0
 
   electron:
     name: Desktop app (typecheck, tests)
@@ -118,6 +147,7 @@ jobs:
     timeout-minutes: 25
     defaults:
       run:
+        shell: bash
         working-directory: electron
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
@@ -130,9 +160,23 @@ jobs:
           cache-dependency-path: electron/package-lock.json
       - run: npm ci
       - name: Typecheck
-        run: npm run typecheck
+        run: |
+          exec > >(tee "$RUNNER_TEMP/electron-typecheck.log") 2>&1
+          npm run typecheck
       - name: Tests
-        run: npm test
+        run: |
+          exec > >(tee "$RUNNER_TEMP/electron-tests.log") 2>&1
+          npm test
+      - name: Annotate failures
+        if: failure()
+        working-directory: .
+        run: |
+          for f in "$RUNNER_TEMP"/*.log; do
+            [ -f "$f" ] || continue
+            body=$(grep -E "$ANNOTATE_PATTERN" "$f" | head -70 | cut -c1-400 | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
+            [ -n "$body" ] && echo "::error title=$(basename "$f" .log)::$body"
+          done
+          exit 0
 
   web:
     name: Web (typecheck)
@@ -140,6 +184,7 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
+        shell: bash
         working-directory: web
     steps:
       - uses: actions/checkout@v4
@@ -150,4 +195,16 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - name: Typecheck
-        run: npm run typecheck
+        run: |
+          exec > >(tee "$RUNNER_TEMP/web-typecheck.log") 2>&1
+          npm run typecheck
+      - name: Annotate failures
+        if: failure()
+        working-directory: .
+        run: |
+          for f in "$RUNNER_TEMP"/*.log; do
+            [ -f "$f" ] || continue
+            body=$(grep -E "$ANNOTATE_PATTERN" "$f" | head -70 | cut -c1-400 | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
+            [ -n "$body" ] && echo "::error title=$(basename "$f" .log)::$body"
+          done
+          exit 0
