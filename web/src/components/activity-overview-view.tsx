@@ -144,11 +144,11 @@ export function ActivityOverviewView({
     <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization.name} · ${timezone}`}
-        title="Team activity overview"
-        description="Employee-level foreground application activity for one date range. Application usage is descriptive metadata, not proof of productivity or idleness."
+        title="Team activity"
+        description="Which apps your team used, and for how long, over one date range. App usage is information, not proof of how productive someone is."
       />
 
-      <ActivityTabs current="team" />
+      <ActivityTabs current="overview" />
 
       <Card>
         <CardHeader

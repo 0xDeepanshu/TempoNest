@@ -282,7 +282,7 @@ describe("ScreenMonitoringPolicyCard", () => {
 
     expect(await screen.findByText("Disabled")).toBeInTheDocument();
     expect(
-      screen.getByText("Your role cannot change this policy."),
+      screen.getByText("You cannot change this setting."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Enable monitoring" })).not.toBeInTheDocument();
     expect(

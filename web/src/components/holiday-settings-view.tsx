@@ -15,7 +15,6 @@ import type { HolidaySettings, Organization } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { BuildingIcon, CalendarIcon, CheckSquareIcon } from "./icons";
 import { GovernmentHolidayImport } from "./government-holiday-import";
-import { LeaveTabs } from "./leave-tabs";
 import {
   Alert,
   Badge,
@@ -70,7 +69,7 @@ function formFromSettings(settings: HolidaySettings): SettingsForm {
   };
 }
 
-export function HolidaySettingsView() {
+export function HolidaySettingsView({ embedded = false }: { embedded?: boolean } = {}) {
   const { organization, membership } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const canEdit = hasPermission(membership, "holiday:settings:manage");
@@ -93,14 +92,15 @@ export function HolidaySettingsView() {
   if (settings.loading && !current) {
     return (
       <div className="space-y-5">
-        <PageHeader
-          eyebrow={organization.name}
-          title="Holiday settings"
-          description="Loading the organization holiday configuration."
-        />
-        <LeaveTabs current="holiday-settings" />
+        {embedded ? null : (
+          <PageHeader
+            eyebrow={organization.name}
+            title="Holiday rules"
+            description="Loading holiday rules."
+          />
+        )}
         <Card>
-          <LoadingBlock label="Loading holiday settings" rows={4} />
+          <LoadingBlock label="Loading holiday rules" rows={4} />
         </Card>
       </div>
     );
@@ -109,8 +109,9 @@ export function HolidaySettingsView() {
   if (settings.error && !current) {
     return (
       <div className="space-y-5">
-        <PageHeader eyebrow={organization.name} title="Holiday settings" />
-        <LeaveTabs current="holiday-settings" />
+        {embedded ? null : (
+          <PageHeader eyebrow={organization.name} title="Holiday rules" />
+        )}
         <ErrorState message={settings.error} onRetry={settings.reload} />
       </div>
     );
@@ -124,6 +125,7 @@ export function HolidaySettingsView() {
       organization={organization}
       settings={current}
       canEdit={canEdit}
+      embedded={embedded}
       onSaved={(next) => setSavedSettings({ organizationId, settings: next })}
     />
   );
@@ -165,11 +167,13 @@ function HolidaySettingsForm({
   organization,
   settings,
   canEdit,
+  embedded = false,
   onSaved,
 }: {
   organization: Organization;
   settings: HolidaySettings;
   canEdit: boolean;
+  embedded?: boolean;
   onSaved: (settings: HolidaySettings) => void;
 }) {
   const [form, setForm] = useState<SettingsForm>(() => formFromSettings(settings));
@@ -260,40 +264,54 @@ function HolidaySettingsForm({
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        eyebrow={`${organization.name} · ${organization.timezone}`}
-        title="Holiday settings"
-        description="Control how the organization holiday calendar behaves. These settings are shared by the admin calendar, employee portal, leave estimation, and attendance classification."
-        actions={
+      {embedded ? (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight text-ink">Holiday rules</h2>
+            <p className="mt-0.5 max-w-3xl text-[13px] leading-5 text-muted">
+              Which days are company holidays, and which weekdays your team works.
+            </p>
+          </div>
           <Link
             href="/admin/leave/holidays"
             className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-xs font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
           >
             <CalendarIcon className="h-3.5 w-3.5" />
-            Back to calendar
+            View calendar
           </Link>
-        }
-      />
-
-      <LeaveTabs current="holiday-settings" />
+        </div>
+      ) : (
+        <PageHeader
+          eyebrow={`${organization.name} · ${organization.timezone}`}
+          title="Holiday rules"
+          description="Choose how the holiday calendar behaves, which days your team works, and where government holidays come from."
+          actions={
+            <Link
+              href="/admin/leave/holidays"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-xs font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
+            >
+              <CalendarIcon className="h-3.5 w-3.5" />
+              View calendar
+            </Link>
+          }
+        />
+      )}
 
       {!canEdit ? (
         <Alert tone="warning" title="Read-only view">
-          Your role can view holiday settings but cannot change them. Organization owners,
-          administrators, and custom roles with holiday:settings:manage can edit this page.
+          You can see these rules but cannot change them. Ask an owner or administrator.
         </Alert>
       ) : null}
 
-      <Alert tone="info" title="Leave policies stay authoritative">
-        Working days here describe the organization calendar used for holiday display and
-        attendance classification. Each leave type continues to charge leave using its own
-        policy working days, so existing leave policies are not changed.
+      <Alert tone="info" title="Leave rules still apply per leave type">
+        These working days only drive the holiday calendar and attendance. Each leave type
+        charges leave using its own working days, so nothing here changes existing leave rules.
       </Alert>
 
       <form onSubmit={save} noValidate className="space-y-5">
         <fieldset disabled={!canEdit || saving} className="space-y-5">
           {formError ? <Alert tone="danger">{formError}</Alert> : null}
-          {saved ? <Alert tone="success">Holiday settings saved.</Alert> : null}
+          {saved ? <Alert tone="success">Holiday rules saved.</Alert> : null}
           {importNotice ? (
             <Alert tone="success" title="Government holidays imported">
               The selected holidays were added to the calendar as drafts. Publish them from the{" "}
@@ -309,20 +327,20 @@ function HolidaySettingsForm({
 
           <Card>
             <CardHeader
-              title="Calendar controls"
-              description="Choose which holiday features are available and what new holidays default to."
+              title="Calendar basics"
+              description="Choose which holiday features are available and what a new holiday starts as."
             />
             <CardBody className="space-y-5">
               <div className="grid gap-3 lg:grid-cols-3">
                 <ToggleRow
-                  title="Enable holiday management"
-                  description="When off, existing holidays remain visible but new holidays cannot be created, edited, duplicated, or deleted."
+                  title="Allow holiday editing"
+                  description="When off, holidays stay visible but cannot be added, changed, copied, or removed."
                   checked={form.enabled}
                   onChange={(enabled) => setForm({ ...form, enabled })}
                 />
                 <ToggleRow
                   title="Allow optional holidays"
-                  description="Optional holidays appear on calendars as informational dates. They are not charged as leave and do not make a day a holiday for attendance."
+                  description="Optional holidays are shown for information. They are not charged as leave and do not change attendance."
                   checked={form.optionalHolidaysEnabled}
                   onChange={(optionalHolidaysEnabled) =>
                     setForm({ ...form, optionalHolidaysEnabled })
@@ -330,7 +348,7 @@ function HolidaySettingsForm({
                 />
                 <ToggleRow
                   title="Allow half-day holidays"
-                  description="Half-day holidays charge only the working half when an employee takes leave across that date."
+                  description="A half-day holiday only charges the working half of the day."
                   checked={form.allowHalfDayHolidays}
                   onChange={(allowHalfDayHolidays) =>
                     setForm({ ...form, allowHalfDayHolidays })
@@ -340,9 +358,9 @@ function HolidaySettingsForm({
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field
-                  label="Default calendar year"
+                  label="Default year"
                   htmlFor="holiday-default-year"
-                  hint="Optional. Leave blank to open the current year first."
+                  hint="Optional. Leave blank to open the current year."
                 >
                   <Input
                     id="holiday-default-year"
@@ -358,9 +376,9 @@ function HolidaySettingsForm({
                   />
                 </Field>
                 <Field
-                  label="Default applicability"
+                  label="Who new holidays apply to"
                   htmlFor="holiday-default-applicability"
-                  hint="Used as the initial selection when adding a holiday."
+                  hint="Starting choice when you add a holiday."
                 >
                   <Select
                     id="holiday-default-applicability"
@@ -382,8 +400,8 @@ function HolidaySettingsForm({
 
           <Card>
             <CardHeader
-              title="Government holidays"
-              description="Choose the jurisdiction used for verified government holiday imports. Imported dates come from official notifications and stay drafts until published."
+              title="Official holidays"
+              description="Where verified government holidays come from. Imported dates stay drafts until you publish them."
               actions={
                 canEdit ? (
                   <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
@@ -502,8 +520,8 @@ function HolidaySettingsForm({
 
           <Card>
             <CardHeader
-              title="Weekly working days"
-              description="Used to classify weekly offs in the holiday calendar and attendance day status."
+              title="Working week"
+              description="Used for the holiday calendar and attendance. Unselected days count as weekly offs."
               actions={
                 <Badge tone="outline">{workingDaysLabel(form.workingDays)}</Badge>
               }
@@ -555,10 +573,10 @@ function HolidaySettingsForm({
 
           <div className="flex flex-wrap items-center gap-3">
             <Button type="submit" loading={saving} disabled={!canEdit}>
-              Save holiday settings
+              Save holiday rules
             </Button>
             <span className="text-xs text-muted">
-              Changes are audited and apply to future holiday and attendance calculations.
+              Changes are recorded and apply to future holiday and attendance calculations.
             </span>
           </div>
         </fieldset>

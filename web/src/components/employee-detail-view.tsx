@@ -219,8 +219,8 @@ export function EmployeeDetailView({
 
         <Card>
           <CardHeader
-            title="Current tracking state"
-            description="Durable state from sessions and agent presence, not an in-memory socket."
+            title="Current status"
+            description="Live status based on the desktop app and recent activity."
             actions={trackingRow ? <StatusBadge status={trackingRow.state} /> : null}
           />
           <CardBody>
@@ -239,7 +239,7 @@ export function EmployeeDetailView({
                   </div>
                 </div>
                 <div>
-                  <p className="text-xs text-muted">Agent</p>
+                  <p className="text-xs text-muted">Desktop app</p>
                   <p className="mt-1 text-[13px] font-medium text-ink">
                     {trackingRow.agent?.name ?? "No active agent"}
                   </p>

@@ -11,6 +11,7 @@ import {
   ensureBalance,
   inRolledBackTransaction,
   loadLeaveTypeWithPolicy,
+  periodConfigFor,
   withTransactionRetry,
 } from './leaveBalance.service';
 import { balancePeriodFor, localDate, roundUnits, toUnits } from './leaveCalendar';
@@ -164,8 +165,14 @@ async function assignOneInTransaction(options: {
 
   const today = localDate(now, organization.timezone);
   const anchor = input.effectiveDate ?? today;
-  const period = balancePeriodFor(anchor, policy, organization.timezone);
-  const currentPeriod = balancePeriodFor(today, policy, organization.timezone);
+  const config = await periodConfigFor({
+    organization,
+    employeeId: target.employeeId,
+    policy,
+    transaction,
+  });
+  const period = balancePeriodFor(anchor, config, organization.timezone);
+  const currentPeriod = balancePeriodFor(today, config, organization.timezone);
 
   let balance = await LeaveBalance.findOne({
     where: {

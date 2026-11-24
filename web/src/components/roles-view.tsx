@@ -507,7 +507,7 @@ function RoleEditorModal({
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search permissions"
-                  className="h-8 w-56 rounded-lg border border-line bg-surface pl-8 pr-2 text-xs text-ink outline-none transition focus:border-ink focus:ring-2 focus:ring-ink/10"
+                  className="h-8 w-56 rounded-lg border border-line bg-surface pl-8 pr-2 text-xs text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/25"
                 />
               </div>
             </div>
@@ -841,9 +841,8 @@ export function RolesView() {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow={organization.name}
         title="Roles & permissions"
-        description="Owner, admin, and employee roles are protected. Owners can customize the Manager role for this organization, and owners or admins can create custom roles with explicit permissions."
+        description="Decide what each role can see and do. Built-in roles stay protected; you can adjust Manager and add your own roles."
         actions={
           canManage ? (
             <Button onClick={() => setCreating(true)} disabled={!catalog.data}>
@@ -862,8 +861,8 @@ export function RolesView() {
 
       {!canManage ? (
         <Alert tone="info" title="Read-only access">
-          You can review roles. Only the organization owner can customize the Manager role;
-          owners and administrators can create, edit, assign, or delete custom roles.
+          You can look at roles but not change them. Owners can adjust Manager; owners and
+          administrators can create and edit custom roles.
         </Alert>
       ) : null}
 
@@ -882,7 +881,7 @@ export function RolesView() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search roles"
-                className="h-8 w-56 rounded-lg border border-line bg-surface pl-8 pr-2 text-xs text-ink outline-none transition focus:border-ink focus:ring-2 focus:ring-ink/10"
+                className="h-8 w-56 rounded-lg border border-line bg-surface pl-8 pr-2 text-xs text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/25"
               />
             </div>
           }

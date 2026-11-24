@@ -6,6 +6,40 @@ import type { LeaveType } from './leaveType.model';
 export const ACCRUAL_FREQUENCIES = ['NONE', 'MONTHLY', 'QUARTERLY', 'ANNUAL'] as const;
 export type AccrualFrequency = (typeof ACCRUAL_FREQUENCIES)[number];
 
+/**
+ * How a balance is reset. CUSTOM and FINANCIAL_YEAR use the configured
+ * balancePeriodStartMonth/Day; CALENDAR_YEAR is always 1 January;
+ * JOINING_ANNIVERSARY uses the employee's membership date; NEVER creates a
+ * single open-ended period so nothing is reset automatically.
+ */
+export const RESET_PERIODS = [
+  'CALENDAR_YEAR',
+  'FINANCIAL_YEAR',
+  'JOINING_ANNIVERSARY',
+  'CUSTOM',
+  'NEVER',
+] as const;
+export type ResetPeriod = (typeof RESET_PERIODS)[number];
+
+/**
+ * Order in which credits are consumed. EXPIRY_FIRST is the default and gives
+ * the required earliest-expiry-first behaviour.
+ */
+export const CARRY_FORWARD_ORDERS = [
+  'EXPIRY_FIRST',
+  'CARRY_FORWARD_FIRST',
+  'NEW_FIRST',
+] as const;
+export type CarryForwardOrder = (typeof CARRY_FORWARD_ORDERS)[number];
+
+export const CREDIT_EXPIRY_REASONS = [
+  'NONE',
+  'MONTHLY_RESET',
+  'ANNUAL_RESET',
+  'CARRY_FORWARD',
+] as const;
+export type CreditExpiryReason = (typeof CREDIT_EXPIRY_REASONS)[number];
+
 export const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5] as const;
 
 export interface LeavePolicyAttributes {
@@ -22,6 +56,13 @@ export interface LeavePolicyAttributes {
   balancePeriodStartDay: number;
   carryForwardAllowance: number;
   maxBalance: number | null;
+  carryForwardEnabled: boolean;
+  carryForwardExpiryMonths: number | null;
+  carryForwardOrder: CarryForwardOrder;
+  resetPeriod: ResetPeriod;
+  maxCreditsPerApplication: number | null;
+  monthlyUsageLimitEnabled: boolean;
+  monthlyUsageLimit: number | null;
   prorateInitialEntitlement: boolean;
   workingDays: number[];
   isActive: boolean;
@@ -42,6 +83,13 @@ export type LeavePolicyCreationAttributes = Optional<
   | 'balancePeriodStartDay'
   | 'carryForwardAllowance'
   | 'maxBalance'
+  | 'carryForwardEnabled'
+  | 'carryForwardExpiryMonths'
+  | 'carryForwardOrder'
+  | 'resetPeriod'
+  | 'maxCreditsPerApplication'
+  | 'monthlyUsageLimitEnabled'
+  | 'monthlyUsageLimit'
   | 'prorateInitialEntitlement'
   | 'workingDays'
   | 'isActive'
@@ -72,6 +120,13 @@ export class LeavePolicy
   declare balancePeriodStartDay: number;
   declare carryForwardAllowance: number;
   declare maxBalance: number | null;
+  declare carryForwardEnabled: boolean;
+  declare carryForwardExpiryMonths: number | null;
+  declare carryForwardOrder: CarryForwardOrder;
+  declare resetPeriod: ResetPeriod;
+  declare maxCreditsPerApplication: number | null;
+  declare monthlyUsageLimitEnabled: boolean;
+  declare monthlyUsageLimit: number | null;
   declare prorateInitialEntitlement: boolean;
   declare workingDays: number[];
   declare isActive: boolean;
@@ -164,6 +219,45 @@ export function initLeavePolicy(sequelize: Sequelize): typeof LeavePolicy {
         type: DataTypes.DECIMAL(8, 2),
         allowNull: true,
         field: 'max_balance',
+      },
+      carryForwardEnabled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        field: 'carry_forward_enabled',
+        defaultValue: false,
+      },
+      carryForwardExpiryMonths: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: 'carry_forward_expiry_months',
+      },
+      carryForwardOrder: {
+        type: DataTypes.STRING(30),
+        allowNull: false,
+        field: 'carry_forward_order',
+        defaultValue: 'EXPIRY_FIRST',
+      },
+      resetPeriod: {
+        type: DataTypes.STRING(30),
+        allowNull: false,
+        field: 'reset_period',
+        defaultValue: 'CUSTOM',
+      },
+      maxCreditsPerApplication: {
+        type: DataTypes.DECIMAL(8, 2),
+        allowNull: true,
+        field: 'max_credits_per_application',
+      },
+      monthlyUsageLimitEnabled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        field: 'monthly_usage_limit_enabled',
+        defaultValue: false,
+      },
+      monthlyUsageLimit: {
+        type: DataTypes.DECIMAL(8, 2),
+        allowNull: true,
+        field: 'monthly_usage_limit',
       },
       prorateInitialEntitlement: {
         type: DataTypes.BOOLEAN,

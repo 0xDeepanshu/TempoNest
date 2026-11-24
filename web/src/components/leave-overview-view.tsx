@@ -114,7 +114,7 @@ export function LeaveOverviewView() {
       <PageHeader
         eyebrow={`${organization.name} · ${organization.timezone}`}
         title="Leave"
-        description="Review pending requests, keep an eye on balances, and maintain the leave catalog and holiday calendar."
+        description="Review requests, keep an eye on balances, and see how much leave is left."
         actions={
           <Button variant="secondary" onClick={retryAll}>
             Refresh
@@ -153,8 +153,8 @@ export function LeaveOverviewView() {
           value={types.data ? activeTypes.length : "—"}
           hint={
             types.data
-              ? `${activeTypes.filter((type) => type.isPaid).length} paid · ${activeTypes.filter((type) => !type.isPaid).length} unpaid · ${activeBalanceTypes.length} balance-based`
-              : "Loading catalog"
+              ? `${activeTypes.filter((type) => type.isPaid).length} paid · ${activeTypes.filter((type) => !type.isPaid).length} unpaid · ${activeBalanceTypes.length} use a balance`
+              : "Loading leave types"
           }
           icon={<CalendarIcon className="h-4 w-4" />}
         />
@@ -166,7 +166,7 @@ export function LeaveOverviewView() {
               ? balances.data
                 ? `Employees with ${LOW_BALANCE_THRESHOLD} days or less available${balances.data.truncated ? " · scan capped" : ""}`
                 : "Loading balances"
-              : "Requires leave:manage"
+              : "Needs leave-management access"
           }
           icon={<UsersIcon className="h-4 w-4" />}
         />
@@ -175,8 +175,8 @@ export function LeaveOverviewView() {
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>
           <CardHeader
-            title="Pending queue"
-            description="The latest requests waiting for a decision."
+            title="Waiting for review"
+            description="The latest requests that need a decision."
             actions={
               <Link
                 href="/admin/leave/requests"
@@ -222,8 +222,8 @@ export function LeaveOverviewView() {
           />
           {!canManage ? (
             <EmptyState
-              title="Balance visibility requires leave:manage"
-              description="Your role can review requests but cannot inspect employee balances."
+              title="You cannot see balances"
+              description="You can review requests, but seeing employee balances needs leave-management access."
             />
           ) : balances.loading && !balances.data ? (
             <LoadingBlock label="Loading employee balances" rows={4} />

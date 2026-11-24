@@ -35,6 +35,8 @@ import { initOrganizationHolidaySettings } from '../modules/leave/holidaySetting
 import { initLeaveBalance } from '../modules/leave/leaveBalance.model';
 import { initLeaveRequest } from '../modules/leave/leaveRequest.model';
 import { initLeaveLedgerEntry } from '../modules/leave/leaveLedgerEntry.model';
+import { initLeaveCreditTranche } from '../modules/leave/leaveCreditTranche.model';
+import { initLeaveRequestCreditAllocation } from '../modules/leave/leaveRequestCreditAllocation.model';
 import { initPasswordResetToken } from '../modules/auth/passwordResetToken.model';
 import { initIntegrationClient } from '../modules/integrations/integrationClient.model';
 import { initIntegrationConnection } from '../modules/integrations/integrationConnection.model';
@@ -87,6 +89,8 @@ export function initModels(sequelize: Sequelize) {
   const LeaveBalance = initLeaveBalance(sequelize);
   const LeaveRequest = initLeaveRequest(sequelize);
   const LeaveLedgerEntry = initLeaveLedgerEntry(sequelize);
+  const LeaveCreditTranche = initLeaveCreditTranche(sequelize);
+  const LeaveRequestCreditAllocation = initLeaveRequestCreditAllocation(sequelize);
   const PasswordResetToken = initPasswordResetToken(sequelize);
   const IntegrationClient = initIntegrationClient(sequelize);
   const IntegrationConnection = initIntegrationConnection(sequelize);
@@ -1132,6 +1136,63 @@ export function initModels(sequelize: Sequelize) {
     onDelete: 'SET NULL',
   });
 
+  LeaveBalance.hasMany(LeaveCreditTranche, {
+    foreignKey: 'balanceId',
+    as: 'creditTranches',
+    onDelete: 'CASCADE',
+  });
+  LeaveCreditTranche.belongsTo(LeaveBalance, {
+    foreignKey: 'balanceId',
+    as: 'balance',
+    onDelete: 'CASCADE',
+  });
+  LeaveCreditTranche.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+  LeaveCreditTranche.belongsTo(User, {
+    foreignKey: 'employeeId',
+    as: 'employee',
+    onDelete: 'CASCADE',
+  });
+  LeaveCreditTranche.belongsTo(LeaveType, {
+    foreignKey: 'leaveTypeId',
+    as: 'leaveType',
+    onDelete: 'CASCADE',
+  });
+  LeaveCreditTranche.belongsTo(LeaveLedgerEntry, {
+    foreignKey: 'sourceLedgerEntryId',
+    as: 'sourceLedgerEntry',
+    onDelete: 'SET NULL',
+  });
+  LeaveCreditTranche.hasMany(LeaveRequestCreditAllocation, {
+    foreignKey: 'trancheId',
+    as: 'allocations',
+    onDelete: 'CASCADE',
+  });
+
+  LeaveRequest.hasMany(LeaveRequestCreditAllocation, {
+    foreignKey: 'requestId',
+    as: 'creditAllocations',
+    onDelete: 'CASCADE',
+  });
+  LeaveRequestCreditAllocation.belongsTo(LeaveRequest, {
+    foreignKey: 'requestId',
+    as: 'request',
+    onDelete: 'CASCADE',
+  });
+  LeaveRequestCreditAllocation.belongsTo(LeaveCreditTranche, {
+    foreignKey: 'trancheId',
+    as: 'tranche',
+    onDelete: 'CASCADE',
+  });
+  LeaveRequestCreditAllocation.belongsTo(Organization, {
+    foreignKey: 'organizationId',
+    as: 'organization',
+    onDelete: 'CASCADE',
+  });
+
   PasswordResetToken.belongsTo(User, {
     foreignKey: 'userId',
     as: 'user',
@@ -1451,6 +1512,8 @@ export function initModels(sequelize: Sequelize) {
     LeaveBalance,
     LeaveRequest,
     LeaveLedgerEntry,
+    LeaveCreditTranche,
+    LeaveRequestCreditAllocation,
     PasswordResetToken,
     IntegrationClient,
     IntegrationConnection,

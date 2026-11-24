@@ -170,7 +170,7 @@ export function RegisterPanel() {
     <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-12 sm:px-8">
       <div className="w-full max-w-md">
         <div className="mb-8 flex items-center gap-2.5">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-base font-semibold text-on-strong">
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent text-base font-semibold text-accent-ink">
             W
           </span>
           <div>

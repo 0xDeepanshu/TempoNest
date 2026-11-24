@@ -156,7 +156,7 @@ export function EmployeePicker({
           if (!rootRef.current?.contains(event.relatedTarget as Node)) setOpen(false);
         }}
         className={cn(
-          "h-9 w-full rounded-lg border border-line-strong bg-surface pl-9 text-[13px] text-ink outline-none transition placeholder:text-muted focus:border-ink focus:ring-2 focus:ring-ink/10 disabled:cursor-not-allowed disabled:text-muted",
+          "h-9 w-full rounded-lg border border-line-strong bg-surface pl-9 text-[13px] text-ink outline-none transition placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:cursor-not-allowed disabled:text-muted",
           value ? "pr-10" : "pr-3",
         )}
       />

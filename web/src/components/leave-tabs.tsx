@@ -5,13 +5,7 @@ import { hasAnyPermission, hasPermission, type Permission } from "@/lib/permissi
 import { cn } from "./ui";
 import { useWorkspace } from "./workspace";
 
-export type LeaveTab =
-  | "overview"
-  | "requests"
-  | "balances"
-  | "types"
-  | "holidays"
-  | "holiday-settings";
+export type LeaveTab = "overview" | "requests" | "balances";
 
 const REVIEW_PERMISSIONS: Permission[] = ["leave:approve", "leave:manage"];
 
@@ -40,26 +34,12 @@ const TABS: Array<{
     href: "/admin/leave/balances",
     permission: "leave:manage",
   },
-  {
-    value: "types",
-    label: "Types & policies",
-    href: "/admin/leave/types",
-    permission: "leave:manage",
-  },
-  {
-    value: "holidays",
-    label: "Holidays",
-    href: "/admin/leave/holidays",
-    permission: "holiday:view",
-  },
-  {
-    value: "holiday-settings",
-    label: "Holiday settings",
-    href: "/admin/leave/holidays/settings",
-    permission: "holiday:view",
-  },
 ];
 
+/**
+ * Day-to-day leave navigation. Leave types and holiday rules are configuration,
+ * so they live under Settings → Leave & holidays instead of duplicating here.
+ */
 export function LeaveTabs({ current }: { current: LeaveTab }) {
   const { membership } = useWorkspace();
   const visible = TABS.filter((tab) =>
@@ -67,30 +47,44 @@ export function LeaveTabs({ current }: { current: LeaveTab }) {
       ? hasPermission(membership, tab.permission)
       : hasAnyPermission(membership, tab.anyOf ?? []),
   );
+  const canOpenSettings = hasAnyPermission(membership, [
+    "leave:manage",
+    "holiday:settings:manage",
+  ]);
 
   return (
-    <nav
-      aria-label="Leave management"
-      className="flex flex-wrap gap-0.5 rounded-lg border border-line bg-surface p-0.5"
-    >
-      {visible.map((tab) => {
-        const active = tab.value === current;
-        return (
-          <Link
-            key={tab.value}
-            href={tab.href}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-              active
-                ? "bg-ink text-on-strong"
-                : "text-muted hover:bg-surface-muted hover:text-ink",
-            )}
-          >
-            {tab.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <nav
+        aria-label="Leave"
+        className="flex flex-wrap gap-0.5 rounded-lg border border-line bg-surface p-0.5"
+      >
+        {visible.map((tab) => {
+          const active = tab.value === current;
+          return (
+            <Link
+              key={tab.value}
+              href={tab.href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                active
+                  ? "bg-accent-soft text-accent-soft-ink"
+                  : "text-muted hover:bg-surface-muted hover:text-ink",
+              )}
+            >
+              {tab.label}
+            </Link>
+          );
+        })}
+      </nav>
+      {canOpenSettings ? (
+        <Link
+          href="/settings/leave"
+          className="rounded-md px-2 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-surface-muted hover:text-ink"
+        >
+          Leave settings
+        </Link>
+      ) : null}
+    </div>
   );
 }

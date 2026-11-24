@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { PermissionGate } from "@/components/workspace";
 import { OrganizationPageView } from "@/components/organization-view";
+import { PermissionGate } from "@/components/workspace";
 
-export const metadata: Metadata = { title: "Organization" };
+export const metadata: Metadata = { title: "General settings" };
 
-export default function OrganizationPage() {
+export default function GeneralSettingsPage() {
   return (
     <PermissionGate permission="organization:read">
       <OrganizationPageView />

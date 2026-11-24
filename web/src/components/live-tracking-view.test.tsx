@@ -354,7 +354,7 @@ describe("LiveTrackingView", () => {
     expect(
       await screen.findByText("Screen monitoring is disabled by the organization policy."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Monitoring policy disabled")).toBeInTheDocument();
+    expect(screen.getByText("Screenshots off")).toBeInTheDocument();
   });
 
   it("shows View live screen to owners and opens the viewer ready to start", async () => {

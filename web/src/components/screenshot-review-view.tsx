@@ -23,6 +23,7 @@ import { useApi } from "@/lib/use-api";
 import { CameraIcon, CloseIcon, MonitorIcon, RefreshIcon, ShieldIcon } from "./icons";
 import { LiveScreenViewer } from "./live-screen-viewer";
 import { ScreenshotRequestButton } from "./screenshot-request-button";
+import { ScreenshotSectionTabs } from "./screenshot-tabs";
 import {
   Alert,
   Avatar,
@@ -425,9 +426,9 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
             </Button>
           </Link>
           {canConfigurePolicy ? (
-            <Link href="/admin/monitoring">
+            <Link href="/settings/monitoring">
               <Button variant="secondary" size="sm">
-                Open monitoring settings
+                Open screenshot settings
               </Button>
             </Link>
           ) : null}
@@ -442,8 +443,8 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
     <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization.name} · ${timezone}`}
-        title="Screenshot review"
-        description="Review private captures across the organization. Previews load on demand through short-lived, audited links."
+        title="Screenshots"
+        description="Private screenshots from across the organization. Images load only when you open them, and every view is recorded."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link href="/admin/live-tracking">
@@ -452,15 +453,17 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
               </Button>
             </Link>
             {canConfigurePolicy ? (
-              <Link href="/admin/monitoring">
+              <Link href="/settings/monitoring">
                 <Button variant="ghost" size="sm">
-                  Monitoring settings
+                  Screenshot settings
                 </Button>
               </Link>
             ) : null}
           </div>
         }
       />
+
+      <ScreenshotSectionTabs />
 
       <Card>
         <div className="flex flex-col gap-3 border-b border-line p-3 lg:flex-row lg:items-end lg:justify-between">
@@ -626,11 +629,11 @@ export function ScreenshotReviewView({ initialEmployeeId = "" }: { initialEmploy
                 ) : null}
 
                 {!monitoringEnabled && canConfigurePolicy && !policy.loading ? (
-                  <Alert tone="warning" title="Monitoring is disabled">
-                    Screenshot requests are blocked. An owner or administrator can enable the
-                    policy in{" "}
-                    <Link className="font-semibold underline" href="/admin/monitoring">
-                      monitoring settings
+                  <Alert tone="warning" title="Screenshots are off">
+                    No one can request a screenshot. An owner or administrator can turn them on
+                    in{" "}
+                    <Link className="font-semibold underline" href="/settings/monitoring">
+                      screenshot settings
                     </Link>
                     .
                   </Alert>
@@ -1030,7 +1033,7 @@ function ScreenshotTile({
     <div
       className={cn(
         "relative overflow-hidden rounded-xl border bg-surface transition-colors",
-        selected ? "border-ink ring-1 ring-ink" : "border-line hover:border-line-strong",
+        selected ? "border-accent ring-1 ring-accent" : "border-line hover:border-line-strong",
       )}
     >
       <div className="flex items-center justify-between gap-2 border-b border-line px-2.5 py-2">
@@ -1054,7 +1057,7 @@ function ScreenshotTile({
         type="button"
         onClick={onOpen}
         aria-label={`Open screenshot captured ${capturedLabel}`}
-        className="block w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink"
+        className="block w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
       >
         <div className="relative flex aspect-[16/10] items-center justify-center bg-surface-muted">
           {preview?.status === "ready" ? (

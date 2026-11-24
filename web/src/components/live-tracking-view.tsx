@@ -155,7 +155,7 @@ export function LiveTrackingView() {
       <PageHeader
         eyebrow={`${organization.name} · ${timezone}`}
         title="Live tracking"
-        description="Durable online state, active sessions, heartbeat freshness, and pending screenshot requests. Agent connectivity and attendance are shown separately: an open session can be stale while the device is offline, and an online device is not necessarily tracking. Owners and administrators can also start a live screen view for an eligible employee."
+        description="Who is online now, who is working or on a break, and any screenshot requests waiting. Device connection and attendance are separate: a session can look open while the device is offline, and an online device is not always tracking. Owners and administrators can also start a live screen view for an eligible employee."
         actions={
           <Button variant="secondary" size="sm" onClick={refreshAll}>
             Refresh status
@@ -163,18 +163,18 @@ export function LiveTrackingView() {
         }
       />
 
-      <Alert tone="info" title="Visible, explicit monitoring">
-        A screenshot request is explicit, one at a time, visible in the employee&apos;s desktop app,
-        and requires an active work session with a fresh heartbeat. Live screen viewing is separate:
-        an owner or administrator starts it deliberately from the employee&apos;s row, it is limited
-        by the monitoring policy and session lifetime, and it is recorded in the audit history.
+      <Alert tone="info" title="Screenshots are always visible">
+        A screenshot request is one at a time, visible in the employee&apos;s desktop app, and
+        only works during an active session with a recent connection. Live screen viewing is
+        separate: an owner or administrator starts it from the employee&apos;s row, it follows
+        the monitoring rules and session lifetime, and it is recorded in the history.
       </Alert>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Agents online"
+          label="Devices online"
           value={tracking.loading ? "…" : `${online} / ${rows.length}`}
-          hint="Fresh device connections"
+          hint="Connected right now"
           accent="emerald"
           icon={<PulseIcon className="h-4 w-4" />}
         />
@@ -191,15 +191,15 @@ export function LiveTrackingView() {
           accent="amber"
         />
         <StatCard
-          label="Pending captures"
+          label="Pending screenshots"
           value={canViewScreenshots && !screenshotStateUnavailable ? pendingCount : "—"}
           hint={
             canViewScreenshots
               ? policy.data
                 ? monitoringEnabled
-                  ? "Monitoring policy enabled"
-                  : "Monitoring policy disabled"
-                : "Pending requests"
+                  ? "Screenshots allowed"
+                  : "Screenshots off"
+                : "Requests waiting"
               : "Not visible for your role"
           }
           accent="rose"
@@ -235,8 +235,8 @@ export function LiveTrackingView() {
           ) : null}
           <p className="text-[11px] text-muted">
             {tracking.data
-              ? `${tracking.data.meta.total} employee${tracking.data.meta.total === 1 ? "" : "s"} · heartbeat stale after ${tracking.data.heartbeatStaleAfterSeconds}s`
-              : "Loading server tracking state…"}
+              ? `${tracking.data.meta.total} employee${tracking.data.meta.total === 1 ? "" : "s"} · counts as offline after ${tracking.data.heartbeatStaleAfterSeconds}s`
+              : "Loading tracking status…"}
           </p>
         </div>
         {canBrowseMembers && members.error ? (
@@ -269,7 +269,7 @@ export function LiveTrackingView() {
       <Card>
         <CardHeader
           title="Employees"
-          description="One row per active membership. Offline employees remain visible with their last known heartbeat."
+          description="One row per active member. Offline employees stay visible with when they were last seen."
         />
         {tracking.loading && rows.length === 0 ? (
           <LoadingBlock label="Loading tracking status" rows={5} />
@@ -286,8 +286,8 @@ export function LiveTrackingView() {
                 <Th>Employee</Th>
                 <Th>State</Th>
                 <Th>Active session</Th>
-                <Th>Heartbeat</Th>
-                <Th>Desktop agent</Th>
+                <Th>Last contact</Th>
+                <Th>Device</Th>
                 {canViewScreenshots ? <Th>Screenshot request</Th> : null}
                 <Th className="text-right">Actions</Th>
               </tr>

@@ -3,7 +3,11 @@ import { DateTime } from 'luxon';
 import { paginationSchema } from '../../utils/pagination';
 import { AppError } from '../../utils/errors';
 import { dateOnlySchema } from '../reporting/reporting.schemas';
-import { ACCRUAL_FREQUENCIES } from './leavePolicy.model';
+import {
+  ACCRUAL_FREQUENCIES,
+  CARRY_FORWARD_ORDERS,
+  RESET_PERIODS,
+} from './leavePolicy.model';
 import { LEAVE_REQUEST_STATUSES } from './leaveRequest.model';
 import { LEAVE_AUDIT_ACTIONS } from '../screenshots/auditEvent.model';
 
@@ -86,6 +90,13 @@ export const updateLeavePolicySchema = z
     balancePeriodStartDay: z.number().int().min(1).max(31).optional(),
     carryForwardAllowance: money.optional(),
     maxBalance: money.nullable().optional(),
+    carryForwardEnabled: z.boolean().optional(),
+    carryForwardExpiryMonths: z.number().int().min(1).max(120).nullable().optional(),
+    carryForwardOrder: z.enum(CARRY_FORWARD_ORDERS).optional(),
+    resetPeriod: z.enum(RESET_PERIODS).optional(),
+    maxCreditsPerApplication: money.nullable().optional(),
+    monthlyUsageLimitEnabled: z.boolean().optional(),
+    monthlyUsageLimit: money.nullable().optional(),
     prorateInitialEntitlement: z.boolean().optional(),
     workingDays: workingDaysSchema.optional(),
     isActive: z.boolean().optional(),

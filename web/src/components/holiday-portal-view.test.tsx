@@ -151,6 +151,6 @@ describe("HolidayPortalView", () => {
     expect(screen.queryByRole("button", { name: "Add holiday" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit holiday" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete holiday" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Holiday settings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Holiday rules" })).not.toBeInTheDocument();
   });
 });

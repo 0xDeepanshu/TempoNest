@@ -84,6 +84,13 @@ const policySnapshot: LeavePolicySnapshot = {
   balancePeriodStartMonth: 1,
   balancePeriodStartDay: 1,
   carryForwardAllowance: 0,
+  carryForwardEnabled: false,
+  carryForwardExpiryMonths: null,
+  carryForwardOrder: "EXPIRY_FIRST",
+  resetPeriod: "CUSTOM",
+  maxCreditsPerApplication: null,
+  monthlyUsageLimitEnabled: false,
+  monthlyUsageLimit: null,
   maxBalance: null,
   prorateInitialEntitlement: false,
   isActive: true,
@@ -129,6 +136,7 @@ const ledgerEntry: LeaveLedgerEntry = {
   carriedForwardDelta: 0,
   reservedDelta: 0,
   consumedDelta: 0,
+  expiredDelta: 0,
   availableDelta: 20,
   balanceAfter: 20,
   reason: "Initial entitlement for balance period",
@@ -153,6 +161,7 @@ function balance(overrides: Partial<LeaveBalance> = {}): LeaveBalance {
     carriedForwardBalance: 0,
     approvedConsumed: 2,
     pendingReserved: 1,
+    expiredBalance: 0,
     availableBalance: 17,
     assignedBalance: 20,
     breakdown: {
@@ -163,6 +172,7 @@ function balance(overrides: Partial<LeaveBalance> = {}): LeaveBalance {
       carriedForward: 0,
       approvedConsumed: 2,
       pendingReserved: 1,
+      expired: 0,
       available: 17,
     },
     leaveType: {
@@ -645,7 +655,7 @@ describe("LeaveBalancesView", () => {
     renderView("MANAGER");
 
     expect(
-      screen.getByText("Balance management requires leave:manage"),
+      screen.getByText("You cannot manage balances"),
     ).toBeInTheDocument();
     expect(mockedApiRequest).not.toHaveBeenCalled();
   });
@@ -655,16 +665,16 @@ describe("LeaveBalancesView", () => {
     renderView();
 
     expect(await screen.findByText("Active employees")).toBeInTheDocument();
-    expect(screen.getByText("Employees with credits")).toBeInTheDocument();
-    expect(screen.getByText("Credits assigned")).toBeInTheDocument();
+    expect(screen.getByText("People with days")).toBeInTheDocument();
+    expect(screen.getByText("Days assigned")).toBeInTheDocument();
     expect(screen.getByText("Pending applications")).toBeInTheDocument();
 
     for (const header of ["Assigned", "Used", "Pending", "Available"]) {
       expect(screen.getAllByText(header).length).toBeGreaterThan(0);
     }
     expect(screen.getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
-    expect(await screen.findByText("Credit history")).toBeInTheDocument();
-    expect(screen.getAllByText("Starting credits").length).toBeGreaterThan(0);
+    expect(await screen.findByText("Balance history")).toBeInTheDocument();
+    expect(screen.getAllByText("Starting days").length).toBeGreaterThan(0);
   });
 
   it("assigns credits to selected employees after an explicit preview", async () => {
@@ -672,11 +682,11 @@ describe("LeaveBalancesView", () => {
     respond();
     renderView();
 
-    await user.click(await screen.findByRole("button", { name: "Assign leave credits" }));
+    await user.click(await screen.findByRole("button", { name: "Add leave days" }));
     const dialog = await screen.findByRole("dialog");
 
     await addEmployee(user, dialog);
-    await user.type(within(dialog).getByLabelText(/^Credits to add/), "5");
+    await user.type(within(dialog).getByLabelText(/^Days to add/), "5");
     await user.type(within(dialog).getByLabelText(/^Reason/), "Annual allocation");
 
     const confirmButton = within(dialog).getByRole("button", {
@@ -727,7 +737,7 @@ describe("LeaveBalancesView", () => {
       );
     });
     expect(
-      await within(dialog).findByText(/1 of 1 employees received credits/),
+      await within(dialog).findByText(/1 of 1 employees received days/),
     ).toBeInTheDocument();
   });
 
@@ -736,7 +746,7 @@ describe("LeaveBalancesView", () => {
     respond();
     renderView();
 
-    await user.click(await screen.findByRole("button", { name: "Assign leave credits" }));
+    await user.click(await screen.findByRole("button", { name: "Add leave days" }));
     const dialog = await screen.findByRole("dialog");
 
     await user.click(within(dialog).getByRole("radio", { name: /All active employees/ }));
@@ -789,18 +799,18 @@ describe("LeaveBalancesView", () => {
     });
     renderView();
 
-    await user.click(await screen.findByRole("button", { name: "Assign leave credits" }));
+    await user.click(await screen.findByRole("button", { name: "Add leave days" }));
     const dialog = await screen.findByRole("dialog");
 
     await user.click(within(dialog).getByRole("radio", { name: /All active employees/ }));
-    await user.type(within(dialog).getByLabelText(/^Credits to add/), "5");
+    await user.type(within(dialog).getByLabelText(/^Days to add/), "5");
     await user.type(within(dialog).getByLabelText(/^Reason/), "Annual allocation");
     await user.click(within(dialog).getByRole("button", { name: "Preview changes" }));
     await within(dialog).findByText("20 days → 25 days");
     await user.click(within(dialog).getByRole("button", { name: "Confirm and assign" }));
 
     expect(
-      await within(dialog).findByText(/1 of 2 employees received credits/),
+      await within(dialog).findByText(/1 of 2 employees received days/),
     ).toBeInTheDocument();
     expect(within(dialog).getByText(/1 could not be updated/)).toBeInTheDocument();
     expect(within(dialog).getByText("This leave type is not active.")).toBeInTheDocument();
@@ -814,13 +824,13 @@ describe("LeaveBalancesView", () => {
     renderView();
     const dialog = await openBalance(user);
 
-    expect(within(dialog).getByText("Credit sources")).toBeInTheDocument();
+    expect(within(dialog).getByText("Where the days came from")).toBeInTheDocument();
     expect(
       within(dialog).getByText(
         byParagraph("20 days assigned − 2 days used − 1 day pending = 17 days available"),
       ),
     ).toBeInTheDocument();
-    expect((await within(dialog).findAllByText("Starting credits")).length).toBeGreaterThan(0);
+    expect((await within(dialog).findAllByText("Starting days")).length).toBeGreaterThan(0);
     expect(within(dialog).getByText(/Admin User/)).toBeInTheDocument();
 
     await waitFor(() => {
@@ -846,8 +856,8 @@ describe("LeaveBalancesView", () => {
     renderView();
     const dialog = await openBalance(user);
 
-    await user.click(within(dialog).getByRole("button", { name: "Assign credits" }));
-    await user.type(within(dialog).getByLabelText(/^Credits to add/), "3");
+    await user.click(within(dialog).getByRole("button", { name: "Add days" }));
+    await user.type(within(dialog).getByLabelText(/^Days to add/), "3");
     await user.type(within(dialog).getByLabelText(/^Reason/), "Compensation for holiday work");
 
     await user.click(within(dialog).getByRole("button", { name: "Preview changes" }));
@@ -884,7 +894,7 @@ describe("LeaveBalancesView", () => {
     });
     expect(
       await within(dialog).findByText(
-        "Credits updated. The change is recorded in the balance history.",
+        "Days updated. The change is recorded in the balance history.",
       ),
     ).toBeInTheDocument();
   });
@@ -896,7 +906,7 @@ describe("LeaveBalancesView", () => {
 
     await user.click(await screen.findByText("Advanced maintenance"));
 
-    expect((await screen.findAllByText("Next accrual")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Scheduled days")).length).toBeGreaterThan(0);
     expect(screen.getByText("Nov 1, 2026")).toBeInTheDocument();
     expect(screen.getByText("+2")).toBeInTheDocument();
     expect(screen.getByText("19 days")).toBeInTheDocument();
@@ -970,7 +980,7 @@ describe("LeaveBalancesView", () => {
     renderView();
 
     await user.click(await screen.findByText("Advanced maintenance"));
-    await user.click(await screen.findByRole("button", { name: "Preview backfill" }));
+    await user.click(await screen.findByRole("button", { name: "Preview" }));
     const dialog = await screen.findByRole("dialog");
 
     expect(await within(dialog).findByText("Will initialize")).toBeInTheDocument();

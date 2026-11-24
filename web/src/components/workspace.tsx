@@ -350,7 +350,7 @@ export function AccessDenied({
         <div className="mt-5">
           <Link
             href="/dashboard"
-            className="inline-flex h-9 items-center rounded-lg bg-ink px-4 text-[13px] font-medium text-on-strong transition hover:bg-ink-secondary"
+            className="inline-flex h-9 items-center rounded-lg bg-accent px-4 text-[13px] font-medium text-accent-ink transition hover:bg-accent-hover"
           >
             Back to dashboard
           </Link>

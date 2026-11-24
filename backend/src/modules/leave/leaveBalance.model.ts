@@ -18,6 +18,7 @@ export interface LeaveBalanceAttributes {
   carriedForwardBalance: number;
   approvedConsumed: number;
   pendingReserved: number;
+  expiredBalance: number;
   availableBalance: number;
   createdAt: Date;
   updatedAt: Date;
@@ -32,6 +33,7 @@ export type LeaveBalanceCreationAttributes = Optional<
   | 'carriedForwardBalance'
   | 'approvedConsumed'
   | 'pendingReserved'
+  | 'expiredBalance'
   | 'availableBalance'
   | 'createdAt'
   | 'updatedAt'
@@ -43,7 +45,7 @@ export type LeaveBalanceCreationAttributes = Optional<
  * the aggregate within the same transaction as its ledger entry.
  *
  * available = entitled + accrued + adjustments + carriedForward
- *             - approvedConsumed - pendingReserved
+ *             - expired - approvedConsumed - pendingReserved
  */
 export class LeaveBalance
   extends Model<LeaveBalanceAttributes, LeaveBalanceCreationAttributes>
@@ -61,6 +63,7 @@ export class LeaveBalance
   declare carriedForwardBalance: number;
   declare approvedConsumed: number;
   declare pendingReserved: number;
+  declare expiredBalance: number;
   declare availableBalance: number;
   declare createdAt: Date;
   declare updatedAt: Date;
@@ -148,6 +151,12 @@ export function initLeaveBalance(sequelize: Sequelize): typeof LeaveBalance {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
         field: 'pending_reserved',
+        defaultValue: 0,
+      },
+      expiredBalance: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+        field: 'expired_balance',
         defaultValue: 0,
       },
       availableBalance: {

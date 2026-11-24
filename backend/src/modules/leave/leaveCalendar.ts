@@ -1,6 +1,6 @@
 import { DateTime, IANAZone } from 'luxon';
 import { AppError } from '../../utils/errors';
-import type { AccrualFrequency } from './leavePolicy.model';
+import type { AccrualFrequency, ResetPeriod } from './leavePolicy.model';
 import type { ChargedLeaveDay } from './leaveRequest.model';
 
 export const HALF_DAY_UNITS = 0.5;
@@ -30,9 +30,42 @@ export function localDate(value: Date | string, timezone: string): string {
 
 export type BalancePeriod = { periodStart: string; periodEnd: string };
 
-type PolicyPeriodConfig = {
+export type PolicyPeriodConfig = {
   balancePeriodStartMonth: number;
   balancePeriodStartDay: number;
+  /** Reset mode. Missing means the legacy annual month/day reset (CUSTOM). */
+  resetPeriod?: ResetPeriod;
+  /**
+   * Joining date used by JOINING_ANNIVERSARY resets. When absent the policy's
+   * configured month/day is used instead, which keeps historical reads safe.
+   */
+  anchorDate?: string | null;
+};
+
+/** Builds the calendar config for a policy, optionally with an employee anchor. */
+export function policyPeriodConfig(
+  policy: {
+    balancePeriodStartMonth: number;
+    balancePeriodStartDay: number;
+    resetPeriod?: ResetPeriod;
+  },
+  anchorDate?: string | null,
+): PolicyPeriodConfig {
+  return {
+    balancePeriodStartMonth: policy.balancePeriodStartMonth,
+    balancePeriodStartDay: policy.balancePeriodStartDay,
+    resetPeriod: policy.resetPeriod ?? 'CUSTOM',
+    anchorDate: anchorDate ?? null,
+  };
+}
+
+/**
+ * Sentinel period used by `resetPeriod = NEVER`. It is intentionally wide so
+ * every date resolves to the same row; no annual reset is ever produced.
+ */
+export const OPEN_ENDED_PERIOD: BalancePeriod = {
+  periodStart: '1970-01-01',
+  periodEnd: '9999-12-31',
 };
 
 function clampedPeriodStart(year: number, config: PolicyPeriodConfig, timezone: string): DateTime {
@@ -49,14 +82,32 @@ export function balancePeriodFor(
   config: PolicyPeriodConfig,
   timezone: string,
 ): BalancePeriod {
-  const date = DateTime.fromISO(dateIso, { zone: leaveZone(timezone) }).startOf('day');
+  const zone = leaveZone(timezone);
+  const date = DateTime.fromISO(dateIso, { zone }).startOf('day');
   if (!date.isValid) {
     throw AppError.unprocessable('Invalid calendar date', 'LEAVE_REQUEST_INVALID_DATES');
   }
 
-  let start = clampedPeriodStart(date.year, config, timezone);
-  if (start > date) start = clampedPeriodStart(date.year - 1, config, timezone);
-  const next = clampedPeriodStart(start.year + 1, config, timezone);
+  const mode = config.resetPeriod ?? 'CUSTOM';
+  if (mode === 'NEVER') return { ...OPEN_ENDED_PERIOD };
+
+  let anchor = config;
+  if (mode === 'CALENDAR_YEAR') {
+    anchor = { ...config, balancePeriodStartMonth: 1, balancePeriodStartDay: 1 };
+  } else if (mode === 'JOINING_ANNIVERSARY' && config.anchorDate) {
+    const joined = DateTime.fromISO(config.anchorDate, { zone }).startOf('day');
+    if (joined.isValid) {
+      anchor = {
+        ...config,
+        balancePeriodStartMonth: joined.month,
+        balancePeriodStartDay: joined.day,
+      };
+    }
+  }
+
+  let start = clampedPeriodStart(date.year, anchor, zone);
+  if (start > date) start = clampedPeriodStart(date.year - 1, anchor, zone);
+  const next = clampedPeriodStart(start.year + 1, anchor, zone);
 
   return {
     periodStart: start.toISODate()!,
@@ -65,11 +116,37 @@ export function balancePeriodFor(
 }
 
 export function periodAfter(periodStart: string, config: PolicyPeriodConfig, timezone: string): string {
+  if ((config.resetPeriod ?? 'CUSTOM') === 'NEVER') return OPEN_ENDED_PERIOD.periodStart;
   return clampedPeriodStart(
     DateTime.fromISO(periodStart, { zone: leaveZone(timezone) }).year + 1,
     config,
     timezone,
   ).toISODate()!;
+}
+
+/** Adds calendar months, clamping the day to the target month (31 Jan + 1 = 28/29 Feb). */
+export function addMonthsClamped(dateIso: string, months: number): string {
+  return DateTime.fromISO(dateIso, { zone: 'utc' }).plus({ months }).toISODate()!;
+}
+
+/** Subtracts calendar months from a date. */
+export function subtractMonthsClamped(dateIso: string, months: number): string {
+  return DateTime.fromISO(dateIso, { zone: 'utc' }).minus({ months }).toISODate()!;
+}
+
+/** Later of two ISO dates. */
+export function laterDate(a: string, b: string): string {
+  return a >= b ? a : b;
+}
+
+/** First day of the calendar month containing `dateIso`. */
+export function calendarMonthStart(dateIso: string): string {
+  return DateTime.fromISO(dateIso, { zone: 'utc' }).startOf('month').toISODate()!;
+}
+
+/** Last day of the calendar month containing `dateIso`. */
+export function calendarMonthEnd(dateIso: string): string {
+  return DateTime.fromISO(dateIso, { zone: 'utc' }).endOf('month').toISODate()!;
 }
 
 export type WorkingDayInput = {

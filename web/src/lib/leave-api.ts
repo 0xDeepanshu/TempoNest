@@ -10,6 +10,7 @@ import type {
   LeaveBalancesResponse,
   LeaveBulkAdjustmentPreviewResponse,
   LeaveBulkAdjustmentResultResponse,
+  LeaveCarryForwardOrder,
   LeaveCreditAssignmentInput,
   LeaveCreditAssignmentPreviewResponse,
   LeaveCreditAssignmentResponse,
@@ -25,6 +26,7 @@ import type {
   LeaveRequestResponse,
   LeaveRequestsResponse,
   LeaveRequestStatus,
+  LeaveResetPeriod,
   LeaveTypeResponse,
   LeaveTypesResponse,
 } from "./types";
@@ -56,6 +58,13 @@ export type UpdateLeavePolicyInput = {
   balancePeriodStartMonth?: number;
   balancePeriodStartDay?: number;
   carryForwardAllowance?: number;
+  carryForwardEnabled?: boolean;
+  carryForwardExpiryMonths?: number | null;
+  carryForwardOrder?: LeaveCarryForwardOrder;
+  resetPeriod?: LeaveResetPeriod;
+  maxCreditsPerApplication?: number | null;
+  monthlyUsageLimitEnabled?: boolean;
+  monthlyUsageLimit?: number | null;
   maxBalance?: number | null;
   prorateInitialEntitlement?: boolean;
   workingDays?: number[];

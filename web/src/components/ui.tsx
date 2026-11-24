@@ -19,15 +19,15 @@ type ButtonSize = "sm" | "md" | "lg";
 
 const buttonVariants: Record<ButtonVariant, string> = {
   primary:
-    "bg-ink text-on-strong hover:bg-ink-secondary focus-visible:outline-ink disabled:bg-line-strong disabled:text-muted",
+    "bg-accent text-accent-ink hover:bg-accent-hover focus-visible:outline-accent disabled:bg-line-strong disabled:text-muted",
   secondary:
-    "border border-line-strong bg-surface text-ink hover:bg-surface-muted focus-visible:outline-ink disabled:bg-surface-muted disabled:text-muted",
+    "border border-control bg-surface text-ink hover:border-line-strong hover:bg-surface-muted focus-visible:outline-accent disabled:bg-surface-muted disabled:text-muted",
   ghost:
-    "text-ink-secondary hover:bg-surface-hover hover:text-ink focus-visible:outline-ink disabled:text-muted",
+    "text-ink-secondary hover:bg-surface-hover hover:text-ink focus-visible:outline-accent disabled:text-muted",
   danger:
     "bg-danger text-on-strong hover:bg-danger/90 focus-visible:outline-danger disabled:bg-line-strong disabled:text-muted",
   subtle:
-    "bg-surface-hover text-ink hover:bg-line focus-visible:outline-ink disabled:text-muted",
+    "bg-surface-hover text-ink hover:bg-line focus-visible:outline-accent disabled:text-muted",
 };
 
 const buttonSizes: Record<ButtonSize, string> = {
@@ -70,7 +70,7 @@ export function Button({
 
 export function Card({ className, children, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("rounded-xl border border-line bg-surface", className)} {...props}>
+    <div className={cn("card-elevated rounded-xl border border-line bg-surface", className)} {...props}>
       {children}
     </div>
   );
@@ -121,7 +121,7 @@ const badgeTones: Record<BadgeTone, string> = {
   warning: "bg-warning-surface text-warning ring-warning-border",
   danger: "bg-danger-surface text-danger ring-danger-border",
   info: "bg-surface-hover text-ink-secondary ring-line-strong",
-  indigo: "bg-ink text-on-strong ring-ink",
+  indigo: "bg-accent text-accent-ink ring-accent",
   outline: "bg-surface text-ink-secondary ring-line-strong",
 };
 
@@ -169,7 +169,25 @@ export function StatusBadge({ status }: { status: string }) {
     CANCELLED: { tone: "neutral", label: "Cancelled" },
     CANCELLATION_REQUESTED: { tone: "warning", label: "Cancellation requested" },
   };
+  // Presence states read best as a quiet pill with a single colored dot.
+  const statusDots: Record<string, string> = {
+    WORKING: "bg-[#86a789]",
+    ONLINE: "bg-[#86a789]",
+    ON_BREAK: "bg-[#d49a5a]",
+    ON_BREAK_SESSION: "bg-[#d49a5a]",
+    OFFLINE: "bg-[#d9534f]",
+    STOPPED: "bg-[#9a9285]",
+  };
   const entry = map[status] ?? { tone: "neutral" as const, label: status };
+  const dot = statusDots[status];
+  if (dot) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-muted px-1.5 py-0.5 text-[11px] font-medium leading-4 text-ink-secondary">
+        <span className={cn("h-1.5 w-1.5 rounded-full", dot)} aria-hidden="true" />
+        {entry.label}
+      </span>
+    );
+  }
   return <Badge tone={entry.tone}>{entry.label}</Badge>;
 }
 
@@ -239,7 +257,7 @@ export function Field({
 }
 
 const inputClass =
-  "block w-full rounded-lg border border-line-strong bg-surface px-2.5 py-2 text-[13px] text-ink outline-none transition placeholder:text-muted focus:border-ink focus:ring-2 focus:ring-ink/10 focus-visible:outline-none disabled:bg-surface-muted disabled:text-muted";
+  "block w-full rounded-lg border border-line-strong bg-surface px-2.5 py-2 text-[13px] text-ink outline-none transition placeholder:text-muted hover:border-line-strong focus:border-accent focus:ring-2 focus:ring-accent/25 focus-visible:outline-none disabled:bg-surface-muted disabled:text-muted";
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={cn(inputClass, className)} {...props} />;
@@ -302,12 +320,12 @@ export function StatCard({
   icon?: ReactNode;
 }) {
   const accents: Record<string, string> = {
-    indigo: "bg-surface-hover text-ink",
-    emerald: "bg-surface-hover text-ink",
-    amber: "bg-surface-hover text-ink",
-    sky: "bg-surface-hover text-ink",
-    rose: "bg-surface-hover text-ink",
-    slate: "bg-surface-hover text-ink",
+    indigo: "border border-line bg-surface-hover text-ink kpi-cream",
+    emerald: "border border-line bg-surface-hover text-ink kpi-emerald",
+    amber: "border border-line bg-surface-hover text-ink kpi-amber",
+    sky: "border border-line bg-surface-hover text-ink kpi-sky",
+    rose: "border border-line bg-surface-hover text-ink kpi-rose",
+    slate: "border border-line bg-surface-hover text-ink kpi-slate",
   };
   return (
     <Card className="p-4" data-accent={accent}>
@@ -518,7 +536,7 @@ export function Tabs<T extends string>({
           className={cn(
             "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
             value === tab.value
-              ? "bg-ink text-on-strong"
+              ? "bg-accent-soft text-accent-soft-ink"
               : "text-muted hover:bg-surface-muted hover:text-ink",
           )}
         >

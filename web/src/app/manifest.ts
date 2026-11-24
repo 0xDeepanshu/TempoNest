@@ -8,8 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
       "Attendance, time tracking, and team reporting for organizations and their employees.",
     start_url: "/",
     display: "standalone",
-    background_color: "#f5f5f3",
-    theme_color: "#0d0d0d",
+    background_color: "#0a0a0a",
+    theme_color: "#0a0a0a",
     icons: [
       {
         src: "/icon-192.png",

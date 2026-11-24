@@ -100,12 +100,12 @@ export function LeaveCreditsModal({
     }
     const credits = Number(draft.credits);
     if (!draft.credits.trim() || !Number.isFinite(credits)) {
-      return "Enter the number of credits.";
+      return "Enter the number of days.";
     }
-    if (credits < 0) return "Credits cannot be negative.";
-    if (credits > 3650) return "Credits must be 3650 or fewer.";
+    if (credits < 0) return "Days cannot be negative.";
+    if (credits > 3650) return "Days must be 3650 or fewer.";
     if (draft.mode === "ADD" && credits === 0) {
-      return "Add credits needs an amount greater than zero.";
+      return "Adding days needs an amount greater than zero.";
     }
     if (draft.effectiveDate && !isDateOnly(draft.effectiveDate)) {
       return "The effective date must be a valid date.";
@@ -187,8 +187,8 @@ export function LeaveCreditsModal({
     <Modal
       open
       onClose={onClose}
-      title="Assign leave credits"
-      description="Give employees leave days directly. 1 credit equals 1 day. Preview every employee before anything is written."
+      title="Add leave days"
+      description="Give employees extra leave days directly. Preview everyone before anything is saved."
       size="lg"
       dismissible={!submitting && !previewing}
       footer={
@@ -197,7 +197,7 @@ export function LeaveCreditsModal({
             <Button variant="secondary" onClick={onClose}>
               Close
             </Button>
-            <Button onClick={reset}>Assign more credits</Button>
+            <Button onClick={reset}>Add more days</Button>
           </>
         ) : (
           <>
@@ -233,7 +233,7 @@ export function LeaveCreditsModal({
         {result ? (
           <section aria-labelledby={resultTitleId} className="space-y-2">
             <Alert tone={result.summary.failed > 0 ? "warning" : "success"}>
-              {result.summary.applied} of {result.summary.requested} employees received credits
+              {result.summary.applied} of {result.summary.requested} employees received days
               {result.summary.unchanged > 0
                 ? ` · ${result.summary.unchanged} already at the requested balance`
                 : ""}
@@ -269,7 +269,7 @@ export function LeaveCreditsModal({
             </Field>
 
             <fieldset className="space-y-2">
-              <legend className="text-xs font-medium text-ink">Who receives credits?</legend>
+              <legend className="text-xs font-medium text-ink">Who gets the days?</legend>
               <div className="grid gap-2 sm:grid-cols-2">
                 <ScopeOption
                   label="Specific employees"
@@ -335,16 +335,16 @@ export function LeaveCreditsModal({
               </div>
             ) : (
               <p className="text-xs leading-5 text-muted">
-                Credits will be applied to every active employee. Employees without a balance
-                for the current period are skipped and reported in the preview.
+                Days will be added to every active employee. Employees without a balance for
+                the current period are skipped and shown in the preview.
               </p>
             )}
 
             <fieldset className="space-y-2">
-              <legend className="text-xs font-medium text-ink">How should credits change?</legend>
+              <legend className="text-xs font-medium text-ink">How should the days change?</legend>
               <div className="grid gap-2 sm:grid-cols-2">
                 <ScopeOption
-                  label="Add credits"
+                  label="Add days"
                   description="Increase the assigned total by this amount."
                   checked={draft.mode === "ADD"}
                   onChange={() => {
@@ -366,12 +366,12 @@ export function LeaveCreditsModal({
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Field
-                label={draft.mode === "ADD" ? "Credits to add" : "New assigned total"}
+                label={draft.mode === "ADD" ? "Days to add" : "New assigned total"}
                 htmlFor="leave-credits-amount"
                 hint={
                   draft.mode === "ADD"
-                    ? "1 credit equals 1 day of leave."
-                    : "The total credits assigned for this period, including unused days."
+                    ? "Enter the number of days to add."
+                    : "The total days assigned for this period, including unused days."
                 }
                 required
               >
@@ -390,7 +390,7 @@ export function LeaveCreditsModal({
               <Field
                 label="Effective date"
                 htmlFor="leave-credits-effective"
-                hint="Optional. Uses the balance period that contains this date; blank uses today."
+                hint="Optional. Uses the period that contains this date; blank uses today."
               >
                 <Input
                   id="leave-credits-effective"
@@ -434,8 +434,8 @@ export function LeaveCreditsModal({
             {preview.summary.unchanged > 0
               ? `${preview.summary.unchanged} employee${preview.summary.unchanged === 1 ? " is" : "s are"} already at this balance and will be skipped. `
               : ""}
-            Credits for {leaveTypeName} are applied per employee; a failure on one employee
-            does not roll back the others.
+            Days for {leaveTypeName} are added per employee; a failure on one employee does not
+            roll back the others.
           </p>
         ) : null}
       </div>
@@ -490,10 +490,10 @@ function PreviewSection({ preview }: { preview: LeaveCreditAssignmentPreview }) 
         Preview · {balancePeriodLabel(preview.periodStart, preview.periodEnd)}
       </h3>
       <p className="text-xs text-muted">
-        {preview.mode === "ADD" ? "Add" : "Set to"} credits for{" "}
+        {preview.mode === "ADD" ? "Add" : "Set to"} days for{" "}
         {preview.scope === "ALL_ACTIVE" ? "all active employees" : `${items.length} employee${items.length === 1 ? "" : "s"}`} ·{" "}
         {preview.summary.previewed} ready · {preview.summary.unchanged} unchanged ·{" "}
-        {preview.summary.failed} cannot be applied. Nothing has been written yet.
+        {preview.summary.failed} cannot be applied. Nothing has been saved yet.
       </p>
       <div className="max-h-72 overflow-y-auto rounded-lg border border-line">
         <TableShell className="min-w-[640px]">

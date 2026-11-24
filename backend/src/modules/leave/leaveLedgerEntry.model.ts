@@ -15,6 +15,7 @@ export const LEAVE_LEDGER_ENTRY_KINDS = [
   'RESERVATION_RELEASE',
   'CONSUMPTION',
   'CONSUMPTION_RESTORE',
+  'EXPIRY',
 ] as const;
 export type LeaveLedgerEntryKind = (typeof LEAVE_LEDGER_ENTRY_KINDS)[number];
 
@@ -33,6 +34,7 @@ export interface LeaveLedgerEntryAttributes {
   carriedForwardDelta: number;
   reservedDelta: number;
   consumedDelta: number;
+  expiredDelta: number;
   availableDelta: number;
   balanceAfter: number;
   reason: string | null;
@@ -54,6 +56,7 @@ export type LeaveLedgerEntryCreationAttributes = Optional<
   | 'carriedForwardDelta'
   | 'reservedDelta'
   | 'consumedDelta'
+  | 'expiredDelta'
   | 'availableDelta'
   | 'balanceAfter'
   | 'reason'
@@ -86,6 +89,7 @@ export class LeaveLedgerEntry
   declare carriedForwardDelta: number;
   declare reservedDelta: number;
   declare consumedDelta: number;
+  declare expiredDelta: number;
   declare availableDelta: number;
   declare balanceAfter: number;
   declare reason: string | null;
@@ -195,6 +199,12 @@ export function initLeaveLedgerEntry(sequelize: Sequelize): typeof LeaveLedgerEn
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
         field: 'consumed_delta',
+        defaultValue: 0,
+      },
+      expiredDelta: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+        field: 'expired_delta',
         defaultValue: 0,
       },
       availableDelta: {

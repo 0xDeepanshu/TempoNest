@@ -155,7 +155,7 @@ export function LeaveRequestsView() {
       <PageHeader
         eyebrow={`${organization.name} · ${organization.timezone}`}
         title="Leave requests"
-        description="Review requests across the organization. Open a request to see its calculation, employee remarks, balance impact, and available actions."
+        description="Review and decide on leave. Open a request to see the days, the balance impact, the employee's note, and what you can do."
       />
 
       <LeaveTabs current="requests" />
@@ -396,7 +396,7 @@ function RequestTable({
                     {request.leaveType.isPaid ? "Paid" : "Unpaid"}
                   </Badge>
                   {request.leaveType.requiresBalance ? (
-                    <Badge tone="outline">Balance</Badge>
+                    <Badge tone="outline">Uses balance</Badge>
                   ) : null}
                 </div>
               ) : null}
@@ -436,7 +436,7 @@ function RequestCard({
     <button
       type="button"
       onClick={onOpen}
-      className="block w-full px-4 py-3 text-left transition hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink"
+      className="block w-full px-4 py-3 text-left transition hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
@@ -710,8 +710,8 @@ function RequestDetailModal({
               </Badge>
               <Badge tone="outline">
                 {request.leaveType.requiresBalance
-                  ? "Balance required"
-                  : "No balance required"}
+                  ? "Uses balance"
+                  : "No balance"}
               </Badge>
             </>
           ) : null}
@@ -872,7 +872,7 @@ function RequestDetailModal({
             </h3>
             {!canManage ? (
               <p className="text-xs leading-5 text-muted">
-                Viewing another employee&apos;s balance requires <code>leave:manage</code>.
+                Seeing another employee&apos;s balance needs leave-management access.
               </p>
             ) : balanceImpact.loading && !balance ? (
               <p className="flex items-center gap-2 text-xs text-muted">
@@ -894,12 +894,12 @@ function RequestDetailModal({
                 <BalanceFigure
                   label="Available balance"
                   value={balance.availableBalance}
-                  hint="After this request's reservation"
+                  hint="After this request is taken into account"
                 />
                 <BalanceFigure
                   label="Pending approval"
                   value={balance.pendingReserved}
-                  hint="Reserved by pending requests, including this one when pending"
+                  hint="Held by pending requests, including this one when pending"
                 />
                 <BalanceFigure
                   label="Approved consumed"
@@ -941,7 +941,7 @@ function RequestDetailModal({
             </h3>
             <p className="mt-0.5 text-xs leading-5 text-muted">
               {actionMode === "approve"
-                ? "Optionally add a note for the employee. Balance reservations become consumed on approval."
+                ? "Optionally add a note for the employee. Pending days become used once approved."
                 : actionMode === "reject"
                   ? "Explain why this request is being rejected. Pending balance is released."
                   : actionMode === "decline-cancellation"

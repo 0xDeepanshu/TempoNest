@@ -75,6 +75,15 @@ function policySnapshot(policy: LeavePolicyModel) {
     balancePeriodStartDay: policy.balancePeriodStartDay,
     carryForwardAllowance: toUnits(policy.carryForwardAllowance),
     maxBalance: policy.maxBalance === null ? null : toUnits(policy.maxBalance),
+    carryForwardEnabled: Boolean(policy.carryForwardEnabled),
+    carryForwardExpiryMonths: policy.carryForwardExpiryMonths ?? null,
+    carryForwardOrder: policy.carryForwardOrder,
+    resetPeriod: policy.resetPeriod,
+    maxCreditsPerApplication:
+      policy.maxCreditsPerApplication === null ? null : toUnits(policy.maxCreditsPerApplication),
+    monthlyUsageLimitEnabled: Boolean(policy.monthlyUsageLimitEnabled),
+    monthlyUsageLimit:
+      policy.monthlyUsageLimit === null ? null : toUnits(policy.monthlyUsageLimit),
     prorateInitialEntitlement: policy.prorateInitialEntitlement,
     isActive: policy.isActive,
   };

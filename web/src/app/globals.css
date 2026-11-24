@@ -1,18 +1,34 @@
 @import "tailwindcss";
 
+/*
+ * WorkZen palette
+ * ---------------
+ * Deep black canvas + warm cream accents. Light mode keeps the same warmth so
+ * the product never falls back to a cool blue-gray theme.
+ */
 :root {
   color-scheme: light;
-  --canvas: #f5f5f3;
+  --canvas: #f4f3f1;
   --surface: #ffffff;
-  --surface-muted: #fafaf9;
-  --surface-hover: #f0f0ed;
-  --ink: #0a0a0a;
-  --ink-secondary: #404040;
-  --muted: #71716e;
-  --line: #e5e5e2;
-  --line-strong: #d2d2ce;
+  --surface-muted: #f7f6f3;
+  --surface-hover: #f1efea;
+  --sidebar: #eceae5;
+  --sidebar-border: #dfddd7;
+  --control-border: #dfddd7;
+  --card-shadow: 0 1px 2px rgba(20, 19, 17, 0.04);
+  --ink: #1c1917;
+  --ink-secondary: #44403b;
+  --muted: #6e685f;
+  --line: #e4e2dd;
+  --line-strong: #dfddd7;
   --on-strong: #ffffff;
-  --overlay: rgb(10 10 10 / 0.4);
+  --overlay: rgb(20 19 17 / 0.42);
+  --accent: #263849;
+  --accent-hover: #1e2d3b;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(38, 56, 73, 0.08);
+  --accent-soft-ink: #263849;
+  --focus-ring: #263849;
   --success: #157347;
   --success-surface: #f0faf4;
   --success-border: #b7e4c9;
@@ -23,37 +39,56 @@
   --danger-surface: #fdf1f0;
   --danger-border: #f0c2be;
   --media: #0a0a0a;
-  --media-foreground: #d4d4d4;
+  --media-foreground: #f3e6d3;
   --media-danger: #f0a7a1;
-  --brand: #0a0a0a;
+  --brand: #263849;
   --brand-foreground: #ffffff;
-  --brand-ink: #0a0a0a;
-  --brand-muted: #a3a3a3;
-  --brand-border: rgb(255 255 255 / 0.16);
+  --brand-ink: #263849;
+  --brand-muted: rgba(255, 255, 255, 0.72);
+  --brand-border: rgba(255, 255, 255, 0.16);
 }
 
-.dark {
+.dark,
+[data-theme="dark"] {
   color-scheme: dark;
-  --canvas: #0d0d0d;
-  --surface: #161616;
-  --surface-muted: #1c1c1c;
-  --surface-hover: #242424;
-  --ink: #f4f4f2;
-  --ink-secondary: #d0d0cc;
-  --muted: #9d9d97;
-  --line: #2a2a2a;
-  --line-strong: #3b3b3b;
+  --canvas: #0a0a0a;
+  --surface: #131210;
+  --surface-muted: #191714;
+  --surface-hover: #211e1a;
+  --sidebar: #131210;
+  --sidebar-border: #282420;
+  --control-border: #282420;
+  --card-shadow: none;
+  --ink: #fbf4e4;
+  --ink-secondary: #f3e6d3;
+  --muted: #9a9285;
+  --line: #282420;
+  --line-strong: #3d3730;
   --on-strong: #0d0d0d;
-  --overlay: rgb(0 0 0 / 0.66);
-  --success: #74d9a4;
-  --success-surface: #14251b;
-  --success-border: #2a5c3e;
-  --warning: #e3b341;
-  --warning-surface: #26200f;
-  --warning-border: #5c4a1d;
-  --danger: #f08a82;
-  --danger-surface: #2a1513;
-  --danger-border: #5e2a25;
+  --overlay: rgb(0 0 0 / 0.72);
+  --accent: #f3e6d3;
+  --accent-hover: #fbf4e4;
+  --accent-ink: #0d0d0d;
+  --accent-soft: rgba(243, 230, 211, 0.12);
+  --accent-soft-ink: #f3e6d3;
+  --focus-ring: #f3e6d3;
+  --success: #8fd6a4;
+  --success-surface: #12211a;
+  --success-border: #2c4a34;
+  --warning: #e8c879;
+  --warning-surface: #241e12;
+  --warning-border: #52432b;
+  --danger: #f2a08f;
+  --danger-surface: #261512;
+  --danger-border: #583029;
+  --media: #0a0a0a;
+  --media-foreground: #f3e6d3;
+  --media-danger: #f0a7a1;
+  --brand: #fbf4e4;
+  --brand-foreground: #0d0d0d;
+  --brand-ink: #fbf4e4;
+  --brand-muted: rgba(13, 13, 13, 0.62);
+  --brand-border: rgba(13, 13, 13, 0.16);
 }
 
 @theme inline {
@@ -61,6 +96,9 @@
   --color-surface: var(--surface);
   --color-surface-muted: var(--surface-muted);
   --color-surface-hover: var(--surface-hover);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-control: var(--control-border);
   --color-ink: var(--ink);
   --color-ink-secondary: var(--ink-secondary);
   --color-muted: var(--muted);
@@ -68,6 +106,12 @@
   --color-line-strong: var(--line-strong);
   --color-on-strong: var(--on-strong);
   --color-overlay: var(--overlay);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-ink: var(--accent-soft-ink);
+  --color-focus-ring: var(--focus-ring);
   --color-success: var(--success);
   --color-success-surface: var(--success-surface);
   --color-success-border: var(--success-border);
@@ -112,12 +156,12 @@
   }
 
   ::selection {
-    background: var(--ink);
-    color: var(--surface);
+    background: var(--accent);
+    color: var(--accent-ink);
   }
 
   :focus-visible {
-    outline: 2px solid var(--ink);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
   }
 
@@ -146,6 +190,107 @@
 
 @utility tnum {
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Dark-mode lighting + semantic micro-accents.
+ * Declared outside Tailwind's layers so they can override utility colors.
+ * Light mode is untouched: the `.dark` / `[data-theme="dark"]` scoping means
+ * these rules only take effect in the black + warm-cream theme.
+ *
+ * The glow is a dedicated pseudo-element layer: it is absolutely positioned,
+ * clipped to the container, and `pointer-events: none`, so it can never
+ * intercept clicks or affect scrolling and layout.
+ */
+.ambient-top {
+  position: relative;
+  isolation: isolate;
+}
+
+.ambient-sidebar {
+  isolation: isolate;
+}
+
+.ambient-top::before,
+.ambient-sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  display: block;
+  height: 320px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -1;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-image: none;
+}
+
+.dark .ambient-top::before,
+[data-theme="dark"] .ambient-top::before {
+  background-image: radial-gradient(
+    85% 110% at 0% 0%,
+    rgba(243, 230, 211, 0.11) 0%,
+    rgba(243, 230, 211, 0.05) 42%,
+    rgba(243, 230, 211, 0) 72%
+  );
+}
+
+.dark .ambient-sidebar::before,
+[data-theme="dark"] .ambient-sidebar::before {
+  height: 300px;
+  background-image: radial-gradient(
+    110% 100% at 0% 0%,
+    rgba(243, 230, 211, 0.11) 0%,
+    rgba(243, 230, 211, 0.045) 45%,
+    rgba(243, 230, 211, 0) 75%
+  );
+}
+
+.card-elevated {
+  box-shadow: var(--card-shadow);
+}
+
+.dark .kpi-emerald,
+[data-theme="dark"] .kpi-emerald {
+  border-color: rgba(134, 167, 137, 0.32);
+  background-color: rgba(134, 167, 137, 0.14);
+  color: #86a789;
+}
+
+.dark .kpi-cream,
+[data-theme="dark"] .kpi-cream {
+  border-color: rgba(243, 230, 211, 0.3);
+  background-color: rgba(243, 230, 211, 0.14);
+  color: #f3e6d3;
+}
+
+.dark .kpi-sky,
+[data-theme="dark"] .kpi-sky {
+  border-color: rgba(139, 164, 196, 0.32);
+  background-color: rgba(139, 164, 196, 0.14);
+  color: #8ba4c4;
+}
+
+.dark .kpi-amber,
+[data-theme="dark"] .kpi-amber {
+  border-color: rgba(212, 154, 90, 0.32);
+  background-color: rgba(212, 154, 90, 0.14);
+  color: #d49a5a;
+}
+
+.dark .kpi-rose,
+[data-theme="dark"] .kpi-rose {
+  border-color: rgba(217, 83, 79, 0.32);
+  background-color: rgba(217, 83, 79, 0.14);
+  color: #d9534f;
+}
+
+.dark .kpi-slate,
+[data-theme="dark"] .kpi-slate {
+  border-color: rgba(154, 146, 133, 0.3);
+  background-color: rgba(154, 146, 133, 0.14);
+  color: #9a9285;
 }
 
 input[type="datetime-local"]::-webkit-calendar-picker-indicator,

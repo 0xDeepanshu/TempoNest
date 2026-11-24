@@ -99,7 +99,7 @@ function RoleChecks({
   );
 }
 
-export function MonitoringSettingsView() {
+export function MonitoringSettingsView({ embedded = false }: { embedded?: boolean } = {}) {
   const { organization } = useWorkspace();
   const organizationId = organization?.id ?? "";
   const [savedPolicy, setSavedPolicy] = useState<{
@@ -125,13 +125,15 @@ export function MonitoringSettingsView() {
   if (policy.loading && !current) {
     return (
       <div className="space-y-5">
-        <PageHeader
-          eyebrow={organization.name}
-          title="Monitoring settings"
-          description="Loading the organization screenshot policy."
-        />
+        {embedded ? null : (
+          <PageHeader
+            eyebrow={organization.name}
+            title="Screenshot capture"
+            description="Loading screenshot rules."
+          />
+        )}
         <Card>
-          <LoadingBlock label="Loading monitoring policy" rows={4} />
+          <LoadingBlock label="Loading screenshot rules" rows={4} />
         </Card>
       </div>
     );
@@ -140,7 +142,9 @@ export function MonitoringSettingsView() {
   if (policy.error && !current) {
     return (
       <div className="space-y-5">
-        <PageHeader eyebrow={organization.name} title="Monitoring settings" />
+        {embedded ? null : (
+          <PageHeader eyebrow={organization.name} title="Screenshot capture" />
+        )}
         <ErrorState message={policy.error} onRetry={policy.reload} />
       </div>
     );
@@ -153,6 +157,7 @@ export function MonitoringSettingsView() {
       key={organization.id}
       policy={current}
       organization={organization}
+      embedded={embedded}
       onSaved={(next) => setSavedPolicy({ organizationId, policy: next })}
     />
   );
@@ -161,10 +166,12 @@ export function MonitoringSettingsView() {
 function MonitoringSettingsForm({
   policy,
   organization,
+  embedded = false,
   onSaved,
 }: {
   policy: ScreenshotPolicy;
   organization: Organization;
+  embedded?: boolean;
   onSaved: (policy: ScreenshotPolicy) => void;
 }) {
   const organizationId = organization.id;
@@ -241,39 +248,52 @@ function MonitoringSettingsForm({
     form.requestRoles.some((role) => !form.viewRoles.includes(role)) ||
     form.requestRoles.length === 0 ||
     form.viewRoles.length === 0;
+  const statusBadge = (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-ink-secondary">
+      <span
+        className={cn("h-1.5 w-1.5 rounded-full", enabled ? "bg-success" : "bg-muted")}
+        aria-hidden
+      />
+      <ShieldIcon className="h-3.5 w-3.5" />
+      {enabled ? "Screenshots allowed" : "Screenshots off"}
+    </span>
+  );
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        eyebrow={`${organization.name} · ${organization.timezone}`}
-        title="Monitoring settings"
-        description="Control whether administrators may request an individual employee screenshot. Screenshots are disabled by default and are never captured on a timer or from application usage alone."
-        actions={
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-ink-secondary">
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                enabled ? "bg-success" : "bg-muted",
-              )}
-              aria-hidden
-            />
-            <ShieldIcon className="h-3.5 w-3.5" />
-            {enabled ? "Monitoring enabled" : "Monitoring disabled"}
-          </span>
-        }
-      />
+      {embedded ? (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight text-ink">
+              Screenshot capture
+            </h2>
+            <p className="mt-0.5 max-w-3xl text-[13px] leading-5 text-muted">
+              Choose whether administrators can ask for a single, visible screenshot. Nothing is
+              ever captured on a timer.
+            </p>
+          </div>
+          {statusBadge}
+        </div>
+      ) : (
+        <PageHeader
+          eyebrow={`${organization.name} · ${organization.timezone}`}
+          title="Screenshot capture"
+          description="Choose whether administrators can ask for a single, visible screenshot. Nothing is ever captured on a timer."
+          actions={statusBadge}
+        />
+      )}
 
       <Alert tone={enabled ? "warning" : "info"} title="Explicit, visible capture only">
         {enabled
-          ? "Enabling this policy allows authorized roles to request one screenshot at a time while an employee has an eligible active session. Employees see a disclosure in the desktop app, and access is audited. Existing screenshots remain private until retention cleanup."
-          : "No screenshot request can be created while monitoring is disabled. Existing screenshots are retained according to the retention period and remain accessible only to permitted roles."}
+          ? "Authorized roles can request one screenshot at a time while the employee has an active session. The employee sees a notice in the desktop app, and every view is recorded. Existing screenshots stay private until they are deleted."
+          : "No screenshot can be requested while this is off. Existing screenshots are kept for the retention period and stay visible only to permitted roles."}
       </Alert>
 
       <form onSubmit={save} className="space-y-5">
         <Card>
           <CardHeader
-            title="Policy controls"
-            description="Route permissions are necessary but not sufficient: a role must also appear in these lists."
+            title="Who can capture and review"
+            description="A role also needs the matching access permission, so both must allow it."
           />
           <CardBody className="space-y-5">
             <label
@@ -294,25 +314,25 @@ function MonitoringSettingsForm({
               />
               <span>
                 <span className="block text-sm font-semibold text-ink">
-                  Allow administrator-requested screenshots
+                  Allow administrators to request screenshots
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-muted">
-                  When off, request creation, claim, upload, and access are blocked. Turning this on
-                  does not create periodic capture or screen streaming.
+                  When off, no one can request, upload, or open a screenshot. Turning this on does
+                  not start automatic capture or screen sharing.
                 </span>
               </span>
             </label>
 
             <div className="grid gap-6 lg:grid-cols-2">
               <RoleChecks
-                label="Roles allowed to request"
-                description="The role must also have screenshot:request. OWNER and ADMIN have it by default."
+                label="Who may request"
+                description="Also needs the request-screenshot permission. Owners and admins have it by default."
                 selected={form.requestRoles}
                 onChange={(requestRoles) => setForm({ ...form, requestRoles })}
               />
               <RoleChecks
-                label="Roles allowed to review"
-                description="The role must also have screenshot:read. Managers have read permission but are excluded by the default policy."
+                label="Who may review"
+                description="Also needs the view-screenshot permission. Managers can view but are excluded by default."
                 selected={form.viewRoles}
                 onChange={(viewRoles) => setForm({ ...form, viewRoles })}
               />
@@ -320,14 +340,14 @@ function MonitoringSettingsForm({
 
             {roleGap ? (
               <Alert tone="danger">
-                Every role allowed to request must also be allowed to review, and both lists need at
-                least one role.
+                Anyone who may request must also be able to review, and both lists need at least
+                one role.
               </Alert>
             ) : null}
 
             <div className="grid gap-4 sm:grid-cols-3">
               <Field
-                label="Request cooldown (seconds)"
+                label="Wait between requests (seconds)"
                 htmlFor="monitor-cooldown"
                 hint="Minimum gap between requests from the same administrator."
               >
@@ -344,9 +364,9 @@ function MonitoringSettingsForm({
                 />
               </Field>
               <Field
-                label="Screenshot retention (days)"
+                label="Keep screenshots for (days)"
                 htmlFor="monitor-retention"
-                hint="Private images are deleted after this period."
+                hint="Images are deleted after this period."
               >
                 <Input
                   id="monitor-retention"
@@ -361,9 +381,9 @@ function MonitoringSettingsForm({
                 />
               </Field>
               <Field
-                label="Audit retention (days)"
+                label="Keep the access log for (days)"
                 htmlFor="monitor-audit-retention"
-                hint="Audit rows outlive the image so access remains reviewable."
+                hint="The log outlives the image so past views stay reviewable."
               >
                 <Input
                   id="monitor-audit-retention"
@@ -393,11 +413,11 @@ function MonitoringSettingsForm({
               />
               <span>
                 <span className="block text-sm font-semibold text-ink">
-                  Require employee acknowledgement
+                  Require the employee to accept the notice
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-muted">
-                  Employees must acknowledge the current disclosure version in the web portal before
-                  an administrator can request their screenshot.
+                  The employee must accept the current notice in the web portal before anyone can
+                  request their screenshot.
                 </span>
               </span>
             </label>
@@ -406,11 +426,11 @@ function MonitoringSettingsForm({
 
         <Card>
           <CardHeader
-            title="Employee disclosure"
-            description="Shown in the web portal and desktop app. Update the version whenever the meaning of the policy changes."
+            title="What employees are told"
+            description="Shown in the web portal and desktop app. Update the version whenever the meaning changes."
           />
           <CardBody className="space-y-4">
-            <Field label="Disclosure version" htmlFor="monitor-version" hint="Example: 2026-10-01">
+            <Field label="Notice version" htmlFor="monitor-version" hint="Example: 2026-10-01">
               <Input
                 id="monitor-version"
                 value={form.disclosureVersion}
@@ -421,9 +441,9 @@ function MonitoringSettingsForm({
               />
             </Field>
             <Field
-              label="Disclosure text"
+              label="Notice text"
               htmlFor="monitor-disclosure"
-              hint="Be specific about who can request a capture, when, and how it is stored."
+              hint="Be specific about who can ask for a screenshot, when, and how it is stored."
             >
               <Textarea
                 id="monitor-disclosure"
@@ -446,19 +466,19 @@ function MonitoringSettingsForm({
           </CardBody>
         </Card>
 
-        {formError ? <Alert tone="danger" title="Settings not saved">{formError}</Alert> : null}
+        {formError ? <Alert tone="danger" title="Not saved">{formError}</Alert> : null}
         {saved ? (
-          <Alert tone="success" title="Monitoring settings saved">
-            The updated policy applies to new requests immediately. Every change is recorded in the
-            screenshot audit history.
+          <Alert tone="success" title="Screenshot rules saved">
+            The new rules apply to the next request immediately. Every change is recorded in the
+            access history.
           </Alert>
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[11px] text-muted">
             {policy.updatedAt
-              ? `Policy last updated ${new Date(policy.updatedAt).toLocaleString()}.`
-              : "This organization uses the default policy."}
+              ? `Last updated ${new Date(policy.updatedAt).toLocaleString()}.`
+              : "This organization uses the default rules."}
           </p>
           <div className="flex gap-2">
             <Button
@@ -474,7 +494,7 @@ function MonitoringSettingsForm({
               Reset
             </Button>
             <Button type="submit" disabled={saving || roleGap}>
-              {saving ? "Saving…" : "Save monitoring settings"}
+              {saving ? "Saving…" : "Save screenshot rules"}
             </Button>
           </div>
         </div>

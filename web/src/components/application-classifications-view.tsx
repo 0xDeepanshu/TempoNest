@@ -98,8 +98,8 @@ export function ApplicationClassificationsView() {
     <div className="space-y-5">
       <PageHeader
         eyebrow={`${organization.name} · ${organization.timezone}`}
-        title="Application classifications"
-        description="Choose how foreground applications are grouped in activity reports. Unknown applications stay Unclassified until an administrator classifies them and are never marked Unproductive automatically."
+        title="App categories"
+        description="Choose how apps are grouped in activity reports. An app stays Unclassified until someone gives it a category, and it is never marked Unproductive automatically."
         actions={
           canManage ? (
             <Button onClick={() => setEditor({ row: null })}>
@@ -112,16 +112,15 @@ export function ApplicationClassificationsView() {
 
       <ActivityTabs current="classifications" />
 
-      <Alert tone="info" title="Classification is retroactive at report time">
-        Reports resolve each application against the current catalog. Changing a category
-        regroups historical application time immediately, but raw activity rows are not
-        rewritten. Every catalog change is recorded in the audit trail.
+      <Alert tone="info" title="Categories apply to old reports too">
+        Reports look up each app in the current category list. Changing a category regroups past
+        app time immediately, but the raw activity rows are not rewritten. Every change is
+        recorded in the history.
       </Alert>
 
       {!canManage ? (
-        <Alert tone="warning" title="Read-only catalog">
-          You can review how applications are classified. Creating or changing classifications
-          requires an administrator.
+        <Alert tone="warning" title="Read-only list">
+          You can see how apps are grouped. Changing categories needs an administrator.
         </Alert>
       ) : null}
 
@@ -149,8 +148,8 @@ export function ApplicationClassificationsView() {
 
       <Card>
         <CardHeader
-          title="Catalog filters"
-          description="Search by identifier or display name. Observed applications come from activity history and stay Unclassified until a catalog entry exists."
+          title="Filters"
+          description="Search by app name or identifier. Apps seen in activity stay Unclassified until someone adds a category."
         />
         <form
           onSubmit={applySearch}
@@ -210,8 +209,8 @@ export function ApplicationClassificationsView() {
 
       <Card>
         <CardHeader
-          title="Classification catalog"
-          description="Categories affect how report application time is grouped. They are descriptive, not a performance score."
+          title="Categories"
+          description="Categories change how app time is grouped in reports. They are a label, not a performance score."
         />
         {list.error ? (
           <div className="p-4">
@@ -234,9 +233,9 @@ export function ApplicationClassificationsView() {
             <TableShell>
               <thead>
                 <tr>
-                  <Th>Application</Th>
+                  <Th>App</Th>
                   <Th>Category</Th>
-                  <Th>Catalog state</Th>
+                  <Th>Status</Th>
                   <Th>Notes</Th>
                   <Th>Last updated</Th>
                   {canManage ? <Th /> : null}

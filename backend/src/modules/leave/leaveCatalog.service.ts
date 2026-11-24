@@ -6,6 +6,7 @@ import {
   LeavePolicy,
   LeaveRequest,
   LeaveType,
+  Membership,
   User,
   sequelize,
 } from '../../database';
@@ -13,7 +14,13 @@ import { AppError } from '../../utils/errors';
 import { paginate } from '../../utils/pagination';
 import { DEFAULT_WORKING_DAYS } from './leavePolicy.model';
 import { ACTIVE_LEAVE_REQUEST_STATUSES } from './leaveRequest.model';
-import { todayInTimezone, toUnits } from './leaveCalendar';
+import {
+  balancePeriodFor,
+  localDate,
+  policyPeriodConfig,
+  todayInTimezone,
+  toUnits,
+} from './leaveCalendar';
 import { recordAuditEvent, type AuditContext } from '../screenshots/audit.service';
 import { LEAVE_AUDIT_ACTIONS } from '../screenshots/auditEvent.model';
 import { createHoliday as createHolidayService, deleteHoliday as deleteHolidayService } from './holiday.service';
@@ -299,25 +306,118 @@ export async function updateLeavePolicy(options: {
       throw AppError.notFound('Leave policy not found', 'LEAVE_POLICY_NOT_FOUND');
     }
 
+    const nextPeriodConfig = {
+      balancePeriodStartMonth:
+        input.balancePeriodStartMonth ?? current.balancePeriodStartMonth,
+      balancePeriodStartDay: input.balancePeriodStartDay ?? current.balancePeriodStartDay,
+      resetPeriod: input.resetPeriod ?? current.resetPeriod,
+    };
+
     const changesPeriod =
-      (input.balancePeriodStartMonth !== undefined &&
-        input.balancePeriodStartMonth !== current.balancePeriodStartMonth) ||
-      (input.balancePeriodStartDay !== undefined &&
-        input.balancePeriodStartDay !== current.balancePeriodStartDay);
+      nextPeriodConfig.balancePeriodStartMonth !== current.balancePeriodStartMonth ||
+      nextPeriodConfig.balancePeriodStartDay !== current.balancePeriodStartDay ||
+      nextPeriodConfig.resetPeriod !== current.resetPeriod;
+
+    // A schedule change is only unsafe when it would move an existing balance
+    // into a different period. Switching CUSTOM (1 Jan) to CALENDAR_YEAR, or
+    // otherwise renaming an equivalent schedule, must keep working after
+    // balances exist — otherwise the Owner could never adopt the new modes.
     if (changesPeriod) {
-      const balanceCount = await LeaveBalance.count({
+      const balances = await LeaveBalance.findAll({
         where: {
           organizationId: organization.id,
           leaveTypeId: current.leaveTypeId,
         },
+        attributes: ['employeeId', 'periodStart', 'periodEnd'],
         transaction,
       });
-      if (balanceCount > 0) {
-        throw AppError.conflict(
-          'The balance period cannot change while balances exist for this leave type. Existing rows would overlap the new period.',
-          'LEAVE_POLICY_PERIOD_LOCKED',
-        );
+
+      if (balances.length > 0) {
+        const anchors = new Map<string, string | null>();
+        if (nextPeriodConfig.resetPeriod === 'JOINING_ANNIVERSARY') {
+          const employeeIds = [...new Set(balances.map((balance) => balance.employeeId))];
+          const memberships = await Membership.findAll({
+            where: { organizationId: organization.id, userId: { [Op.in]: employeeIds } },
+            attributes: ['userId', 'createdAt'],
+            transaction,
+          });
+          for (const membership of memberships) {
+            anchors.set(
+              membership.userId,
+              localDate(membership.createdAt, organization.timezone),
+            );
+          }
+        }
+
+        const overlaps = balances.some((balance) => {
+          const config = policyPeriodConfig(
+            nextPeriodConfig,
+            anchors.get(balance.employeeId) ?? null,
+          );
+          const period = balancePeriodFor(balance.periodStart, config, organization.timezone);
+          return period.periodStart !== balance.periodStart || period.periodEnd !== balance.periodEnd;
+        });
+
+        if (overlaps) {
+          throw AppError.conflict(
+            'The balance period cannot change while balances exist for this leave type. Existing rows would overlap the new period.',
+            'LEAVE_POLICY_PERIOD_LOCKED',
+          );
+        }
       }
+    }
+
+    // Carry-forward toggle and allowance are kept consistent: a positive
+    // allowance always enables carry-forward, and disabling it zeroes the
+    // allowance so the stored row matches the effective behaviour.
+    let nextCarryForwardEnabled =
+      input.carryForwardEnabled !== undefined
+        ? input.carryForwardEnabled
+        : current.carryForwardEnabled;
+    let nextCarryForwardAllowance =
+      input.carryForwardAllowance !== undefined
+        ? input.carryForwardAllowance
+        : toUnits(current.carryForwardAllowance);
+    if (input.carryForwardAllowance !== undefined && input.carryForwardAllowance > 0) {
+      // Setting an allowance implies carry-forward is on (legacy clients).
+      nextCarryForwardEnabled = true;
+    } else if (input.carryForwardEnabled === false && input.carryForwardAllowance === undefined) {
+      // Explicitly disabling carry-forward clears the allowance so the stored
+      // row matches the effective behaviour.
+      nextCarryForwardAllowance = 0;
+    }
+    if (nextCarryForwardAllowance > 0) nextCarryForwardEnabled = true;
+    const nextCarryForwardExpiryMonths = nextCarryForwardEnabled
+      ? input.carryForwardExpiryMonths !== undefined
+        ? input.carryForwardExpiryMonths
+        : current.carryForwardExpiryMonths
+      : null;
+
+    const nextMonthlyEnabled =
+      input.monthlyUsageLimitEnabled !== undefined
+        ? input.monthlyUsageLimitEnabled
+        : current.monthlyUsageLimitEnabled;
+    const nextMonthlyLimit =
+      input.monthlyUsageLimit !== undefined
+        ? input.monthlyUsageLimit
+        : current.monthlyUsageLimit === null
+          ? null
+          : toUnits(current.monthlyUsageLimit);
+    if (nextMonthlyEnabled && (nextMonthlyLimit === null || toUnits(nextMonthlyLimit) <= 0)) {
+      throw AppError.unprocessable(
+        'A positive monthly usage limit is required when the limit is enabled',
+        'LEAVE_POLICY_MONTHLY_LIMIT_REQUIRED',
+      );
+    }
+    if (
+      input.maxCreditsPerApplication !== undefined &&
+      input.maxCreditsPerApplication !== null &&
+      toUnits(input.maxCreditsPerApplication) <= 0
+    ) {
+      throw AppError.unprocessable(
+        'Maximum credits per application must be greater than zero, or empty for no limit',
+        'LEAVE_POLICY_MAX_PER_APPLICATION_INVALID',
+      );
     }
 
     const nextFrequency = input.accrualFrequency ?? current.accrualFrequency;
@@ -359,8 +459,29 @@ export async function updateLeavePolicy(options: {
         ...(input.balancePeriodStartDay !== undefined
           ? { balancePeriodStartDay: input.balancePeriodStartDay }
           : {}),
-        ...(input.carryForwardAllowance !== undefined
-          ? { carryForwardAllowance: input.carryForwardAllowance }
+        ...(input.carryForwardAllowance !== undefined || input.carryForwardEnabled !== undefined
+          ? {
+              carryForwardAllowance: nextCarryForwardAllowance,
+              carryForwardEnabled: nextCarryForwardEnabled,
+            }
+          : {}),
+        ...(input.carryForwardExpiryMonths !== undefined ||
+        input.carryForwardEnabled !== undefined
+          ? { carryForwardExpiryMonths: nextCarryForwardExpiryMonths }
+          : {}),
+        ...(input.carryForwardOrder !== undefined
+          ? { carryForwardOrder: input.carryForwardOrder }
+          : {}),
+        ...(input.resetPeriod !== undefined ? { resetPeriod: input.resetPeriod } : {}),
+        ...(input.maxCreditsPerApplication !== undefined
+          ? { maxCreditsPerApplication: input.maxCreditsPerApplication }
+          : {}),
+        ...(input.monthlyUsageLimitEnabled !== undefined ||
+        input.monthlyUsageLimit !== undefined
+          ? {
+              monthlyUsageLimitEnabled: nextMonthlyEnabled,
+              monthlyUsageLimit: nextMonthlyLimit,
+            }
           : {}),
         ...(input.maxBalance !== undefined ? { maxBalance: input.maxBalance } : {}),
         ...(input.prorateInitialEntitlement !== undefined

@@ -94,6 +94,13 @@ function makeType(overrides: Partial<LeaveType> = {}): LeaveType {
       balancePeriodStartMonth: 1,
       balancePeriodStartDay: 1,
       carryForwardAllowance: 0,
+      carryForwardEnabled: false,
+      carryForwardExpiryMonths: null,
+      carryForwardOrder: "EXPIRY_FIRST",
+      resetPeriod: "CUSTOM",
+      maxCreditsPerApplication: null,
+      monthlyUsageLimitEnabled: false,
+      monthlyUsageLimit: null,
       maxBalance: null,
       prorateInitialEntitlement: false,
       workingDays: [1, 2, 3, 4, 5],
@@ -129,6 +136,7 @@ function makeBalance(overrides: Partial<LeaveBalance> = {}): LeaveBalance {
     carriedForwardBalance: 0,
     approvedConsumed: 0,
     pendingReserved: 5,
+    expiredBalance: 0,
     availableBalance: 17,
     assignedBalance: 22,
     breakdown: {
@@ -139,6 +147,7 @@ function makeBalance(overrides: Partial<LeaveBalance> = {}): LeaveBalance {
       carriedForward: 0,
       approvedConsumed: 0,
       pendingReserved: 5,
+      expired: 0,
       available: 17,
     },
     leaveType: {
@@ -371,10 +380,11 @@ describe("MyLeaveView", () => {
     renderView();
 
     expect(await screen.findByText("Available balances")).toBeInTheDocument();
-    expect(screen.getByText("Assigned")).toBeInTheDocument();
+    expect(screen.getByText("Earned this month")).toBeInTheDocument();
+    expect(screen.getByText("Rolled over")).toBeInTheDocument();
     expect(screen.getByText("Used")).toBeInTheDocument();
     expect(screen.getByText("Pending")).toBeInTheDocument();
-    expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(screen.getByText("Available days")).toBeInTheDocument();
     expect(
       screen.getByText(
         (_content, element) =>
@@ -412,7 +422,7 @@ describe("MyLeaveView", () => {
     submitApplyForm(dialog);
 
     expect(
-      within(dialog).getAllByText(/No Casual Leave balance is available for this period/).length,
+      within(dialog).getAllByText(/You have no Casual Leave days left for this period/).length,
     ).toBeGreaterThan(0);
     expect(postCalls()).toHaveLength(0);
   });
@@ -429,7 +439,7 @@ describe("MyLeaveView", () => {
     expect(
       (
         await within(dialog).findAllByText(
-          "This request is estimated at 5 days, but only 2 days is available for this period.",
+          "This request needs 5 days, but only 2 days is left for this period.",
         )
       ).length,
     ).toBeGreaterThan(0);

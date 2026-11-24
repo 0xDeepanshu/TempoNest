@@ -108,20 +108,20 @@ describe("ActivitySettingsView", () => {
 
     renderSettings();
 
-    expect(await screen.findByText(/Policy v1/)).toBeInTheDocument();
-    expect(screen.getByText(/Policy last updated/)).toBeInTheDocument();
+    expect(await screen.findByText(/Version 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Last updated/)).toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("checkbox", { name: /Allow application tracking/ }),
+      screen.getByRole("checkbox", { name: /Record app activity/ }),
     );
-    const threshold = screen.getByLabelText(/Idle threshold/);
+    const threshold = screen.getByLabelText(/Idle after/);
     await user.clear(threshold);
     await user.type(threshold, "10");
-    const retention = screen.getByLabelText(/Raw activity retention/);
+    const retention = screen.getByLabelText(/Keep activity for/);
     await user.clear(retention);
     await user.type(retention, "120");
 
-    await user.click(screen.getByRole("button", { name: "Save tracking settings" }));
+    await user.click(screen.getByRole("button", { name: "Save app tracking rules" }));
 
     await waitFor(() => {
       expect(mockedApiRequest).toHaveBeenCalledWith(
@@ -138,8 +138,8 @@ describe("ActivitySettingsView", () => {
         }),
       );
     });
-    expect(await screen.findByText("Tracking settings saved")).toBeInTheDocument();
-    expect((await screen.findAllByText(/Policy v2/)).length).toBeGreaterThan(0);
+    expect(await screen.findByText("App tracking rules saved")).toBeInTheDocument();
+    expect((await screen.findAllByText(/Version 2/)).length).toBeGreaterThan(0);
   });
 
   it("blocks saving when the idle threshold is outside 1–120 minutes", async () => {
@@ -151,14 +151,14 @@ describe("ActivitySettingsView", () => {
 
     renderSettings();
 
-    const threshold = await screen.findByLabelText(/Idle threshold/);
+    const threshold = await screen.findByLabelText(/Idle after/);
     await user.clear(threshold);
     await user.type(threshold, "0");
-    await user.click(screen.getByRole("button", { name: "Save tracking settings" }));
+    await user.click(screen.getByRole("button", { name: "Save app tracking rules" }));
 
     expect(
       await screen.findByText(
-        "Idle threshold must be a whole number between 1 and 120 minutes.",
+        "Idle time must be between 1 and 120 minutes.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -175,14 +175,14 @@ describe("ActivitySettingsView", () => {
 
     renderSettings();
 
-    const retention = await screen.findByLabelText(/Raw activity retention/);
+    const retention = await screen.findByLabelText(/Keep activity for/);
     await user.clear(retention);
     await user.type(retention, "3");
-    await user.click(screen.getByRole("button", { name: "Save tracking settings" }));
+    await user.click(screen.getByRole("button", { name: "Save app tracking rules" }));
 
     expect(
       await screen.findByText(
-        "Activity retention must be a whole number between 7 and 3650 days.",
+        "Activity history must be kept between 7 and 3650 days.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -200,8 +200,8 @@ describe("ActivitySettingsView", () => {
 
     expect(await screen.findByText("Read-only view")).toBeInTheDocument();
     expect(
-      screen.getByRole("checkbox", { name: /Allow application tracking/ }),
+      screen.getByRole("checkbox", { name: /Record app activity/ }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save tracking settings" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save app tracking rules" })).toBeDisabled();
   });
 });

@@ -185,7 +185,7 @@ export function LoginPanel() {
       <div className="flex items-center justify-center bg-canvas px-4 py-12 sm:px-8">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink text-sm font-semibold text-on-strong">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-accent-ink">
               W
             </span>
             <div>

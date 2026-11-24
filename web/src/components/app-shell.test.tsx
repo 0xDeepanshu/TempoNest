@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { visibleNavigationGroups } from "@/components/app-shell";
+import { activeNavigationHref, visibleNavigationGroups } from "@/components/app-shell";
 import type { Permission } from "@/lib/permissions";
 import type { DataScope, MembershipSummary } from "@/lib/types";
 
@@ -43,16 +43,14 @@ describe("visibleNavigationGroups", () => {
     const visible = labels(membership(["report:read"]));
 
     expect(visible).toEqual(
-      expect.arrayContaining(["Reports", "Live tracking", "Attendance evidence"]),
+      expect.arrayContaining(["Reports", "Live tracking", "Attendance logs"]),
     );
     expect(visible).not.toContain("My attendance");
     expect(visible).not.toContain("Corrections");
     expect(visible).not.toContain("People");
     expect(visible).not.toContain("App tracking");
-    expect(visible).not.toContain("Screenshot review");
-    expect(visible).not.toContain("Scheduled screenshots");
-    expect(visible).not.toContain("Monitoring settings");
-    expect(visible).not.toContain("Organization");
+    expect(visible).not.toContain("Screenshots");
+    expect(visible).not.toContain("Settings");
   });
 
   it("keeps the built-in EMPLOYEE navigation free of management areas", () => {
@@ -62,46 +60,54 @@ describe("visibleNavigationGroups", () => {
       expect.arrayContaining(["My attendance", "My leaves", "Corrections"]),
     );
     expect(visible).toContain("Holiday calendar");
-    expect(visible).not.toContain("Holiday management");
+    expect(visible).not.toContain("Holidays");
     expect(visible).not.toContain("App tracking");
     expect(visible).not.toContain("Reports");
     expect(visible).not.toContain("People");
-    expect(visible).not.toContain("Organization");
-    expect(visible).not.toContain("Roles & permissions");
+    expect(visible).not.toContain("Settings");
   });
 
-  it("requires both organization and member read for the Organization item", () => {
-    expect(labels(membership(["organization:read"]))).not.toContain("Organization");
+  it("shows the single Settings item only when a section is readable", () => {
+    // Organization read alone is not enough: General also needs member read,
+    // and no other section is granted.
+    expect(labels(membership(["organization:read"]))).not.toContain("Settings");
     expect(labels(membership(["organization:read", "member:read"]))).toContain(
-      "Organization",
+      "Settings",
     );
+    expect(labels(membership(["role:read"]))).toContain("Settings");
+    expect(labels(membership([]))).not.toContain("Settings");
   });
 
-  it("maps each team and workspace item to its exact permission", () => {
+  it("maps live and settings areas to their exact permission", () => {
     expect(labels(membership(["member:read"]))).toContain("People");
     expect(labels(membership(["leave:approve"]))).toContain("Leave");
     expect(labels(membership(["leave:manage"]))).toContain("Leave");
-    expect(labels(membership(["role:read"]))).toContain("Roles & permissions");
-    expect(labels(membership(["screenshot:read"]))).toContain("Screenshot review");
-    expect(labels(membership(["screenshot:policy"]))).toContain("Monitoring settings");
-    expect(labels(membership(["screenshot:monitoring"]))).toContain("Scheduled screenshots");
-    expect(labels(membership(["screenshot:read"]))).not.toContain("Scheduled screenshots");
-    expect(labels(membership(["screenshot:policy"]))).not.toContain("Scheduled screenshots");
+    expect(labels(membership(["role:read"]))).toContain("Settings");
+    expect(labels(membership(["screenshot:read"]))).toContain("Screenshots");
+    // Screenshot configuration lives in Settings, not in the live nav.
+    expect(labels(membership(["screenshot:policy"]))).toContain("Settings");
+    // Scheduled capture is a section inside Screenshots, never its own item.
+    expect(labels(membership(["screenshot:monitoring"]))).not.toContain(
+      "Scheduled screenshots",
+    );
+    expect(labels(membership(["screenshot:read"]))).not.toContain(
+      "Scheduled screenshots",
+    );
   });
 
   it("gates holiday navigation by view and management permissions", () => {
     expect(labels(membership(["holiday:view"]))).toContain("Holiday calendar");
-    expect(labels(membership(["holiday:view"]))).not.toContain("Holiday management");
+    expect(labels(membership(["holiday:view"]))).not.toContain("Holidays");
     // Management permissions cannot open the calendar endpoint on their own.
-    expect(labels(membership(["holiday:create"]))).not.toContain("Holiday management");
+    expect(labels(membership(["holiday:create"]))).not.toContain("Holidays");
     expect(labels(membership(["holiday:settings:manage"]))).not.toContain(
-      "Holiday management",
+      "Holidays",
     );
     expect(labels(membership(["holiday:view", "holiday:create"]))).toContain(
-      "Holiday management",
+      "Holidays",
     );
     expect(labels(membership(["holiday:view", "holiday:settings:manage"]))).toContain(
-      "Holiday management",
+      "Holidays",
     );
     expect(labels(membership([]))).not.toContain("Holiday calendar");
   });
@@ -120,5 +126,40 @@ describe("visibleNavigationGroups", () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0].items.map((item) => item.label)).toEqual(["Overview"]);
+  });
+});
+
+describe("activeNavigationHref", () => {
+  const manager = membership([
+    "report:read",
+    "time:read",
+    "screenshot:read",
+    "screenshot:policy",
+    "leave:manage",
+    "holiday:view",
+    "holiday:settings:manage",
+  ]);
+
+  it("highlights only the most specific matching item", () => {
+    expect(activeNavigationHref("/admin/leave/holidays", manager)).toBe(
+      "/admin/leave/holidays",
+    );
+    expect(activeNavigationHref("/admin/leave/requests", manager)).toBe("/admin/leave");
+    // Every settings route points at the single Settings item.
+    expect(activeNavigationHref("/settings/leave/holidays", manager)).toBe("/settings");
+    expect(activeNavigationHref("/settings/roles", manager)).toBe("/settings");
+    expect(activeNavigationHref("/admin/activity/classifications", manager)).toBe(
+      "/admin/activity/team",
+    );
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(activeNavigationHref("/unrelated", manager)).toBeNull();
+  });
+
+  it("only considers items the membership can see", () => {
+    const employee = membership(undefined, { role: "EMPLOYEE" });
+    // An employee cannot open any settings section, so no Settings highlight.
+    expect(activeNavigationHref("/settings/roles", employee)).toBeNull();
   });
 });

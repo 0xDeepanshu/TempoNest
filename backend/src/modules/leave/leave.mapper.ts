@@ -22,6 +22,15 @@ export function toLeavePolicySummary(policy: LeavePolicyModel) {
     balancePeriodStartDay: policy.balancePeriodStartDay,
     carryForwardAllowance: toUnits(policy.carryForwardAllowance),
     maxBalance: policy.maxBalance === null ? null : toUnits(policy.maxBalance),
+    carryForwardEnabled: Boolean(policy.carryForwardEnabled),
+    carryForwardExpiryMonths: policy.carryForwardExpiryMonths ?? null,
+    carryForwardOrder: policy.carryForwardOrder,
+    resetPeriod: policy.resetPeriod,
+    maxCreditsPerApplication:
+      policy.maxCreditsPerApplication === null ? null : toUnits(policy.maxCreditsPerApplication),
+    monthlyUsageLimitEnabled: Boolean(policy.monthlyUsageLimitEnabled),
+    monthlyUsageLimit:
+      policy.monthlyUsageLimit === null ? null : toUnits(policy.monthlyUsageLimit),
     prorateInitialEntitlement: policy.prorateInitialEntitlement,
     workingDays: policy.workingDays,
     isActive: policy.isActive,
@@ -83,6 +92,7 @@ export function toLeaveLedgerEntrySummary(entry: LeaveLedgerEntryModel) {
     carriedForwardDelta: toUnits(entry.carriedForwardDelta),
     reservedDelta: toUnits(entry.reservedDelta),
     consumedDelta: toUnits(entry.consumedDelta),
+    expiredDelta: toUnits(entry.expiredDelta),
     availableDelta: toUnits(entry.availableDelta),
     balanceAfter: toUnits(entry.balanceAfter),
     reason: entry.reason,
@@ -131,6 +141,7 @@ export function toLeaveBalanceSummary(balance: LeaveBalanceModel) {
     carriedForwardBalance: toUnits(balance.carriedForwardBalance),
     approvedConsumed: toUnits(balance.approvedConsumed),
     pendingReserved: toUnits(balance.pendingReserved),
+    expiredBalance: toUnits(balance.expiredBalance),
     availableBalance: toUnits(balance.availableBalance),
     assignedBalance,
     breakdown: {
@@ -141,6 +152,7 @@ export function toLeaveBalanceSummary(balance: LeaveBalanceModel) {
       carriedForward: toUnits(balance.carriedForwardBalance),
       approvedConsumed: toUnits(balance.approvedConsumed),
       pendingReserved: toUnits(balance.pendingReserved),
+      expired: toUnits(balance.expiredBalance),
       available: toUnits(balance.availableBalance),
     },
     ...(balance.leaveType

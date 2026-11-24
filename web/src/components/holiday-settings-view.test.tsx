@@ -123,15 +123,15 @@ describe("HolidaySettingsView", () => {
 
     renderSettings();
 
-    expect(await screen.findByText("Calendar controls")).toBeInTheDocument();
+    expect(await screen.findByText("Calendar basics")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: /Allow optional holidays/ }));
-    const year = screen.getByLabelText(/Default calendar year/);
+    const year = screen.getByLabelText(/Default year/);
     await user.clear(year);
     await user.type(year, "2027");
     await user.click(screen.getByRole("checkbox", { name: "Saturday" }));
     await user.click(screen.getByRole("checkbox", { name: "Sunday" }));
 
-    await user.click(screen.getByRole("button", { name: "Save holiday settings" }));
+    await user.click(screen.getByRole("button", { name: "Save holiday rules" }));
 
     await waitFor(() => {
       expect(mockedApiRequest).toHaveBeenCalledWith(
@@ -152,7 +152,7 @@ describe("HolidaySettingsView", () => {
         }),
       );
     });
-    expect(await screen.findByText("Holiday settings saved.")).toBeInTheDocument();
+    expect(await screen.findByText("Holiday rules saved.")).toBeInTheDocument();
     expect(await screen.findByText(/Updated by Admin User/)).toBeInTheDocument();
   });
 
@@ -166,7 +166,7 @@ describe("HolidaySettingsView", () => {
 
     expect(await screen.findByText("Read-only view")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Save holiday settings" }),
+      screen.getByRole("button", { name: "Save holiday rules" }),
     ).toBeDisabled();
   });
 });

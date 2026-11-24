@@ -5,6 +5,7 @@ import { formatDateTime } from "@/lib/format";
 import type { ScheduledCaptureOverviewResponse } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { CameraIcon } from "./icons";
+import { ScreenshotSectionTabs } from "./screenshot-tabs";
 import {
   Badge,
   Card,
@@ -67,8 +68,10 @@ export function ScheduledCaptureOverviewView() {
       <PageHeader
         eyebrow={organization.name}
         title="Scheduled screenshots"
-        description="Employees whose screen is captured automatically, and how often."
+        description="Who has automatic screenshots on, and how often they are taken."
       />
+
+      <ScreenshotSectionTabs />
 
       {overview.loading && !overview.data ? (
         <Card>
@@ -79,11 +82,11 @@ export function ScheduledCaptureOverviewView() {
       ) : (
         <Card>
           <CardHeader
-            title="Automatic capture"
+            title="Automatic screenshots"
             description={
               employees.length === 0
                 ? "No active employees in this organization."
-                : `${activeCount} of ${employees.length} employees capture automatically · ${scheduledCount} with a schedule configured.`
+                : `${activeCount} of ${employees.length} employees take screenshots automatically · ${scheduledCount} have a schedule set.`
             }
           />
           <CardBody className="p-0">
@@ -91,7 +94,7 @@ export function ScheduledCaptureOverviewView() {
               <EmptyState
                 icon={<CameraIcon className="h-5 w-5" />}
                 title="No employees yet"
-                description="Invite employees to see their scheduled capture settings here."
+                description="Invite employees, then their screenshot schedule shows up here."
               />
             ) : (
               <TableShell>
@@ -99,9 +102,9 @@ export function ScheduledCaptureOverviewView() {
                   <tr>
                     <Th>Employee</Th>
                     <Th>Status</Th>
-                    <Th>Interval</Th>
-                    <Th>Next scheduled capture</Th>
-                    <Th>Last capture</Th>
+                    <Th>How often</Th>
+                    <Th>Next screenshot</Th>
+                    <Th>Last screenshot</Th>
                   </tr>
                 </thead>
                 <tbody>

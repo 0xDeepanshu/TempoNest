@@ -56,11 +56,11 @@ function NavLink({
         "flex items-center gap-2.5 rounded-lg font-medium transition-colors",
         compact ? "px-2.5 py-1.5 text-xs" : "px-2.5 py-1.5 text-[13px]",
         active
-          ? "bg-ink text-on-strong"
+          ? "bg-accent text-accent-ink"
           : "text-ink-secondary hover:bg-surface-hover hover:text-ink",
       )}
     >
-      <span className={active ? "text-on-strong/70" : "text-muted"}>{item.icon}</span>
+      <span className={active ? "text-accent-ink/70" : "text-muted"}>{item.icon}</span>
       {item.label}
     </Link>
   );
@@ -122,19 +122,17 @@ export function SuperadminShell({
     <div className="min-h-screen bg-canvas">
       <a
         href="#platform-main"
-        className="sr-only rounded-lg bg-ink px-3 py-2 text-sm font-medium text-on-strong focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50"
+        className="sr-only rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-ink focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50"
       >
         Skip to content
       </a>
 
       <aside
         aria-label="Platform sidebar"
-        className="fixed inset-y-0 left-0 z-30 hidden w-56 flex-col border-r border-line bg-surface lg:flex"
+        className="ambient-sidebar fixed inset-y-0 left-0 z-30 hidden w-56 flex-col border-r border-sidebar-border bg-sidebar lg:flex"
       >
         <div className="flex h-14 items-center gap-2 border-b border-line px-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink text-xs font-semibold text-on-strong">
-            W
-          </span>
+          <img src="/logo/logo-nobg.png" alt="WorkZen" className="h-7 w-7 shrink-0 object-contain" />
           <div className="min-w-0">
             <p className="text-[13px] font-semibold tracking-tight text-ink">WorkZen</p>
             <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted">
@@ -168,9 +166,7 @@ export function SuperadminShell({
         <header className="sticky top-0 z-20 border-b border-line bg-surface/95 backdrop-blur lg:hidden">
           <div className="flex h-14 items-center justify-between gap-3 px-4">
             <div className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-ink text-[11px] font-semibold text-on-strong">
-                W
-              </span>
+              <img src="/logo/logo-nobg.png" alt="WorkZen" className="h-6 w-6 object-contain" />
               <div>
                 <p className="text-[13px] font-semibold leading-4 text-ink">WorkZen</p>
                 <p className="text-[9px] font-medium uppercase tracking-[0.12em] text-muted">
@@ -201,7 +197,7 @@ export function SuperadminShell({
         <main
           id="platform-main"
           tabIndex={-1}
-          className="mx-auto w-full max-w-[1280px] px-4 py-5 outline-none sm:px-6 lg:px-8 lg:py-7"
+          className="ambient-top mx-auto w-full max-w-[1280px] px-4 py-5 outline-none sm:px-6 lg:px-8 lg:py-7"
         >
           {children}
         </main>

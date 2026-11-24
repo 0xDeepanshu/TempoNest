@@ -91,10 +91,10 @@ const CATEGORY_META: Record<
   HolidayCategory,
   { tone: "indigo" | "success" | "warning" | "info" | "neutral"; dot: string }
 > = {
-  PUBLIC: { tone: "indigo", dot: "bg-ink" },
+  PUBLIC: { tone: "indigo", dot: "bg-accent" },
   COMPANY: { tone: "success", dot: "bg-success" },
   OPTIONAL: { tone: "warning", dot: "bg-warning" },
-  NATIONAL: { tone: "indigo", dot: "bg-ink" },
+  NATIONAL: { tone: "indigo", dot: "bg-accent" },
   STATE: { tone: "info", dot: "bg-ink-secondary" },
   GAZETTED: { tone: "neutral", dot: "bg-ink-secondary" },
   RESTRICTED: { tone: "warning", dot: "bg-warning" },
@@ -511,14 +511,14 @@ export function HolidayCalendarView({
         title={mode === "employee" ? "Holiday calendar" : "Company holidays"}
         description={
           mode === "employee"
-            ? "Read-only view of the holidays that apply to you. Contact your HR administrator if a holiday looks incorrect."
+            ? "Read-only view of the holidays that apply to you. Ask an administrator if a holiday looks wrong."
             : "Plan the organization calendar, publish public and company holidays, and keep half-days and employee-specific dates in one place."
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {canManageSettings ? (
-              <Button variant="secondary" onClick={() => router.push("/admin/leave/holidays/settings")}>
-                Holiday settings
+              <Button variant="secondary" onClick={() => router.push("/settings/leave/holidays")}>
+                Holiday rules
               </Button>
             ) : null}
             {canCreate ? (
@@ -619,7 +619,7 @@ export function HolidayCalendarView({
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
                       filter === value
-                        ? "border-ink bg-ink text-on-strong"
+                        ? "border-accent bg-accent text-accent-ink"
                         : "border-line bg-surface text-ink-secondary hover:bg-surface-hover",
                     )}
                   >
@@ -675,9 +675,9 @@ export function HolidayCalendarView({
                           type="button"
                           onClick={() => setSelectedDate(dateOnly)}
                           className={cn(
-                            "min-h-24 border-b border-r border-line p-2 text-left align-top transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink",
+                            "min-h-24 border-b border-r border-line p-2 text-left align-top transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
                             fullDay && "bg-surface-muted",
-                            isSelected && "ring-2 ring-inset ring-ink",
+                            isSelected && "ring-2 ring-inset ring-accent",
                           )}
                           aria-pressed={isSelected}
                         >
@@ -685,7 +685,7 @@ export function HolidayCalendarView({
                             <span
                               className={cn(
                                 "inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-semibold",
-                                isToday ? "bg-ink text-on-strong" : "text-ink-secondary",
+                                isToday ? "bg-accent text-accent-ink" : "text-ink-secondary",
                               )}
                             >
                               {day}
@@ -1014,15 +1014,15 @@ export function HolidayCalendarView({
           {mode === "admin" ? (
             <Card>
               <CardHeader
-                title="Calendar configuration"
-                description="Working days and holiday policy are managed once for the organization."
+                title="Holiday rules"
+                description="Working days and holiday rules are set once for the whole organization."
                 actions={
                   canManageSettings ? (
                     <Link
-                      href="/admin/leave/holidays/settings"
+                      href="/settings/leave/holidays"
                       className="inline-flex items-center gap-1 text-xs font-medium text-ink underline-offset-2 hover:underline"
                     >
-                      Open holiday settings
+                      Open holiday rules
                       <ChevronDownIcon className="h-3.5 w-3.5 -rotate-90" />
                     </Link>
                   ) : null
