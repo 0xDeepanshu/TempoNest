@@ -1,22 +1,25 @@
 import { BrowserWindow, screen } from 'electron'
 import type { LiveIndicator } from './liveScreenService'
 
-const WIDTH = 380
-const HEIGHT = 46
+const WIDTH = 132
+const HEIGHT = 24
+const MARGIN = 10
 const SHOW_TIMEOUT_MS = 3_000
 
 const HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Live viewing</title>
 <style>
-  html,body{margin:0;height:100%;background:#7f1d1d;color:#fff;font:600 14px system-ui,-apple-system,"Segoe UI",sans-serif;
-    display:flex;align-items:center;justify-content:center;gap:10px;user-select:none;overflow:hidden}
-  .dot{width:10px;height:10px;border-radius:50%;background:#fecaca;animation:pulse 1.4s ease-in-out infinite}
-  @keyframes pulse{50%{opacity:.35}}
-</style></head><body><span class="dot"></span><span>Your screen is being viewed live</span></body></html>`
+  html,body{margin:0;height:100%;background:#111827;color:#e5e7eb;font:500 11px system-ui,-apple-system,"Segoe UI",sans-serif;
+    display:flex;align-items:center;justify-content:center;gap:6px;user-select:none;overflow:hidden}
+  .dot{width:6px;height:6px;border-radius:50%;background:#ef4444;animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.4}}
+</style></head><body><span class="dot"></span><span>Screen viewed live</span></body></html>`
 
 /**
- * A small always-on-top banner that stays on the primary display for as long as an integration viewer is
- * watching. It cannot be focused, moved, minimised or closed by the employee, ignores mouse input so it
- * never blocks their work, and is visible on top of full-screen windows. It does not name the viewer.
+ * A small, unobtrusive status pill in the top-right corner of the primary display, shown for as long as an
+ * integration viewer is watching. It cannot be focused, moved, minimised or closed by the employee, ignores mouse
+ * input so it never blocks their work, and is visible on top of full-screen windows. It does not name the viewer.
+ * The show, hide and visibility behaviour is unchanged: the server still receives the confirmation only once the
+ * window is really on screen, and the stream stops if it goes away.
  */
 export class LiveIndicatorWindow implements LiveIndicator {
   private window: BrowserWindow | null = null
@@ -32,8 +35,8 @@ export class LiveIndicatorWindow implements LiveIndicator {
       const window = new BrowserWindow({
         width: WIDTH,
         height: HEIGHT,
-        x: Math.round(workArea.x + (workArea.width - WIDTH) / 2),
-        y: workArea.y + 8,
+        x: workArea.x + workArea.width - WIDTH - MARGIN,
+        y: workArea.y + MARGIN,
         frame: false,
         show: false,
         resizable: false,
@@ -46,7 +49,7 @@ export class LiveIndicatorWindow implements LiveIndicator {
         skipTaskbar: true,
         alwaysOnTop: true,
         hasShadow: true,
-        backgroundColor: '#7f1d1d',
+        backgroundColor: '#111827',
         webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false }
       })
       this.window = window
