@@ -13,6 +13,11 @@ name: Desktop test build (private)
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/flowtrium-live-screens
+    paths:
+      - '.github/workflows/desktop-test-build.yml'
 
 permissions:
   contents: read
