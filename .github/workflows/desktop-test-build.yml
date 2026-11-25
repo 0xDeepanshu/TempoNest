@@ -1,0 +1,97 @@
+name: Desktop test build (private)
+
+# Manual only. Packages the WorkZen Windows desktop app as an UNPACKED test folder (electron-builder --dir) and
+# uploads it as a downloadable workflow artifact for 7 days. It never creates a GitHub release, never publishes,
+# never uses a version tag, and never deploys anything.
+#
+# Two test-only edits are applied to the build workspace here, not committed to the application source:
+#   1. The local data folder is WorkZen-Production-Test-v2, so this test build never shares refresh tokens,
+#      agent credentials or the offline queue with a production install.
+#   2. Automatic updates are disabled (updateRuntime reports supported: false), so the package never contacts GitHub
+#      for an update.
+# The API and WebSocket endpoints are the production ones, baked in at build time as in the production procedure.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package WorkZen Production Test v2 (win-x64, unpacked)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: electron
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply the two test-only overlay edits (build workspace only)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib, sys
+
+          def replace_once(path, old, new):
+              p = pathlib.Path(path)
+              text = p.read_text(encoding="utf-8")
+              if text.count(old) != 1:
+                  sys.exit(f"overlay anchor not found exactly once in {path}: {old!r}")
+              p.write_text(text.replace(old, new), encoding="utf-8")
+              print(f"overlay applied: {path}")
+
+          replace_once(
+              "electron/main.ts",
+              "join(app.getPath('appData'), 'TempoNest')",
+              "join(app.getPath('appData'), 'WorkZen-Production-Test-v2')",
+          )
+          replace_once(
+              "electron/updateRuntime.ts",
+              "supported: app.isPackaged && process.platform === 'win32',",
+              "supported: false,",
+          )
+          PY
+
+      - name: Write the production endpoints (baked in at build time)
+        run: |
+          printf '%s\n' \
+            'MAIN_VITE_TEMPO_API_BASE_URL=https://api.workzen.cloud/api/v1' \
+            'MAIN_VITE_TEMPO_WS_URL=wss://api.workzen.cloud/api/v1/ws/agent' \
+            > .env.production
+          cat .env.production
+
+      - name: Package unpacked Windows x64 build (npm run package:dir, no publishing)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run package:dir -- --win --x64 --publish never
+
+      - name: Show what will be uploaded
+        run: |
+          set -euo pipefail
+          ls -la release
+          test -f "release/win-unpacked/WorkZen.exe" || test -f "release/win-unpacked/WorkZen Production Test.exe" || { echo "no packaged exe found"; exit 1; }
+          du -sh release/win-unpacked
+
+      - name: Upload the unpacked application
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorkZen-Production-Test-v2-win-x64
+          path: electron/release/win-unpacked
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 6
