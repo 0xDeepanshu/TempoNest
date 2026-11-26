@@ -11,6 +11,7 @@ on:
   push:
     branches:
       - feature/flowtrium-live-screens
+      - hotfix/2026-11-27-tracking-status
   pull_request:
     paths:
       - 'backend/**'

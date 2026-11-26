@@ -18,6 +18,8 @@ import {
 } from '../reporting/reporting.service';
 import { getCurrentSession } from '../timeTracking/timeSession.service';
 import { effectiveSessionEnd, toTimeSessionSummary } from '../timeTracking/timeSession.mapper';
+import { integrationPresence } from '../timeTracking/presence';
+import { config } from '../../config/env';
 import { toIntegrationEmployeeView } from './integration.employee.service';
 import type { TimeSession as TimeSessionModel } from '../timeTracking/timeSession.model';
 import type { IntegrationConnection as IntegrationConnectionModel } from './integrationConnection.model';
@@ -138,6 +140,7 @@ function toSessionView(options: {
     breakSeconds,
     workingSeconds: Math.max(0, summary.durationSeconds - breakSeconds),
     activeBreak: summary.activeBreak,
+    heartbeatFresh: summary.heartbeatFresh,
     breaks: (summary.breaks ?? []).map((brk) => ({
       id: brk.id,
       startedAt: brk.startedAt,
@@ -173,22 +176,24 @@ export async function getEmployeeStatus(options: {
   const employee = scope.mapping.workzenUser
     ? toIntegrationEmployeeView(scope.mapping.workzenUser)
     : { id: scope.userId };
+  const now = new Date();
+  // Working or on break only while the heartbeat is fresh (WorkZen's rule). A stale open session is offline.
+  const status = integrationPresence(session, now, config.timeTracking.heartbeatStaleSeconds);
 
-  if (!session) {
+  if (!session || status === 'OFFLINE') {
     return {
       externalEmployeeId: scope.mapping.externalEmployeeId,
       employee,
       status: 'OFFLINE' as const,
       session: null,
-      serverTime: new Date().toISOString(),
+      serverTime: now.toISOString(),
     };
   }
 
-  const now = new Date();
   return {
     externalEmployeeId: scope.mapping.externalEmployeeId,
     employee,
-    status: session.status === 'ON_BREAK' ? ('ON_BREAK' as const) : ('WORKING' as const),
+    status,
     session: toSessionView({
       session,
       externalEmployeeId: scope.mapping.externalEmployeeId,
